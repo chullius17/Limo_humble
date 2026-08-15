@@ -1,0 +1,8 @@
+# Local helper scripts and experiments; do not version them.
+/ros2_ws/useful_scripts/
+
+# Generated local development artifacts.
+**/__pycache__/
+**/*.py[cod]
+**/.vscode/*.db
+/ros2_ws/control_logs/
