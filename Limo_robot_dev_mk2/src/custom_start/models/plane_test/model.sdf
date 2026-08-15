@@ -91,7 +91,7 @@
         </surface>
       </collision>
     </link>
-    <static>0</static>
+    <static>1</static>   <!-- To make the plane static, set this to 1 -->
     <allow_auto_disable>1</allow_auto_disable>
   </model>
 </sdf>
