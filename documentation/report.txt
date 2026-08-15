@@ -13,3 +13,11 @@ modificare ackermann.xarco per migliorare lo sterzo e settare come base frame il
 creare il launch del nuovo mondo con il singolo robot con libgazebo_ros_factory.so in modo tale da chiamare lo spawn service con successo 
 
 in model.sdf mettere lo static = 1 in modo tale da fissare il circuito
+
+NAV2 PACKAGE
+sudo apt update
+sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-toolbox
+ros2 run nav2_map_server map_saver_cli -f ~/maps/limo_circuit_map
+ros2 launch slam_toolbox online_async_launch.py \
+  slam_params_file:=$(ros2 pkg prefix custom_start)/share/custom_start/config/slam_toolbox.yaml \
+  use_sim_time:=true

@@ -14,13 +14,14 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'config'), glob('config/*.rviz')),
         (os.path.join('share', package_name, 'worlds'), glob('worlds/*')),
-        (os.path.join('share', package_name, 'models', 'plane_test'),
-         glob('models/plane_test/model.*')),
-        (os.path.join('share', package_name, 'models', 'plane_test', 'materials', 'scripts'),
-         glob('models/plane_test/materials/scripts/*')),
-        (os.path.join('share', package_name, 'models', 'plane_test', 'materials', 'textures'),
-         glob('models/plane_test/materials/textures/*')),
+        *[
+            (os.path.join('share', package_name, os.path.dirname(path)), [path])
+            for path in glob('models/**/*', recursive=True) # ** in order to search recursively folders at every level
+            if os.path.isfile(path)
+        ],
     ],
     install_requires=['setuptools'],
     zip_safe=True,
