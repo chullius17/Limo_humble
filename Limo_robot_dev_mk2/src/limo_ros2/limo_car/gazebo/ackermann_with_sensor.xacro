@@ -25,7 +25,7 @@ andere Sensoren zusammengebaut werden und laden sie das Modell in Gazebo.-->
     <xacro:gazebo_depth_camera frame_prefix="depth_camera" />
 
     <joint name="depth_camera_joint" type="fixed">
-        <origin xyz="0.1 0 0.065" rpy="0 0 0"/>
+        <origin xyz="0.1 0 0.065" rpy="0 0.35 0"/>
         <parent link="base_link"/>
         <child link="depth_camera_link"/>
     </joint>

@@ -11,7 +11,8 @@ material vrc/circuit
       texture_unit
       {
         texture circuit.png
-        filtering trilinear
+        filtering anisotropic
+        max_anisotropy 16
       }
     }
   }

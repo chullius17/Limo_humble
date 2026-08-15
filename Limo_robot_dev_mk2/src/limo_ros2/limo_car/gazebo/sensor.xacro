@@ -127,7 +127,7 @@ realisierbar elektrische Komponente, also Sensoren aus Gazebo-Package. Diese Ant
                 <visualize>true</visualize>
                 <update_rate>20.0</update_rate>
                 <camera name="head">
-                    <horizontal_fov>1.3962634</horizontal_fov> <!-- 60*pi/180 -->
+                    <horizontal_fov>1.0471976</horizontal_fov> <!-- 60*pi/180 -->
                     <!-- normalisieren die Form für Fotos -->
                     <image>
                         <width>320</width>
