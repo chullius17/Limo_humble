@@ -42,18 +42,23 @@ class BirdPerspective(Node):
 
         # ROS 2 Subscriptions
         self.rgb_sub = self.create_subscription(
-            Image, '/detection/lines_and_curbs/raw', self.rgb_callback, 10
+            Image, 'limo/base_cv/boundaries/lines_and_curbs/raw', self.rgb_callback, 10
         )
+
+        self.declare_parameter('camera_info_topic', '/rgb/camera_info')
+        self.declare_parameter('depth_topic', '/depth_camera/depth/image_raw')
+        self.camera_info_topic = self.get_parameter('camera_info_topic').value
+        self.depth_topic = self.get_parameter('depth_topic').value
         self.info_sub = self.create_subscription(
-            CameraInfo, '/limo/color/camera_info', self.camera_info_callback, 10
+            CameraInfo, self.camera_info_topic, self.camera_info_callback, 10
         )
         self.depth_sub = self.create_subscription(
-            Image, '/limo/depth/image_raw', self.depth_callback, sensor_qos
+            Image, self.depth_topic, self.depth_callback, sensor_qos
         )
 
         # ROS 2 Publisher
         self.bird_pub = self.create_publisher(
-            Image, '/limo/color/image_raw_bird_perspective', 10
+            Image, 'limo/base_cv/bev/bird_perspective/raw', 10
         )
 
         # Queue and worker thread setup for multithreaded processing

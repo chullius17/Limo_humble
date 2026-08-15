@@ -17,17 +17,23 @@ class CurbDetector(Node):
         super().__init__('curb_detector')
         self.bridge = CvBridge()
 
+        # ROI parameters for cropping
+        self.declare_parameter('roi_y_min', 0.5)
+        self.declare_parameter('roi_y_max', 1.0)
+        self.roi_y_min = self.get_parameter('roi_y_min').value
+        self.roi_y_max = self.get_parameter('roi_y_max').value
+
         # Topic Subscription
         self.image_sub = self.create_subscription(
             Image,
-            '/detection/lane_masks/raw',
+            'limo/base_cv/detection/lane_masks/raw',
             self.image_callback,
             10
         )
 
         # Publishers
-        self.debug_pub = self.create_publisher(Image, '/detection/curb_points_debug/raw', 10)
-        self.lines_pub = self.create_publisher(Image, '/detection/lines_and_curbs/raw', 10)
+        self.debug_pub = self.create_publisher(Image, 'limo/base_cv/boundaries/curb_points_debug/raw', 10)
+        self.lines_pub = self.create_publisher(Image, 'limo/base_cv/boundaries/lines_and_curbs/raw', 10)
 
         # Threading and Queue Setup
         self.frame_queue = Queue(maxsize=1)
@@ -37,7 +43,7 @@ class CurbDetector(Node):
         # Bottom third: Large kernel for heavy noise removal
         self.kernel_bottom = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
         # Middle third: Small kernel for moderate noise removal
-        self.kernel_middle = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        self.kernel_middle = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
         # Top third: No opening performed
 
         self.sampling_step = 3
@@ -133,8 +139,8 @@ class CurbDetector(Node):
 
         # --- STEP 3: FIXED GEOMETRIC CROP OF ROI ---
         t_start = time.perf_counter()
-        background_mask[int(LOW_RES_SIZE * 0.91):, :] = False
-        background_mask[:int(LOW_RES_SIZE * 0.54), :] = False
+        background_mask[int(LOW_RES_SIZE * self.roi_y_max):, :] = False
+        background_mask[:int(LOW_RES_SIZE * self.roi_y_min), :] = False
 
         background_pure = background_mask.copy()
         
@@ -208,14 +214,14 @@ class CurbDetector(Node):
             v_b = np.clip(pts_blue[:, 1], 0, high_h - 1)
             only_lines_frame[v_b, u_b] = [255, 0, 0]
 
-        # Draw unclassified background points in Magenta [255, 0, 255]
+        # Draw unclassified background points in White BGR [255, 255, 255].
         if len(pts_unclassified) > 0:
             pts_sampled = pts_unclassified[::self.sampling_step]
             u_c = np.clip(pts_sampled[:, 0], 0, high_w - 1)
             v_c = np.clip(pts_sampled[:, 1], 0, high_h - 1)
             
-            only_lines_frame[v_c, u_c] = [255, 0, 255]
-            full_overlay_frame[v_c, u_c] = [255, 0, 255]
+            only_lines_frame[v_c, u_c] = [255, 255, 255]
+            full_overlay_frame[v_c, u_c] = [255, 255, 255]
 
         # Draw dashed mask points in White BGR [255, 255, 255]
         if len(pts_dashed) > 0:

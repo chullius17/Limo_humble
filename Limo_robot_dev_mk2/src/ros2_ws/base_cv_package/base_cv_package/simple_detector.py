@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -19,9 +19,8 @@ class ColorLaneDetector(Node):
         super().__init__('color_lane_detector')
 
         # ROS 2 Publishers
-        self.mask_pub = self.create_publisher(CompressedImage, '/detection/lane_masks/compressed', 10)
-        self.raw_mask_pub = self.create_publisher(Image, '/detection/lane_masks/raw', 10)
-        self.image_pub = self.create_publisher(Image, '/detection/lane_overlay', 10)
+        self.raw_mask_pub = self.create_publisher(Image, 'limo/base_cv/detection/lane_masks/raw', 10)
+        self.image_pub = self.create_publisher(Image, 'limo/base_cv/detection/lane_overlay/raw', 10)
         
         self.bridge = CvBridge()
 
@@ -38,7 +37,7 @@ class ColorLaneDetector(Node):
         self.yellow_upper = np.array([35, 255, 255], dtype=np.uint8)
 
         self.black_lower = np.array([0, 0, 0], dtype=np.uint8)
-        self.black_upper = np.array([180, 255, 100], dtype=np.uint8)
+        self.black_upper = np.array([180, 255, 150], dtype=np.uint8)
 
         # Best effort QoS matching high-rate video streams
         latest_frame_qos = QoSProfile(
@@ -48,12 +47,20 @@ class ColorLaneDetector(Node):
         )
 
         # Subscriber to Limo's camera
+        self.declare_parameter('rgb_topic', '/rgb/image_raw')
+        self.camera_topic = self.get_parameter('rgb_topic').value
         self.rgb_sub = self.create_subscription(
             Image,
-            '/limo/color/image_raw',
+            self.camera_topic,
             self.image_callback,
             latest_frame_qos
         )
+
+        # ROI parameters for cropping
+        self.declare_parameter('roi_y_min', 0.1)
+        self.declare_parameter('roi_y_max', 1.0)
+        self.roi_y_min = self.get_parameter('roi_y_min').value
+        self.roi_y_max = self.get_parameter('roi_y_max').value
 
         # Telemetry metrics window (sliding window of 30 frames)
         self.window_size = 30
@@ -149,8 +156,8 @@ class ColorLaneDetector(Node):
         black_mask = cv2.inRange(hsv_image, self.black_lower, self.black_upper)
 
         # Step 4: Geometric ROI Cropping (Keep band between Y_min = 54% and Y_max = 91%)
-        y_min = int(self.target_size * 0.54)
-        y_max = int(self.target_size * 0.91)
+        y_min = int(self.target_size * self.roi_y_min)
+        y_max = int(self.target_size * self.roi_y_max)
 
         yellow_mask[:y_min, :] = 0
         yellow_mask[y_max:, :] = 0
@@ -224,15 +231,6 @@ class ColorLaneDetector(Node):
                 ros_overlay_msg.header.stamp = stamp
                 self.image_pub.publish(ros_overlay_msg)
 
-                # 3. Publish compressed mask image
-                success, jpeg_buf = cv2.imencode('.jpg', mask_overlay, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                if success:
-                    comp_msg = CompressedImage()
-                    comp_msg.header.stamp = stamp
-                    comp_msg.format = 'jpeg'
-                    comp_msg.data = jpeg_buf.tobytes()
-                    self.mask_pub.publish(comp_msg)
-
             except Exception as e:
                 self.get_logger().error(f"Publishing failed: {str(e)}")
 
@@ -274,7 +272,7 @@ class ColorLaneDetector(Node):
             f" HSV Color Thresholding (ROI/300px): {avg_hsv:.2f} ms\n"
             f" Canvas Rendering (Masks/Blend):   {avg_canvas:.2f} ms\n"
             f" ROS Publish Enqueue:              {avg_pub_enqueue:.2f} ms\n"
-            f" Async Encode & Publish:           {avg_async_pub:.2f} ms\n"
+            f" Async Publish:                    {avg_async_pub:.2f} ms\n"
             f"-----------------------------------------\n"
             f" TOTAL PIPELINE TIME:              {avg_total:.2f} ms\n"
             f" ESTIMATED INTERNAL FPS:           {fps:.1f}\n"

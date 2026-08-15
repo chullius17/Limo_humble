@@ -4,21 +4,19 @@ from launch.event_handlers import OnProcessStart
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    bev_node = Node(
-        package='base_cv_package',
-        executable='bev_node',
-        name='bev_node',
-        output='screen',
-        emulate_tty=True,
-    )
-
     lane_node = Node(
-        package='base_cv_package',
-        executable='lane_detector',
-        name='lane_node',
-        output='screen',
-        emulate_tty=True,
-    )
+            package='base_cv_package',
+            executable='lane_detector',
+            name='lane_node',
+            output='screen',
+            emulate_tty=True,
+            parameters=[{
+                'enable_telemetry': False,
+                'rgb_topic': '/rgb/image_raw',
+                'roi_y_min': 0.1,
+                'roi_y_max': 1.0,
+            }]
+        )
 
     boundary_node = Node( 
         package='base_cv_package',
@@ -26,6 +24,24 @@ def generate_launch_description():
         name='boundary_node',
         output='screen',
         emulate_tty=True,
+        parameters=[{
+            'enable_telemetry': False,
+            'roi_y_min': 0.5,
+            'roi_y_max': 1.0,
+        }]
+    )
+
+    bev_node = Node(
+        package='base_cv_package',
+        executable='bev_node',
+        name='bev_node',
+        output='screen',
+        emulate_tty=True,
+        parameters=[{
+            'enable_telemetry': False,
+            'camera_info_topic': '/rgb/camera_info',
+            'depth_topic': '/depth_camera/depth/image_raw'
+        }]
     )
 
     boundary_trigger = RegisterEventHandler(

@@ -6,16 +6,16 @@
       <collision name='Wall_0_Collision'>
         <geometry>
           <box>
-            <size>6.5 0.15 0.4</size>
+            <size>6.5 0.15 0.25</size>
           </box>
         </geometry>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
       </collision>
       <visual name='Wall_0_Visual'>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>6.5 0.15 0.4</size>
+            <size>6.5 0.15 0.25</size>
           </box>
         </geometry>
         <material>
@@ -35,16 +35,16 @@
       <collision name='Wall_2_Collision'>
         <geometry>
           <box>
-            <size>9.75 0.15 0.4</size>
+            <size>9.75 0.15 0.25</size>
           </box>
         </geometry>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
       </collision>
       <visual name='Wall_2_Visual'>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>9.75 0.15 0.4</size>
+            <size>9.75 0.15 0.25</size>
           </box>
         </geometry>
         <material>
@@ -64,16 +64,16 @@
       <collision name='Wall_4_Collision'>
         <geometry>
           <box>
-            <size>6.5 0.15 0.4</size>
+            <size>6.5 0.15 0.25</size>
           </box>
         </geometry>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
       </collision>
       <visual name='Wall_4_Visual'>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>6.5 0.15 0.4</size>
+            <size>6.5 0.15 0.25</size>
           </box>
         </geometry>
         <material>
@@ -93,16 +93,16 @@
       <collision name='Wall_5_Collision'>
         <geometry>
           <box>
-            <size>9.75 0.15 0.4</size>
+            <size>9.75 0.15 0.25</size>
           </box>
         </geometry>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
       </collision>
       <visual name='Wall_5_Visual'>
-        <pose>0 0 0.2 0 -0 0</pose>
+        <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>9.75 0.15 0.4</size>
+            <size>9.75 0.15 0.25</size>
           </box>
         </geometry>
         <material>
