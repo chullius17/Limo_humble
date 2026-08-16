@@ -22,9 +22,8 @@ class LaneDetector(Node):
         super().__init__('lane_detector')
 
         # ROS 2 Publishers
-        self.mask_pub = self.create_publisher(CompressedImage, '/detection/lane_masks/compressed', 10)
-        self.raw_mask_pub = self.create_publisher(Image, '/detection/lane_masks/raw', 10)
-        self.image_pub = self.create_publisher(Image, '/detection/lane_overlay', 10)
+        self.raw_mask_pub = self.create_publisher(Image, 'limo/cv_package/ai_detection/lane_masks/raw', 10)
+        self.image_pub = self.create_publisher(Image, 'limo/cv_package/ai_detection/lane_overlay', 10)
         
         self.bridge = CvBridge()
 
@@ -41,9 +40,11 @@ class LaneDetector(Node):
         )
 
         # Subscriber to Limo's camera
+        self.declare_parameter('rgb_topic', '/rgb/image_raw')
+        self.camera_topic = self.get_parameter('rgb_topic').value
         self.rgb_sub = self.create_subscription(
             Image,
-            '/limo/color/image_raw',
+            self.camera_topic,
             self.image_callback,
             latest_frame_qos
         )
@@ -307,15 +308,6 @@ class LaneDetector(Node):
                 ros_overlay_msg = self.bridge.cv2_to_imgmsg(overlay_image, encoding='bgr8')
                 ros_overlay_msg.header.stamp = stamp
                 self.image_pub.publish(ros_overlay_msg)
-
-                # Compressed Mask Publish via OpenCV (no TurboJPEG needed)
-                success, jpeg_buf = cv2.imencode('.jpg', mask_overlay, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                if success:
-                    comp_msg = CompressedImage()
-                    comp_msg.header.stamp = stamp
-                    comp_msg.format = 'jpeg'
-                    comp_msg.data = jpeg_buf.tobytes()
-                    self.mask_pub.publish(comp_msg)
 
             except Exception as e:
                 self.get_logger().error(f"Publishing failed: {str(e)}")

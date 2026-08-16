@@ -8,24 +8,31 @@ import numpy as np
 import time
 import threading
 from queue import Queue, Empty
+from collections import deque
 
 class CurbDetector(Node):
 
     def __init__(self):
         super().__init__('curb_detector')
         self.bridge = CvBridge()
+
+        # ROI parameters for cropping
+        self.declare_parameter('roi_y_min', 0.54)
+        self.declare_parameter('roi_y_max', 0.98)
+        self.roi_y_min = self.get_parameter('roi_y_min').value
+        self.roi_y_max = self.get_parameter('roi_y_max').value
         
         # Topic Subscription
         self.image_sub = self.create_subscription(
             Image, 
-            '/detection/lane_masks/raw', 
+            'limo/cv_package/ai_detection/lane_masks/raw',
             self.image_callback, 
             10
         )
         
         # Publishers
-        self.debug_pub = self.create_publisher(Image, '/detection/curb_points_debug/raw', 10)
-        self.lines_pub = self.create_publisher(Image, '/detection/lines_and_curbs/raw', 10)
+        self.debug_pub = self.create_publisher(Image, 'limo/cv_package/boundaries/curb_points_debug/raw', 10)
+        self.lines_pub = self.create_publisher(Image, 'limo/cv_package/boundaries/lines_and_curbs/raw', 10)
         
         # Threading and Queue Setup
         # Keep queue size small (e.g., maxsize=1 or 2) to drop old frames and avoid latency buildup
@@ -39,19 +46,22 @@ class CurbDetector(Node):
         self.kernel_skel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
         self.sampling_step = 3
 
-        # Profiling variables
+        # Telemetry & Diagnostics setup
+        self.declare_parameter('enable_telemetry', True)
+        self.debug_telemetry = self.get_parameter('enable_telemetry').value
         self.frame_count = 0
-        self.t_accumulated = {
-            'decomp': 0.0,
-            'step1_masks': 0.0,
-            'step2_close_erode': 0.0,
-            'step3_crop': 0.0,
-            'step4_bg_clean': 0.0,
-            'step5_color_iso': 0.0,
-            'step6_skeleton': 0.0,
-            'step7_points': 0.0,
-            'step8_draw_publish': 0.0,
-            'total': 0.0,
+        self.window_size = 30
+        self.telemetry_stats = {
+            'decomp': deque(maxlen=self.window_size),
+            'step1_masks': deque(maxlen=self.window_size),
+            'step2_close_erode': deque(maxlen=self.window_size),
+            'step3_crop': deque(maxlen=self.window_size),
+            'step4_bg_clean': deque(maxlen=self.window_size),
+            'step5_color_iso': deque(maxlen=self.window_size),
+            'step6_skeleton': deque(maxlen=self.window_size),
+            'step7_points': deque(maxlen=self.window_size),
+            'step8_draw_publish': deque(maxlen=self.window_size),
+            'total': deque(maxlen=self.window_size),
         }
 
         # Start background worker thread
@@ -123,16 +133,6 @@ class CurbDetector(Node):
         background_mask = cv2.bitwise_not(foreground_mask)
         t['step1_masks'] = (time.perf_counter() - t_start) * 1000.0
 
-        if not np.any(foreground_mask):
-            empty_frame = np.zeros_like(cv_image)
-            t_start = time.perf_counter()
-            self.publish_image(self.debug_pub, empty_frame, msg.header.stamp)
-            self.publish_image(self.lines_pub, empty_frame, msg.header.stamp)
-            t['step8_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
-            t['total'] = (time.perf_counter() - start_total) * 1000.0
-            self.log_diagnostics(high_w, high_h, t)
-            return   
-        
         # --- STEP 2: HIGH-SPEED CLOSING AND EROSION (CURB) ---
         t_start = time.perf_counter()
         clean_mask = cv2.morphologyEx(foreground_mask, cv2.MORPH_CLOSE, self.kernel_close)
@@ -142,10 +142,15 @@ class CurbDetector(Node):
 
         # --- STEP 3: FIXED GEOMETRIC CROP OF THE LOWER ZONE ---
         t_start = time.perf_counter()
-        boundary_edges[int(LOW_RES_SIZE * 0.91):, :] = False
+        roi_y_min = int(LOW_RES_SIZE * np.clip(self.roi_y_min, 0.0, 1.0))
+        roi_y_max = int(LOW_RES_SIZE * np.clip(self.roi_y_max, 0.0, 1.0))
 
-        background_mask[int(LOW_RES_SIZE * 0.91):, :] = False
-        background_mask[:int(LOW_RES_SIZE * 0.54), :] = False
+        # Keep only pixels inside [roi_y_min, roi_y_max).  The previous
+        # slices were reversed and cleared the complete background mask.
+        boundary_edges[:roi_y_min, :] = False
+        boundary_edges[roi_y_max:, :] = False
+        background_mask[:roi_y_min, :] = False
+        background_mask[roi_y_max:, :] = False
         t['step3_crop'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 4: BACKGROUND CLEANING ---
@@ -235,18 +240,25 @@ class CurbDetector(Node):
         self.log_diagnostics(high_w, high_h, t)
 
     def log_diagnostics(self, w, h, t):
-        self.frame_count += 1
-        for key in self.t_accumulated:
-            self.t_accumulated[key] += t[key]
+        for key, val in t.items():
+            if key in self.telemetry_stats:
+                self.telemetry_stats[key].append(val)
 
-        avg = {key: self.t_accumulated[key] / self.frame_count for key in self.t_accumulated}
+        self.frame_count += 1
+        if self.frame_count % self.window_size != 0 or not self.debug_telemetry:
+            return
+
+        avg = {
+            key: float(np.mean(values)) if values else 0.0
+            for key, values in self.telemetry_stats.items()
+        }
         fps = 1000.0 / avg['total'] if avg['total'] > 0 else 0.0
 
         self.get_logger().info(
             f"\n"
             f"================ BOUNDARY EXTRACTOR PROFILE ({w}x{h} @ {fps:.1f} WORKER FPS) ================\n"
             f"  Frames processed: {self.frame_count} | Queue depth: {self.frame_queue.qsize()}\n"
-            f"  [Total Latency]                 Current: {t['total']:.2f} ms | Avg: {avg['total']:.2f} ms\n"
+            f"  [Total Latency]                 Current: {t['total']:.2f} ms | Avg ({self.window_size}f): {avg['total']:.2f} ms\n"
             f"  -----------------------------------------------------------------\n"
             f"  [Decompression]                 Current: {t['decomp']:.2f} ms | Avg: {avg['decomp']:.2f} ms\n"
             f"  [Step 1: Mask Extraction]       Current: {t['step1_masks']:.2f} ms | Avg: {avg['step1_masks']:.2f} ms\n"

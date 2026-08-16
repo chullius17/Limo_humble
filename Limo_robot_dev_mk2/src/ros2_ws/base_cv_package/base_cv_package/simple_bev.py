@@ -49,6 +49,7 @@ class BirdPerspective(Node):
         self.declare_parameter('depth_topic', '/depth_camera/depth/image_raw')
         self.camera_info_topic = self.get_parameter('camera_info_topic').value
         self.depth_topic = self.get_parameter('depth_topic').value
+        
         self.info_sub = self.create_subscription(
             CameraInfo, self.camera_info_topic, self.camera_info_callback, 10
         )

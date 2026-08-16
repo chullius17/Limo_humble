@@ -9,7 +9,7 @@ import time
 import threading
 import queue
 from collections import deque
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 
 class BirdPerspective(Node):
@@ -41,23 +41,37 @@ class BirdPerspective(Node):
         # BEV rasterization configuration
         self.res = 0.01
         self.side = 600
+        self.output_height = self.side // 2
         self.kernel_inflate = np.ones((3, 3), dtype=np.uint8)
+
+        # Camera streams normally use the ROS sensor-data QoS policy.
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
 
         # ROS 2 Subscriptions
         self.rgb_sub = self.create_subscription(
-            Image, '/detection/lines_and_curbs/raw', self.rgb_callback, 10
+            Image, 'limo/cv_package/boundaries/lines_and_curbs/raw', self.rgb_callback, 10
         )
+
+        self.declare_parameter('camera_info_topic', '/rgb/camera_info')
+        self.declare_parameter('depth_topic', '/depth_camera/depth/image_raw')
+        self.camera_info_topic = self.get_parameter('camera_info_topic').value
+        self.depth_topic = self.get_parameter('depth_topic').value
+
         self.info_sub = self.create_subscription(
-            CameraInfo, '/limo/color/camera_info', self.camera_info_callback, 10
+            CameraInfo, self.camera_info_topic, self.camera_info_callback, 10
         )
         self.depth_sub = self.create_subscription(
-            Image, '/limo/depth/image_raw', self.depth_callback,
-            QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1)
+            Image, self.depth_topic, self.depth_callback, sensor_qos
         )
 
         # ROS 2 Publisher
         self.bird_pub = self.create_publisher(
-            Image, '/limo/color/image_raw_bird_perspective', 10
+            Image, 'limo/cv_package/bev/bird_perspective/raw', 10
         )
 
         # Queue and worker thread setup for multithreaded processing
@@ -150,7 +164,7 @@ class BirdPerspective(Node):
         v_indices, u_indices = np.where(valid_color_mask)
 
         if len(u_indices) == 0:
-            empty_bev = np.zeros((self.side, self.side, 3), dtype=np.uint8)
+            empty_bev = np.zeros((self.output_height, self.side, 3), dtype=np.uint8)
             self._publish_bev(empty_bev, msg.header)
             return
 
@@ -176,12 +190,20 @@ class BirdPerspective(Node):
         world_points = np.dot(self.extrinsic_matrix, camera_points)
 
         # Rasterization onto BEV canvas
-        bev_img = np.zeros((self.side, self.side, 3), dtype=np.uint8)
+        # Publish only the upper half of the BEV (the area in front of the
+        # robot). The robot origin remains at row self.side / 2, just below
+        # the output image, so the metric coordinate convention is unchanged.
+        bev_img = np.zeros((self.output_height, self.side, 3), dtype=np.uint8)
 
         u_bev = (world_points[0, :] / self.res + self.side / 2.0).astype(np.int32)
         v_bev = (world_points[1, :] / self.res + self.side / 2.0).astype(np.int32)
 
-        mask = (u_bev >= 0) & (u_bev < self.side) & (v_bev >= 0) & (v_bev < self.side)
+        mask = (
+            (u_bev >= 0)
+            & (u_bev < self.side)
+            & (v_bev >= 0)
+            & (v_bev < self.output_height)
+        )
         bev_img[v_bev[mask], u_bev[mask]] = colors[mask]
 
         # Apply dilation to inflate projected pixels
