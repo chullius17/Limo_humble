@@ -21,9 +21,8 @@ class MapDisplay(Node):
     def __init__(self):
         super().__init__('map_display_node')
 
-        self.declare_parameter('AI_mode',            False)
         self.declare_parameter('global_frame',        'odom')
-        self.declare_parameter('robot_frame',         'base_footprint')
+        self.declare_parameter('robot_frame',         'base_link')
         self.declare_parameter('costmap_resolution',  0.005)    # High definition for navigation (5mm/px)
         self.declare_parameter('view_resolution',     0.02)     # Lightweight definition for images (2cm/px)
         self.declare_parameter('view_range_m',        3.0)      # Semi-side of ego canvas
@@ -34,7 +33,6 @@ class MapDisplay(Node):
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
-        self.AI_mode            = self.get_parameter('AI_mode').value
         self.global_frame       = self.get_parameter('global_frame').value
         self.robot_frame        = self.get_parameter('robot_frame').value
         self.costmap_resolution = self.get_parameter('costmap_resolution').value
@@ -57,22 +55,16 @@ class MapDisplay(Node):
         self.map_data_green   = None
 
         # --- SUBSCRIPTIONS WITH ROI PROJECTORS ---
-        if self.AI_mode:
-            self.get_logger().info('AI Mode: Subscribing to MAGENTA, RED, GREEN maps')
-            self.create_subscription(OccupancyGrid, '/limo/map_paper_magenta', self.curb_map_callback, 10)
-            self.create_subscription(OccupancyGrid, '/limo/map_paper_red',     self.solid_map_callback,     10)
-            self.create_subscription(OccupancyGrid, '/limo/map_paper_green',   self.dashed_map_callback,   10)
-        else:
-            self.get_logger().info('Non-AI Mode: Subscribing to MAGENTA map only')
-            self.create_subscription(OccupancyGrid, '/limo/map_paper_magenta', self.curb_map_callback, 10)
-            self.create_subscription(OccupancyGrid, '/limo/map_paper_turquoise',     self.solid_map_callback,     10)
-            self.create_subscription(OccupancyGrid, '/limo/map_paper_white',     self.dashed_map_callback,     10)
+        self.create_subscription(OccupancyGrid, '/limo/ai_map_package/mapper/map_paper_magenta', self.magenta_map_callback, 10)
+        self.create_subscription(OccupancyGrid, '/limo/ai_map_package/mapper/map_paper_red', self.red_map_callback, 10)
+        self.create_subscription(OccupancyGrid, '/limo/ai_map_package/mapper/map_paper_green', self.green_map_callback, 10)
+        self.get_logger().info('Subscribing to MAGENTA, RED and GREEN maps')
 
         # --- COMBINED IMAGE PUBLISHERS ---
-        self.firstp_img_pub         = self.create_publisher(Image, '/limo/map_firstp_combined', 10)
+        self.firstp_img_pub         = self.create_publisher(Image, '/limo/ai_map_package/map_display/map_firstp_combined', 10)
         
         # --- NEW PUBLISHER: COMBINED OCCUPANCY GRID ---
-        self.grid_pub               = self.create_publisher(OccupancyGrid, '/limo/global_map_combined', 10)
+        self.grid_pub               = self.create_publisher(OccupancyGrid, '/limo/ai_map_package/map_display/global_map_combined', 10)
 
         # Pre-allocate the OccupancyGrid message to optimize CPU usage
         self.combined_grid_msg      = self.get_default_occupancy_grid()
@@ -98,13 +90,13 @@ class MapDisplay(Node):
 
     # ------------------------------------------------------------------
 
-    def curb_map_callback(self, msg: OccupancyGrid):
+    def magenta_map_callback(self, msg: OccupancyGrid):
         self.map_data_magenta = msg
 
-    def solid_map_callback(self, msg: OccupancyGrid):
+    def red_map_callback(self, msg: OccupancyGrid):
         self.map_data_red = msg
 
-    def dashed_map_callback(self, msg: OccupancyGrid):
+    def green_map_callback(self, msg: OccupancyGrid):
         self.map_data_green = msg
 
     # ------------------------------------------------------------------

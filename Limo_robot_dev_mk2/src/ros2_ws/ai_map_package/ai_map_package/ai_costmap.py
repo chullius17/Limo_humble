@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import Image
 from nav_msgs.msg import OccupancyGrid
 import cv2
 from cv_bridge import CvBridge
@@ -10,7 +10,6 @@ import time
 import threading
 import queue
 import array
-from turbojpeg import TurboJPEG, TJPF_BGR
 from std_msgs.msg import Header
 from typing import Tuple
 from geometry_msgs.msg import TransformStamped
@@ -24,47 +23,32 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoS
 
 class Costmap(Node):
     """
-    Converts each color channel of a BEV image into its own ROS2 OccupancyGrid costmap.
-    A single node/subscription/worker handles all active colors dynamically based on AI_mode.
+    Converts the AI segmentation channels into ROS2 OccupancyGrid costmaps.
     """
 
-    COLORS_AI = ['MAGENTA', 'RED', 'GREEN']
-    COLORS = ['MAGENTA', 'TURQUOISE', 'WHITE']
+    COLORS = ['MAGENTA', 'RED', 'GREEN']
 
-    COLOR_MAP_AI = {
+    COLOR_MAP = {
         'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
         'RED':     np.array([  0,   0, 255], dtype=np.uint8),
         'GREEN':   np.array([  0, 255,   0], dtype=np.uint8)
     }
 
-    COLOR_MAP = {
-        'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
-        'TURQUOISE': np.array([255, 255,   0], dtype=np.uint8),
-        'WHITE': np.array([255, 255, 255], dtype=np.uint8),
-    }
-
     TOLERANCE = 30          # Pixel-value tolerance for color matching
 
-    CONFIG_MAP_AI = {
+    CONFIG_MAP = {
         'MAGENTA': {'peak_cost': 100.0, 'radius': 2},
         'RED':     {'peak_cost': 60.0,  'radius': 5},
         'GREEN':   {'peak_cost': 30.0,  'radius': 5}
     }
 
-    CONFIG_MAP = {
-        'MAGENTA': {'peak_cost': 100.0, 'radius': 2},
-        'TURQUOISE': {'peak_cost': 60.0,  'radius': 5},
-        'WHITE': {'peak_cost': 30.0,  'radius': 5}
-    }
-
     DECAY = 6.0
-    ROI_FRACTION = 0.4
-    RULER_FRACTION = 0.08
+    ROI_FRACTION = 0.8
+    RULER_FRACTION = 0.17
 
     def __init__(self):
         super().__init__('costmap_node')
         self.bridge = CvBridge()
-        self.jpeg_encoder = TurboJPEG()
 
         self.latest_bev_stamp = None
 
@@ -80,23 +64,13 @@ class Costmap(Node):
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
-        # Parse operation mode parameters FIRST
-        self.declare_parameter('AI_mode', False)
-        self.AI_mode = self.get_parameter('AI_mode').value
-
-        if self.AI_mode:
-            self.get_logger().info('AI mode enabled: using COLOR_MAP_AI and CONFIG_MAP_AI')
-            self.colors = self.COLORS_AI
-            self.color_map = self.COLOR_MAP_AI
-            self.config_map = self.CONFIG_MAP_AI
-        else:
-            self.get_logger().info('Standard mode enabled: using COLOR_MAP and CONFIG_MAP')
-            self.colors = self.COLORS
-            self.color_map = self.COLOR_MAP
-            self.config_map = self.CONFIG_MAP
+        self.colors = self.COLORS
+        self.color_map = self.COLOR_MAP
+        self.config_map = self.CONFIG_MAP
+        self.get_logger().info('AI costmap enabled for MAGENTA, RED and GREEN')
 
         # Global (color-independent) parameters
-        self.declare_parameter('fixed_frame', 'base_footprint')
+        self.declare_parameter('fixed_frame', 'base_link')
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.0092)
         self.declare_parameter('publish_debug', True)
@@ -124,7 +98,7 @@ class Costmap(Node):
         # Single subscription shared by all active colors
         self.bev_sub = self.create_subscription(
             Image,
-            '/limo/color/image_raw_bird_perspective',
+            'limo/cv_package/bev/bird_perspective/raw',
             self.bev_callback,
             10
         )
@@ -132,9 +106,7 @@ class Costmap(Node):
         # Global ROI debug publishers
         if self.publish_debug:
             self.roi_debug_pub = self.create_publisher(
-                Image, '/limo/costmap/roi_debug', 10)
-            self.roi_debug_pub_compressed = self.create_publisher(
-                CompressedImage, '/limo/costmap/roi_debug/compressed', 10)
+                Image, '/limo/ai_map_package/costmap/roi_debug', 10)
 
         # Per-color publisher bundle for costmap and debug heatmaps (using self.colors)
         self.color_state = {}
@@ -142,13 +114,11 @@ class Costmap(Node):
             suffix = color.lower()
             state = {'topic_suffix': suffix}
             state['costmap_pub'] = self.create_publisher(
-                OccupancyGrid, f'/limo/costmap/costmap_grid_{suffix}', map_qos_profile)
+                OccupancyGrid, f'/limo/ai_map_package/costmap/costmap_grid_{suffix}', map_qos_profile)
 
             if self.publish_debug:
                 state['debug_pub'] = self.create_publisher(
-                    Image, f'/limo/costmap/costmap_debug_{suffix}', 10)
-                state['debug_pub_compressed'] = self.create_publisher(
-                    CompressedImage, f'/limo/costmap/costmap_debug_{suffix}/compressed', 10)
+                    Image, f'/limo/ai_map_package/costmap/costmap_debug_{suffix}', 10)
 
             self.color_state[color] = state
 
@@ -187,8 +157,8 @@ class Costmap(Node):
 
     def tf_callback(self):
         """
-        Publishes the static transform between base_footprint and cv_origin_[color].
-        Uses the exact timestamp header retrieved from base_footprint via TF2 buffer.
+        Publishes the transform between base_link and cv_origin_[color].
+        Uses the exact timestamp header retrieved from base_link via TF2 buffer.
         """
         try:
             tf_base = self.tf_buffer.lookup_transform(
@@ -207,7 +177,7 @@ class Costmap(Node):
             suffix = self.color_state[color]['topic_suffix']
             t = TransformStamped()
             t.header.stamp = stamp
-            t.header.frame_id = self.fixed_frame   # base_footprint
+            t.header.frame_id = self.fixed_frame   # base_link
             t.child_frame_id = f'cv_origin_{suffix}'
             t.transform.translation.x = 0.6
             t.transform.translation.y = 0.0
@@ -249,7 +219,7 @@ class Costmap(Node):
 
         mask = self._make_mask(bgr, target_color)
 
-        if self.AI_mode and color == 'RED' and 'MAGENTA' in self.color_map:
+        if color == 'RED':
             mask_magenta = self._make_mask(bgr, self.color_map['MAGENTA'])
             mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_magenta))
 
@@ -346,18 +316,12 @@ class Costmap(Node):
 
         # --- Shared: Single ROI debug overlay publishing ---
         has_roi_raw = self.publish_debug and self.roi_debug_pub.get_subscription_count() > 0
-        has_roi_comp = self.publish_debug and self.roi_debug_pub_compressed.get_subscription_count() > 0
-
-        if has_roi_raw or has_roi_comp:
+        if has_roi_raw:
             t_start = time.perf_counter()
             roi_debug_bgr = self._render_roi_debug(bgr, roi_bottom, roi_top)
-            if has_roi_raw:
-                roi_debug_msg = self.bridge.cv2_to_imgmsg(roi_debug_bgr, encoding='bgr8')
-                roi_debug_msg.header = msg.header
-                self.roi_debug_pub.publish(roi_debug_msg)
-            if has_roi_comp:
-                self._publish_compressed(self.roi_debug_pub_compressed, roi_debug_bgr,
-                                          msg.header, 'roi_debug')
+            roi_debug_msg = self.bridge.cv2_to_imgmsg(roi_debug_bgr, encoding='bgr8')
+            roi_debug_msg.header = msg.header
+            self.roi_debug_pub.publish(roi_debug_msg)
             t['roi_debug'] = (time.perf_counter() - t_start) * 1000
 
         # --- Per-color processing ---
@@ -375,30 +339,16 @@ class Costmap(Node):
 
             if self.publish_debug:
                 has_debug_raw = state['debug_pub'].get_subscription_count() > 0
-                has_debug_comp = state['debug_pub_compressed'].get_subscription_count() > 0
-                if has_debug_raw or has_debug_comp:
+                if has_debug_raw:
                     t_start = time.perf_counter()
                     debug_bgr = self._render_debug(cost_img_cropped)
-                    if has_debug_raw:
-                        debug_msg = self.bridge.cv2_to_imgmsg(debug_bgr, encoding='bgr8')
-                        debug_msg.header = msg.header
-                        state['debug_pub'].publish(debug_msg)
-                    if has_debug_comp:
-                        self._publish_compressed(state['debug_pub_compressed'], debug_bgr, msg.header, f'debug_{suffix}')
+                    debug_msg = self.bridge.cv2_to_imgmsg(debug_bgr, encoding='bgr8')
+                    debug_msg.header = msg.header
+                    state['debug_pub'].publish(debug_msg)
                     t_color[color]['debug_render'] = (time.perf_counter() - t_start) * 1000
 
         t['total'] = (time.perf_counter() - start_total) * 1000
         self.log_diagnostics(t, t_color)
-
-    def _publish_compressed(self, publisher, frame_bgr, header, label):
-        try:
-            compressed_msg = CompressedImage()
-            compressed_msg.header = header
-            compressed_msg.format = 'jpeg'
-            compressed_msg.data = self.jpeg_encoder.encode(frame_bgr, quality=60, pixel_format=TJPF_BGR)
-            publisher.publish(compressed_msg)
-        except Exception as exc:
-            self.get_logger().error(f'Failed to publish {label} compressed image: {exc}')
 
     def log_diagnostics(self, t, t_color):
         for key, val in t.items():
@@ -436,7 +386,7 @@ class Costmap(Node):
                 lines.append(f"  ---------------- {color} ----------------")
                 lines.append(f"  [Mask + Inflate]       Current: {t_color[color]['mask_inflate']:.2f} ms | Avg ({self.window_size}f): {avg_c['mask_inflate']:.2f} ms")
                 lines.append(f"  [Occupancy Publish]    Current: {t_color[color]['occupancy_publish']:.2f} ms | Avg ({self.window_size}f): {avg_c['occupancy_publish']:.2f} ms")
-                lines.append(f"  [Debug Render+Compress]Current: {t_color[color]['debug_render']:.2f} ms | Avg ({self.window_size}f): {avg_c['debug_render']:.2f} ms")
+                lines.append(f"  [Debug Render]         Current: {t_color[color]['debug_render']:.2f} ms | Avg ({self.window_size}f): {avg_c['debug_render']:.2f} ms")
             lines.append("=========================================================================")
 
             self.get_logger().info("\n".join(lines))
