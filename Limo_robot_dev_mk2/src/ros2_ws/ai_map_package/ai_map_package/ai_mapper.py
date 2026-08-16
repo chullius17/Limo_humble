@@ -1,9 +1,6 @@
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
-import cv2
 import numpy as np
 import math
 from tf2_ros import TransformException
@@ -11,67 +8,41 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 class Mapper(Node):
-    CHANNELS = {
-        'TURQUOISE': 'turquoise',
-        'WHITE': 'white',
-    }
-
     def __init__(self):
         super().__init__('mapper_node')
 
         # --- ROS2 PARAMETERS ---
-        self.declare_parameter('color', 'TURQUOISE')
+        self.declare_parameter('color', 'MAGENTA') # Options: MAGENTA, RED, GREEN, TURQUOISE, WHITE
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.02)
         self.declare_parameter('map_size_meters', 10.0)
-        self.declare_parameter('roi_x_min_m', 0.0)
-        self.declare_parameter('roi_x_max_m', 1.85)
-        self.declare_parameter('roi_width_near_m', 0.6)
-        self.declare_parameter('roi_width_far_m', 2.65)
 
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
         self.color_flag = self.get_parameter('color').value.upper()
-        if self.color_flag not in self.CHANNELS:
-            options = ', '.join(self.CHANNELS)
-            raise ValueError(f'Unsupported color {self.color_flag!r}; use {options}')
         self.global_frame = self.get_parameter('global_frame').value
         self.resolution = self.get_parameter('resolution').value
         self.map_size_meters = self.get_parameter('map_size_meters').value
-        self.roi_x_min_m = self.get_parameter('roi_x_min_m').value
-        self.roi_x_max_m = self.get_parameter('roi_x_max_m').value
-        self.roi_width_near_m = self.get_parameter('roi_width_near_m').value
-        self.roi_width_far_m = self.get_parameter('roi_width_far_m').value
-
-        if self.roi_x_max_m <= self.roi_x_min_m:
-            raise ValueError('roi_x_max_m must be greater than roi_x_min_m')
-        if self.roi_width_near_m < 0.0 or self.roi_width_far_m < 0.0:
-            raise ValueError('ROI widths must be non-negative')
 
         self.map_size_pixels = int(self.map_size_meters / self.resolution)
 
         # --- TF2 CONFIGURATION ---
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.bridge = CvBridge()
 
         # --- DYNAMIC TOPIC CONFIGURATION ---
         self.color_suffix = self.color_flag.lower()
-        self.costmap_suffix = self.CHANNELS[self.color_flag]
-        costmap_topic = f'/limo/map_package/costmap/costmap_grid_{self.costmap_suffix}'
-        map_topic = f'/limo/map_package/mapper/map_paper_{self.color_suffix}'
+        costmap_topic = f'/limo/costmap/costmap_grid_{self.color_suffix}'
+        map_topic = f'/limo/map_paper_{self.color_suffix}'
 
         self.filtered_publisher = self.create_publisher(OccupancyGrid, map_topic, 10)
-        self.roi_debug_publisher = self.create_publisher(
-            Image, f'/limo/map_package/mapper/roi_debug_{self.color_suffix}', 10
-        )
 
         # --- BAYESIAN LOG-ODDS FILTER CONFIGURATION ---
         # The global canvas stores log-odds to accelerate probabilistic calculations.
         self.canvas_logodds = np.zeros((self.map_size_pixels, self.map_size_pixels), dtype=np.float32)
         self.seen_canvas = np.zeros((self.map_size_pixels, self.map_size_pixels), dtype=bool)
-        self.L_OCC = 1.0    # Certainty increment if an obstacle is detected
+        self.L_OCC = 0.85    # Certainty increment if an obstacle is detected
         self.L_FREE = 0.35    # Decrement if free space is detected (reduced value for smooth clearing)
         self.L_MAX = 5.0     # Maximum saturation point of the memory
         self.L_MIN = -3.0    # Minimum saturation point of the map
@@ -92,12 +63,6 @@ class Mapper(Node):
         self.grid_msg_filtered = self.get_default_occupancy_grid()
 
         self.get_logger().info(f'Probabilistic Mapper initialized for channel [{self.color_flag}] on topic {costmap_topic}')
-        self.get_logger().info(
-            'Bayesian ROI: '
-            f'x=[{self.roi_x_min_m:.2f}, {self.roi_x_max_m:.2f}] m, '
-            f'width={self.roi_width_near_m:.2f} m near -> '
-            f'{self.roi_width_far_m:.2f} m far'
-        )
 
     def get_default_occupancy_grid(self) -> OccupancyGrid:
         """Initializes standard metadata for the global occupancy grid map."""
@@ -123,7 +88,7 @@ class Mapper(Node):
         try:
             # Retrieving the transformation between the global world (odom) and the local sensor origin
             tf = self.tf_buffer.lookup_transform(
-                self.global_frame, f'cv_origin_{self.costmap_suffix}', rclpy.time.Time()
+                self.global_frame, f'cv_origin_{self.color_suffix}', rclpy.time.Time()
             )
             origin_x = tf.transform.translation.x
             origin_y = tf.transform.translation.y
@@ -156,22 +121,23 @@ class Mapper(Node):
                 self.cached_local_y = coy + rr * cres + cres / 2.0
                 self.cached_shape = (ch, cw)
 
-                # Trapezoidal ROI. Width parameters represent the complete
-                # lateral width, centered around local y=0.
-                roi_length = self.roi_x_max_m - self.roi_x_min_m
-                interpolation = (self.cached_local_x - self.roi_x_min_m) / roi_length
-                allowed_width = (
-                    self.roi_width_near_m
-                    + interpolation * (self.roi_width_far_m - self.roi_width_near_m)
-                )
-                max_allowed_abs_y = allowed_width / 2.0
+                # --- MANUAL ROI TRAPEZOID CONFIGURATION ---
+                # Modify these parameters by looking at the shape of the blue beam in RViz to make it match perfectly!
+                min_x = 0  # Rear limit of the field of view relative to cv_origin (in meters)
+                max_x = 1.85   # Maximum visible front limit from the camera (in meters) 
+                
+                width_at_min_x = 0.70  # Total width of the beam at the closest point (min_x)
+                width_at_max_x = 2.2  # Total width of the beam at the farthest point (max_x)
+
+                # Linear interpolation of the allowed semi-width along the X axis
+                slope = (width_at_max_x - width_at_min_x) / (max_x - min_x)
+                max_allowed_y = (width_at_min_x / 2.0) + slope * (self.cached_local_x - min_x)
+                # max_allowed_y is a vector
 
                 # Generation of the local boolean mask to isolate the useful field of view
-                self.cached_roi_mask = (
-                    (self.cached_local_x >= self.roi_x_min_m)
-                    & (self.cached_local_x <= self.roi_x_max_m)
-                    & (np.abs(self.cached_local_y) <= max_allowed_abs_y)
-                )
+                self.cached_roi_mask = (self.cached_local_x >= min_x) & \
+                                       (self.cached_local_x <= max_x) & \
+                                       (np.abs(self.cached_local_y) <= max_allowed_y)
 
             # Vectorial projection of the local map onto global map coordinates (Rotation-translation)
             world_x = origin_x + cos_yaw * self.cached_local_x - sin_yaw * self.cached_local_y
@@ -207,9 +173,6 @@ class Mapper(Node):
             prob_matrix = 1.0 / (1.0 + np.exp(-self.canvas_logodds))
             canvas_filtered = (prob_matrix * 100.0).astype(np.int8)
 
-            if self.roi_debug_publisher.get_subscription_count() > 0:
-                self._publish_roi_debug(data, self.costmap.header)
-
         except TransformException as e:
             self.get_logger().warn(f'TF not available: {e}', throttle_duration_sec=2.0)
             return
@@ -220,34 +183,6 @@ class Mapper(Node):
         self.grid_msg_filtered.header.stamp = self.get_clock().now().to_msg()
         self.grid_msg_filtered.data = canvas_out.flatten().tolist()
         self.filtered_publisher.publish(self.grid_msg_filtered)
-
-    def _publish_roi_debug(self, data: np.ndarray, header) -> None:
-        """Publish the local costmap with the Bayesian update ROI highlighted."""
-        cost_gray = np.clip(data.astype(np.float32), 0, 100)
-        cost_gray = (cost_gray * 2.55).astype(np.uint8)
-        debug = cv2.cvtColor(cost_gray, cv2.COLOR_GRAY2BGR)
-
-        # Dim pixels outside the filter ROI and tint the active area green.
-        debug[~self.cached_roi_mask] = (debug[~self.cached_roi_mask] * 0.2).astype(np.uint8)
-        green_overlay = np.zeros_like(debug)
-        green_overlay[:, :, 1] = 120
-        debug[self.cached_roi_mask] = cv2.addWeighted(
-            debug, 0.65, green_overlay, 0.35, 0
-        )[self.cached_roi_mask]
-
-        contours, _ = cv2.findContours(
-            self.cached_roi_mask.astype(np.uint8),
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-        cv2.drawContours(debug, contours, -1, (0, 255, 255), 2)
-
-        # Landscape visualization; this affects only the debug topic.
-        debug = cv2.rotate(debug, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-        debug_msg = self.bridge.cv2_to_imgmsg(debug, encoding='bgr8')
-        debug_msg.header = header
-        self.roi_debug_publisher.publish(debug_msg)
 
 
 def main(args=None):

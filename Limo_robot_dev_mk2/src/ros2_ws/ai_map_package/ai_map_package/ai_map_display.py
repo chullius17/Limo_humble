@@ -21,24 +21,28 @@ class MapDisplay(Node):
     def __init__(self):
         super().__init__('map_display_node')
 
+        self.declare_parameter('AI_mode',            False)
         self.declare_parameter('global_frame',        'odom')
-        self.declare_parameter('robot_frame',         'base_link')
+        self.declare_parameter('robot_frame',         'base_footprint')
         self.declare_parameter('costmap_resolution',  0.005)    # High definition for navigation (5mm/px)
         self.declare_parameter('view_resolution',     0.02)     # Lightweight definition for images (2cm/px)
         self.declare_parameter('view_range_m',        3.0)      # Semi-side of ego canvas
-        self.declare_parameter('turquoise_factor',    0.6)
-        self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('magenta_factor',      1.0)      
+        self.declare_parameter('red_factor',          0.6)      
+        self.declare_parameter('green_factor',        0.3)      
 
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
+        self.AI_mode            = self.get_parameter('AI_mode').value
         self.global_frame       = self.get_parameter('global_frame').value
         self.robot_frame        = self.get_parameter('robot_frame').value
         self.costmap_resolution = self.get_parameter('costmap_resolution').value
         self.view_resolution    = self.get_parameter('view_resolution').value
         self.view_range_m       = self.get_parameter('view_range_m').value
-        self.turquoise_factor   = self.get_parameter('turquoise_factor').value
-        self.white_factor       = self.get_parameter('white_factor').value
+        self.magenta_factor     = self.get_parameter('magenta_factor').value
+        self.red_factor         = self.get_parameter('red_factor').value
+        self.green_factor       = self.get_parameter('green_factor').value
 
         # Dynamic canvas dimensions based on chosen resolutions
         self.canvas_px = int(2 * self.view_range_m / self.view_resolution)
@@ -48,19 +52,27 @@ class MapDisplay(Node):
         self.bridge      = CvBridge()
 
         # Storage for incoming occupancy grid messages
-        self.map_data_turquoise = None
-        self.map_data_white = None
+        self.map_data_magenta = None
+        self.map_data_red     = None
+        self.map_data_green   = None
 
         # --- SUBSCRIPTIONS WITH ROI PROJECTORS ---
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_turquoise', self.turquoise_map_callback, 10)
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_white', self.white_map_callback, 10)
-        self.get_logger().info('Subscribing to TURQUOISE and WHITE maps')
+        if self.AI_mode:
+            self.get_logger().info('AI Mode: Subscribing to MAGENTA, RED, GREEN maps')
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_magenta', self.curb_map_callback, 10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_red',     self.solid_map_callback,     10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_green',   self.dashed_map_callback,   10)
+        else:
+            self.get_logger().info('Non-AI Mode: Subscribing to MAGENTA map only')
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_magenta', self.curb_map_callback, 10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_turquoise',     self.solid_map_callback,     10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_white',     self.dashed_map_callback,     10)
 
         # --- COMBINED IMAGE PUBLISHERS ---
-        self.firstp_img_pub         = self.create_publisher(Image, '/limo/map_package/map_display/map_firstp_combined', 10)
+        self.firstp_img_pub         = self.create_publisher(Image, '/limo/map_firstp_combined', 10)
         
         # --- NEW PUBLISHER: COMBINED OCCUPANCY GRID ---
-        self.grid_pub               = self.create_publisher(OccupancyGrid, '/limo/map_package/map_display/global_map_combined', 10)
+        self.grid_pub               = self.create_publisher(OccupancyGrid, '/limo/global_map_combined', 10)
 
         # Pre-allocate the OccupancyGrid message to optimize CPU usage
         self.combined_grid_msg      = self.get_default_occupancy_grid()
@@ -86,11 +98,14 @@ class MapDisplay(Node):
 
     # ------------------------------------------------------------------
 
-    def turquoise_map_callback(self, msg: OccupancyGrid):
-        self.map_data_turquoise = msg
+    def curb_map_callback(self, msg: OccupancyGrid):
+        self.map_data_magenta = msg
 
-    def white_map_callback(self, msg: OccupancyGrid):
-        self.map_data_white = msg
+    def solid_map_callback(self, msg: OccupancyGrid):
+        self.map_data_red = msg
+
+    def dashed_map_callback(self, msg: OccupancyGrid):
+        self.map_data_green = msg
 
     # ------------------------------------------------------------------
 
@@ -134,10 +149,7 @@ class MapDisplay(Node):
     def timer_callback(self):
         t_timer_start = time.perf_counter()
 
-        if all(m is None for m in (
-            self.map_data_turquoise,
-            self.map_data_white,
-        )):
+        if self.map_data_magenta is None and self.map_data_red is None and self.map_data_green is None:
             return
 
         try:
@@ -162,10 +174,12 @@ class MapDisplay(Node):
         ego_canvas = np.zeros((self.canvas_px, self.canvas_px), dtype=np.float32)
         seen_canvas = np.zeros((self.canvas_px, self.canvas_px), dtype=bool)
 
-        if self.map_data_turquoise is not None:
-            self._project_grid_layer_optimized(self.map_data_turquoise, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.turquoise_factor)
-        if self.map_data_white is not None:
-            self._project_grid_layer_optimized(self.map_data_white, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.white_factor)
+        if self.map_data_magenta is not None:
+            self._project_grid_layer_optimized(self.map_data_magenta, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.magenta_factor)
+        if self.map_data_red is not None:
+            self._project_grid_layer_optimized(self.map_data_red, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.red_factor)
+        if self.map_data_green is not None:
+            self._project_grid_layer_optimized(self.map_data_green, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.green_factor)
 
         t_ego_done = time.perf_counter()
 

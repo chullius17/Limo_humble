@@ -2,39 +2,43 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    mapper_roi = {
-        'roi_x_min_m': 0.0,
-        'roi_x_max_m': 1.85,
-        'roi_width_near_m': 0.70,
-        'roi_width_far_m': 2.20,
-    }
-
     costmap = Node(
         package='map_package',
         executable='costmap',
         name='costmap_boardwalk',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'AI_mode': False
+        }]
     )
 
-    mapper_turquoise = Node(
+    mapper_mgn = Node(
+        package='map_package',
+        executable='mapper',
+        name='mapper_boardwalk',
+        output='screen',
+        parameters=[{
+            'color': 'MAGENTA'
+        }]
+    )
+
+    mapper_red = Node(
         package='map_package',
         executable='mapper',
         name='mapper_solid',
         output='screen',
         parameters=[{
-            'color': 'TURQUOISE',
-            **mapper_roi,
+            'color': 'TURQUOISE'
         }]
     )
 
-    mapper_white = Node(
+    mapper_grn = Node(
         package='map_package',
         executable='mapper',
-        name='mapper_white',
+        name='mapper_dashed',
         output='screen',
         parameters=[{
-            'color': 'WHITE',
-            **mapper_roi,
+            'color': 'WHITE'
         }]
     )
 
@@ -42,20 +46,27 @@ def generate_launch_description():
         package='map_package',
         executable='map_display',
         name='map_displayer',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'AI_mode': False
+        }]
     )
 
     saver_node = Node(
         package='map_package',
         executable='map_save',
         name='map_saver',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'AI_mode': False
+        }]
     )
     
     return LaunchDescription([
         costmap,
-        mapper_turquoise,
-        mapper_white,
+        mapper_mgn,
+        mapper_red,
+        mapper_grn,
         display_node,
         saver_node
     ])

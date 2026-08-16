@@ -3,19 +3,20 @@ from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 import numpy as np
 import cv2
+import os
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
+from ament_index_python.packages import get_package_share_directory
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 import math
 from pathlib import Path
 
-def find_project_root(start: Path):
-    """Find the LIMO project root from source, build, or install paths."""
-    for candidate in [start] + list(start.parents):
-        if (candidate / 'src' / 'ros2_ws').is_dir():
-            return candidate
+def find_ros2_ws(start: Path):
+    for parent in [start] + list(start.parents):
+        if parent.name == "ros2_ws":
+            return parent
     return None
 
 class MapSaver(Node):
@@ -26,16 +27,17 @@ class MapSaver(Node):
     """
 
     def __init__(self):
-        super().__init__('map_saver_node')
+        super().__init__('map_display_node')
 
         # --- ROS2 PARAMETERS ---
+        self.declare_parameter('AI_mode',             False)
         self.declare_parameter('global_frame',        'odom')
         self.declare_parameter('view_resolution',     0.02)     
-        self.declare_parameter('turquoise_factor',    0.6)
-        self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('magenta_factor',      1.0)      
+        self.declare_parameter('red_factor',          0.6)      
+        self.declare_parameter('green_factor',        0.3) 
         self.declare_parameter('canvas_size_meters',  10.0)     
-        self.declare_parameter('robot_frame',         'base_link')
-        self.declare_parameter('save_directory',      '')
+        self.declare_parameter('robot_frame',         'base_footprint')
         
         self.robot_frame = self.get_parameter('robot_frame').value
         self.tf_buffer   = Buffer()
@@ -44,42 +46,45 @@ class MapSaver(Node):
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
+        self.AI_mode            = self.get_parameter('AI_mode').value
         self.global_frame       = self.get_parameter('global_frame').value
         self.view_resolution    = self.get_parameter('view_resolution').value
-        self.turquoise_factor   = self.get_parameter('turquoise_factor').value
-        self.white_factor       = self.get_parameter('white_factor').value
+        self.magenta_factor     = self.get_parameter('magenta_factor').value
+        self.red_factor         = self.get_parameter('red_factor').value
+        self.green_factor       = self.get_parameter('green_factor').value
         self.canvas_size_meters = self.get_parameter('canvas_size_meters').value
-        save_directory          = self.get_parameter('save_directory').value
 
         # Dynamic canvas dimensions based on chosen resolutions
         self.canvas_px = int(self.canvas_size_meters / self.view_resolution)
 
         self.bridge = CvBridge()
-        self.img_pub = self.create_publisher(Image, '/limo/map_package/map_saver/global_map_jet', 10)
+        self.img_pub = self.create_publisher(Image, '/limo/global_map_jet', 10)
 
         # Storage for incoming occupancy grid messages
-        self.map_data_turquoise = None
-        self.map_data_white = None
+        self.map_data_magenta = None
+        self.map_data_red     = None
+        self.map_data_green   = None
 
         # --- SUBSCRIPTIONS ---
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_turquoise', self.turquoise_map_callback, 10)
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_white', self.white_map_callback, 10)
-        self.get_logger().info('Subscribing to TURQUOISE and WHITE maps')
+        if self.AI_mode:
+            self.get_logger().info('AI Mode: Subscribing to MAGENTA, RED, GREEN maps')
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_magenta', self.curb_map_callback, 10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_red',     self.solid_map_callback,     10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_green',   self.dashed_map_callback,   10)
+        else:
+            self.get_logger().info('Non-AI Mode: Subscribing to MAGENTA map only')
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_magenta', self.curb_map_callback, 10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_turquoise', self.solid_map_callback,     10)
+            self.create_subscription(OccupancyGrid, '/limo/map_paper_white', self.dashed_map_callback,     10)
 
         # Pre-allocation of the OccupancyGrid message to optimize CPU usage
         self.grid_msg_combined = self.get_default_occupancy_grid()
 
-        if save_directory:
-            self.save_directory = Path(save_directory).expanduser().resolve()
-        else:
-            project_root = find_project_root(Path(__file__).resolve())
-            if project_root is None:
-                raise RuntimeError(
-                    'Cannot locate the project root; set the save_directory parameter'
-                )
-            self.save_directory = project_root / 'ros2_maps'
+        ws = find_ros2_ws(Path(__file__).resolve())
 
-        self.save_directory.mkdir(parents=True, exist_ok=True)
+        if ws is not None:
+            self.save_dir_src = ws / "src" / "ros2_maps"
+            self.save_dir_src.mkdir(parents=True, exist_ok=True)
 
         # Canvas preallocation
         self.global_canvas   = np.zeros((self.canvas_px, self.canvas_px), dtype=np.float32)
@@ -88,9 +93,7 @@ class MapSaver(Node):
         # Last valid grid stored for final storage/saving
         self.latest_grid_data = np.full((self.canvas_px, self.canvas_px), -1, dtype=np.int8)
 
-        self.get_logger().info(
-            f'Map Saver node started; maps will be saved in {self.save_directory}'
-        )
+        self.get_logger().info('Map Saver node started (Save on Shutdown mode)')
 
     def get_default_occupancy_grid(self) -> OccupancyGrid:
         """Initializes metadata for the combined occupancy grid centered on the robot."""
@@ -106,12 +109,16 @@ class MapSaver(Node):
         msg.info.origin.orientation.w = 1.0
         return msg
 
-    def turquoise_map_callback(self, msg: OccupancyGrid):
-        self.map_data_turquoise = msg
+    def curb_map_callback(self, msg: OccupancyGrid):
+        self.map_data_magenta = msg
         self.update_and_publish_map()
 
-    def white_map_callback(self, msg: OccupancyGrid):
-        self.map_data_white = msg
+    def solid_map_callback(self, msg: OccupancyGrid):
+        self.map_data_red = msg
+        self.update_and_publish_map()
+
+    def dashed_map_callback(self, msg: OccupancyGrid):
+        self.map_data_green = msg
         self.update_and_publish_map()
 
     def _project_grid_layer_optimized(self, m: OccupancyGrid,
@@ -151,11 +158,10 @@ class MapSaver(Node):
         # Vertical flip to synchronize the OpenCV origin with the ROS display orientation
         pgm_img = np.flipud(pgm_img)
 
-        img_path = self.save_directory / 'limo_map.pgm'
-        yaml_path = self.save_directory / 'limo_map.yaml'
+        img_path = os.path.join(self.save_dir_src, "limo_map.pgm")
+        yaml_path = os.path.join(self.save_dir_src, "limo_map.yaml")
         
-        if not cv2.imwrite(str(img_path), pgm_img):
-            raise RuntimeError(f'Failed to write map image to {img_path}')
+        cv2.imwrite(img_path, pgm_img)
 
         half = self.canvas_size_meters / 2.0
         yaml_content = (
@@ -168,26 +174,25 @@ class MapSaver(Node):
             f"mode: scale\n"
         )
         
-        with yaml_path.open('w') as f:
+        with open(yaml_path, 'w') as f:
             f.write(yaml_content)
             
-        self.get_logger().info(f'Map saved in {self.save_directory}')
+        self.get_logger().info(f"Map flipped and saved with cost levels in: {self.save_dir_src}!")
 
     def update_and_publish_map(self):
-        if all(m is None for m in (
-            self.map_data_turquoise,
-            self.map_data_white,
-        )):
+        if self.map_data_magenta is None and self.map_data_red is None and self.map_data_green is None:
             return
 
         # CRITICAL: Clear canvases before re-projecting to avoid incorrect data accumulation
         self.global_canvas.fill(0)
         self.seen_canvas.fill(False)
 
-        if self.map_data_turquoise is not None:
-            self._project_grid_layer_optimized(self.map_data_turquoise, self.global_canvas, self.seen_canvas, self.turquoise_factor)
-        if self.map_data_white is not None:
-            self._project_grid_layer_optimized(self.map_data_white, self.global_canvas, self.seen_canvas, self.white_factor)
+        if self.map_data_magenta is not None:
+            self._project_grid_layer_optimized(self.map_data_magenta, self.global_canvas, self.seen_canvas, self.magenta_factor)
+        if self.map_data_red is not None:
+            self._project_grid_layer_optimized(self.map_data_red, self.global_canvas, self.seen_canvas, self.red_factor)
+        if self.map_data_green is not None:
+            self._project_grid_layer_optimized(self.map_data_green, self.global_canvas, self.seen_canvas, self.green_factor)
 
         grid_data = np.where(self.seen_canvas,
                              np.clip(self.global_canvas, 0, 100),
@@ -235,20 +240,7 @@ class MapSaver(Node):
                 dy_y = int(-arrow_len * math.cos(yaw))  # Inverted for image coordinate space
                 cv2.arrowedLine(jet_img, (rx, ry), (rx + dx_y, ry + dy_y), (0, 255, 0), 2, tipLength=0.3)
                 
-                cv2.circle(jet_img, (rx, ry), 6, (0, 0, 0), -1)
-                cv2.circle(jet_img, (rx, ry), 4, (255, 255, 255), -1)
-                label_x = min(rx + 8, self.canvas_px - 75)
-                label_y = max(ry - 8, 15)
-                cv2.putText(
-                    jet_img,
-                    self.robot_frame,
-                    (label_x, label_y),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+                cv2.circle(jet_img, (rx, ry), 3, (255, 255, 255), -1)
 
         except TransformException as e:
             self.get_logger().warn(f'TF not available: {e}', throttle_duration_sec=2.0)

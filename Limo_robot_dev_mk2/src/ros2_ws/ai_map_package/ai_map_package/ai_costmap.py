@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from nav_msgs.msg import OccupancyGrid
 import cv2
 from cv_bridge import CvBridge
@@ -10,6 +10,7 @@ import time
 import threading
 import queue
 import array
+from turbojpeg import TurboJPEG, TJPF_BGR
 from std_msgs.msg import Header
 from typing import Tuple
 from geometry_msgs.msg import TransformStamped
@@ -23,39 +24,47 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoS
 
 class Costmap(Node):
     """
-    Converts the turquoise and white channels of a BEV image into ROS2 costmaps.
+    Converts each color channel of a BEV image into its own ROS2 OccupancyGrid costmap.
+    A single node/subscription/worker handles all active colors dynamically based on AI_mode.
     """
 
-    COLORS = ['TURQUOISE', 'WHITE']
+    COLORS_AI = ['MAGENTA', 'RED', 'GREEN']
+    COLORS = ['MAGENTA', 'TURQUOISE', 'WHITE']
+
+    COLOR_MAP_AI = {
+        'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
+        'RED':     np.array([  0,   0, 255], dtype=np.uint8),
+        'GREEN':   np.array([  0, 255,   0], dtype=np.uint8)
+    }
 
     COLOR_MAP = {
+        'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
         'TURQUOISE': np.array([255, 255,   0], dtype=np.uint8),
         'WHITE': np.array([255, 255, 255], dtype=np.uint8),
     }
 
     TOLERANCE = 30          # Pixel-value tolerance for color matching
 
-    CONFIG_MAP = {
-        'TURQUOISE': {'peak_cost': 60.0,  'radius': 5},
-        'WHITE': {
-            'peak_cost': 40.0, 'radius': 10,
-            'interior_max_cost': 100.0,   # max cost at the core of thick blobs
-            'interior_radius': 220,         # px of interior depth needed to saturate
-        },
+    CONFIG_MAP_AI = {
+        'MAGENTA': {'peak_cost': 100.0, 'radius': 2},
+        'RED':     {'peak_cost': 60.0,  'radius': 5},
+        'GREEN':   {'peak_cost': 30.0,  'radius': 5}
     }
 
-    DECAY = 8.0
+    CONFIG_MAP = {
+        'MAGENTA': {'peak_cost': 100.0, 'radius': 2},
+        'TURQUOISE': {'peak_cost': 60.0,  'radius': 5},
+        'WHITE': {'peak_cost': 30.0,  'radius': 5}
+    }
+
+    DECAY = 6.0
     ROI_FRACTION = 0.4
     RULER_FRACTION = 0.08
-
-    # Scales the vertical (row-axis) interior distance based on how far a row is
-    # from the robot, to compensate for sparser/noisier depth at range.
-    # 0.0 = no correction.
-    VERTICAL_SCALE_PER_METER = 8.0
 
     def __init__(self):
         super().__init__('costmap_node')
         self.bridge = CvBridge()
+        self.jpeg_encoder = TurboJPEG()
 
         self.latest_bev_stamp = None
 
@@ -71,13 +80,23 @@ class Costmap(Node):
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
-        self.colors = self.COLORS
-        self.color_map = self.COLOR_MAP
-        self.config_map = self.CONFIG_MAP
-        self.get_logger().info('Using TURQUOISE and WHITE color maps')
+        # Parse operation mode parameters FIRST
+        self.declare_parameter('AI_mode', False)
+        self.AI_mode = self.get_parameter('AI_mode').value
+
+        if self.AI_mode:
+            self.get_logger().info('AI mode enabled: using COLOR_MAP_AI and CONFIG_MAP_AI')
+            self.colors = self.COLORS_AI
+            self.color_map = self.COLOR_MAP_AI
+            self.config_map = self.CONFIG_MAP_AI
+        else:
+            self.get_logger().info('Standard mode enabled: using COLOR_MAP and CONFIG_MAP')
+            self.colors = self.COLORS
+            self.color_map = self.COLOR_MAP
+            self.config_map = self.CONFIG_MAP
 
         # Global (color-independent) parameters
-        self.declare_parameter('fixed_frame', 'base_link')
+        self.declare_parameter('fixed_frame', 'base_footprint')
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.0092)
         self.declare_parameter('publish_debug', True)
@@ -105,7 +124,7 @@ class Costmap(Node):
         # Single subscription shared by all active colors
         self.bev_sub = self.create_subscription(
             Image,
-            'limo/base_cv/bev/bird_perspective/raw',
+            '/limo/color/image_raw_bird_perspective',
             self.bev_callback,
             10
         )
@@ -113,24 +132,23 @@ class Costmap(Node):
         # Global ROI debug publishers
         if self.publish_debug:
             self.roi_debug_pub = self.create_publisher(
-                Image, '/limo/map_package/costmap/roi_debug', 10)
+                Image, '/limo/costmap/roi_debug', 10)
+            self.roi_debug_pub_compressed = self.create_publisher(
+                CompressedImage, '/limo/costmap/roi_debug/compressed', 10)
 
-        # Per-color publisher bundle.
+        # Per-color publisher bundle for costmap and debug heatmaps (using self.colors)
         self.color_state = {}
         for color in self.colors:
-            suffixes = [color.lower()]
-            state = {'outputs': {}}
-            for suffix in suffixes:
-                output = {'topic_suffix': suffix}
-                output['costmap_pub'] = self.create_publisher(
-                    OccupancyGrid,
-                    f'/limo/map_package/costmap/costmap_grid_{suffix}',
-                    map_qos_profile,
-                )
-                if self.publish_debug:
-                    output['debug_pub'] = self.create_publisher(
-                        Image, f'/limo/map_package/costmap/costmap_debug_{suffix}', 10)
-                state['outputs'][suffix] = output
+            suffix = color.lower()
+            state = {'topic_suffix': suffix}
+            state['costmap_pub'] = self.create_publisher(
+                OccupancyGrid, f'/limo/costmap/costmap_grid_{suffix}', map_qos_profile)
+
+            if self.publish_debug:
+                state['debug_pub'] = self.create_publisher(
+                    Image, f'/limo/costmap/costmap_debug_{suffix}', 10)
+                state['debug_pub_compressed'] = self.create_publisher(
+                    CompressedImage, f'/limo/costmap/costmap_debug_{suffix}/compressed', 10)
 
             self.color_state[color] = state
 
@@ -185,15 +203,11 @@ class Costmap(Node):
             else:
                 stamp = self.get_clock().now().to_msg()
 
-        output_suffixes = [
-            suffix
-            for state in self.color_state.values()
-            for suffix in state['outputs']
-        ]
-        for suffix in output_suffixes:
+        for color in self.colors:
+            suffix = self.color_state[color]['topic_suffix']
             t = TransformStamped()
             t.header.stamp = stamp
-            t.header.frame_id = self.fixed_frame   # base_link
+            t.header.frame_id = self.fixed_frame   # base_footprint
             t.child_frame_id = f'cv_origin_{suffix}'
             t.transform.translation.x = 0.6
             t.transform.translation.y = 0.0
@@ -215,34 +229,7 @@ class Costmap(Node):
         hi = np.clip(exact_color.astype(np.int16) + self.TOLERANCE, 0, 255).astype(np.uint8)
         return cv2.inRange(bgr, lo, hi)
 
-    def _axis_distance_to_zero(self, binary: np.ndarray, axis: int) -> np.ndarray:
-        """
-        For every pixel, distance (in px) to the nearest background (0) pixel,
-        measured ONLY along `axis` (1 = horizontal/per-row, 0 = vertical/per-column).
-        Rows/columns with no background at all get a sentinel value of n (image size along axis).
-        Fully vectorized (no Python loops over pixels).
-        """
-        fg = binary > 0
-        n = binary.shape[axis]
-        idx_shape = [1, 1]
-        idx_shape[axis] = n
-        idx = np.broadcast_to(np.arange(n).reshape(idx_shape), binary.shape)
-
-        # Nearest background index scanning "backward" along axis
-        left_src = np.where(fg, -1, idx)
-        left = np.maximum.accumulate(left_src, axis=axis)
-        dist_left = np.where(left < 0, n, idx - left)
-
-        # Nearest background index scanning "forward" along axis
-        right_src = np.where(fg, n, idx)
-        right = np.flip(np.minimum.accumulate(np.flip(right_src, axis=axis), axis=axis), axis=axis)
-        dist_right = np.where(right >= n, n, right - idx)
-
-        return np.minimum(dist_left, dist_right).astype(np.float32)
-
-    def _inflate_layer(self, mask: np.ndarray, peak_cost: float, radius_px: int,
-                        interior_max_cost: float = None, interior_radius: float = None) -> np.ndarray:
-        # --- Outward halo: unchanged, distance from nearest mask pixel ---
+    def _inflate_layer(self, mask: np.ndarray, peak_cost: float, radius_px: int) -> np.ndarray:
         obstacle = cv2.bitwise_not(mask)
         dist = cv2.distanceTransform(obstacle, cv2.DIST_L2, cv2.DIST_MASK_3)
 
@@ -254,28 +241,6 @@ class Costmap(Node):
             norm_dist = d_valid / max(radius_px, 1)
             cost_layer[within_radius] = peak_cost * np.exp(-self.DECAY * norm_dist)
 
-        # --- Interior growth: directional (h/v) distance-to-edge, saturating toward max ---
-        if interior_max_cost is not None:
-            mask_bool = mask > 0
-            if np.any(mask_bool):
-                dist_h = self._axis_distance_to_zero(mask, axis=1)  # horizontal-only
-                dist_v = self._axis_distance_to_zero(mask, axis=0)  # vertical-only
-
-                # Rows farther from the robot -> depth estimate sparser/noisier -> widen
-                # the effective vertical interior distance to compensate.
-                h = mask.shape[0]
-                row_idx = np.arange(h).reshape(-1, 1)
-                # Assumes row (h-1) is the row closest to the robot (bottom of the ROI crop).
-                dist_from_robot_m = ((h - 1) - row_idx) * self.resolution
-                vertical_scale = 1.0 + self.VERTICAL_SCALE_PER_METER * dist_from_robot_m
-                dist_v_scaled = dist_v * vertical_scale
-
-                dist_in = np.minimum(dist_h, dist_v_scaled)
-
-                norm_in = dist_in[mask_bool] / max(interior_radius, 1e-3)
-                cost_layer[mask_bool] = peak_cost + (interior_max_cost - peak_cost) * (
-                    1.0 - np.exp(-self.DECAY * norm_in))
-
         return np.clip(cost_layer, 0, 100).astype(np.uint8)
 
     def _image_to_costmap(self, bgr: np.ndarray, color: str) -> np.ndarray:
@@ -284,11 +249,11 @@ class Costmap(Node):
 
         mask = self._make_mask(bgr, target_color)
 
-        return self._inflate_layer(
-            mask, config['peak_cost'], config['radius'],
-            interior_max_cost=config.get('interior_max_cost'),
-            interior_radius=config.get('interior_radius'),
-        )
+        if self.AI_mode and color == 'RED' and 'MAGENTA' in self.color_map:
+            mask_magenta = self._make_mask(bgr, self.color_map['MAGENTA'])
+            mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_magenta))
+
+        return self._inflate_layer(mask, config['peak_cost'], config['radius'])
 
     def _costmap_to_occupancy_grid(self, cost_img: np.ndarray, header: Header, topic_suffix: str) -> OccupancyGrid:
         rotated_cost = cv2.rotate(cost_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
@@ -381,48 +346,59 @@ class Costmap(Node):
 
         # --- Shared: Single ROI debug overlay publishing ---
         has_roi_raw = self.publish_debug and self.roi_debug_pub.get_subscription_count() > 0
+        has_roi_comp = self.publish_debug and self.roi_debug_pub_compressed.get_subscription_count() > 0
 
-        if has_roi_raw:
+        if has_roi_raw or has_roi_comp:
             t_start = time.perf_counter()
             roi_debug_bgr = self._render_roi_debug(bgr, roi_bottom, roi_top)
-            roi_debug_msg = self.bridge.cv2_to_imgmsg(roi_debug_bgr, encoding='bgr8')
-            roi_debug_msg.header = msg.header
-            self.roi_debug_pub.publish(roi_debug_msg)
+            if has_roi_raw:
+                roi_debug_msg = self.bridge.cv2_to_imgmsg(roi_debug_bgr, encoding='bgr8')
+                roi_debug_msg.header = msg.header
+                self.roi_debug_pub.publish(roi_debug_msg)
+            if has_roi_comp:
+                self._publish_compressed(self.roi_debug_pub_compressed, roi_debug_bgr,
+                                          msg.header, 'roi_debug')
             t['roi_debug'] = (time.perf_counter() - t_start) * 1000
 
         # --- Per-color processing ---
         for color in self.colors:
             state = self.color_state[color]
+            suffix = state['topic_suffix']
 
             t_start = time.perf_counter()
             cost_img_cropped = self._image_to_costmap(roi_bgr, color)
             t_color[color]['mask_inflate'] = (time.perf_counter() - t_start) * 1000
 
             t_start = time.perf_counter()
-            output_layers = {color.lower(): cost_img_cropped}
-            for suffix, cost_layer in output_layers.items():
-                state['outputs'][suffix]['costmap_pub'].publish(
-                    self._costmap_to_occupancy_grid(cost_layer, msg.header, suffix)
-                )
+            state['costmap_pub'].publish(self._costmap_to_occupancy_grid(cost_img_cropped, msg.header, suffix))
             t_color[color]['occupancy_publish'] = (time.perf_counter() - t_start) * 1000
 
             if self.publish_debug:
-                debug_outputs = [
-                    (suffix, cost_layer)
-                    for suffix, cost_layer in output_layers.items()
-                    if state['outputs'][suffix]['debug_pub'].get_subscription_count() > 0
-                ]
-                if debug_outputs:
+                has_debug_raw = state['debug_pub'].get_subscription_count() > 0
+                has_debug_comp = state['debug_pub_compressed'].get_subscription_count() > 0
+                if has_debug_raw or has_debug_comp:
                     t_start = time.perf_counter()
-                    for suffix, cost_layer in debug_outputs:
-                        debug_bgr = self._render_debug(cost_layer)
+                    debug_bgr = self._render_debug(cost_img_cropped)
+                    if has_debug_raw:
                         debug_msg = self.bridge.cv2_to_imgmsg(debug_bgr, encoding='bgr8')
                         debug_msg.header = msg.header
-                        state['outputs'][suffix]['debug_pub'].publish(debug_msg)
+                        state['debug_pub'].publish(debug_msg)
+                    if has_debug_comp:
+                        self._publish_compressed(state['debug_pub_compressed'], debug_bgr, msg.header, f'debug_{suffix}')
                     t_color[color]['debug_render'] = (time.perf_counter() - t_start) * 1000
 
         t['total'] = (time.perf_counter() - start_total) * 1000
         self.log_diagnostics(t, t_color)
+
+    def _publish_compressed(self, publisher, frame_bgr, header, label):
+        try:
+            compressed_msg = CompressedImage()
+            compressed_msg.header = header
+            compressed_msg.format = 'jpeg'
+            compressed_msg.data = self.jpeg_encoder.encode(frame_bgr, quality=60, pixel_format=TJPF_BGR)
+            publisher.publish(compressed_msg)
+        except Exception as exc:
+            self.get_logger().error(f'Failed to publish {label} compressed image: {exc}')
 
     def log_diagnostics(self, t, t_color):
         for key, val in t.items():
@@ -460,7 +436,7 @@ class Costmap(Node):
                 lines.append(f"  ---------------- {color} ----------------")
                 lines.append(f"  [Mask + Inflate]       Current: {t_color[color]['mask_inflate']:.2f} ms | Avg ({self.window_size}f): {avg_c['mask_inflate']:.2f} ms")
                 lines.append(f"  [Occupancy Publish]    Current: {t_color[color]['occupancy_publish']:.2f} ms | Avg ({self.window_size}f): {avg_c['occupancy_publish']:.2f} ms")
-                lines.append(f"  [Debug Render]         Current: {t_color[color]['debug_render']:.2f} ms | Avg ({self.window_size}f): {avg_c['debug_render']:.2f} ms")
+                lines.append(f"  [Debug Render+Compress]Current: {t_color[color]['debug_render']:.2f} ms | Avg ({self.window_size}f): {avg_c['debug_render']:.2f} ms")
             lines.append("=========================================================================")
 
             self.get_logger().info("\n".join(lines))
