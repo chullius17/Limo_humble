@@ -12,9 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        # Include all launch files in the 'launch' directory
         ('share/' + package_name + '/launch', glob(os.path.join('launch', '*.launch.py'))),
-        ('share/' + package_name, ['best.onnx']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,9 +23,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'bev_node = cv_package.bev:main',
-            'lane_detector = cv_package.lane_detector:main',
-            'boundaries = cv_package.boundary_extractor:main',
+            'lane_detector = cv_package.simple_detector:main',
+            'boundaries = cv_package.simple_boundaries:main',
+            'bev_node = cv_package.simple_bev:main',
         ],
     },
 )

@@ -13,7 +13,10 @@ def generate_launch_description():
         package='map_package',
         executable='costmap',
         name='costmap_boardwalk',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'enable_telemetry': False,
+        }]
     )
 
     mapper_turquoise = Node(
@@ -42,7 +45,10 @@ def generate_launch_description():
         package='map_package',
         executable='map_display',
         name='map_displayer',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'enable_telemetry': False,
+        }]
     )
 
     saver_node = Node(

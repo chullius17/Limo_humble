@@ -81,7 +81,7 @@ class MapSaver(Node):
                 raise RuntimeError(
                     'Cannot locate the project root; set the save_directory parameter'
                 )
-            self.save_directory = project_root / 'ros2_maps'
+            self.save_directory = project_root / 'ai_ros2_maps'
 
         self.save_directory.mkdir(parents=True, exist_ok=True)
 

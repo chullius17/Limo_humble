@@ -13,7 +13,10 @@ def generate_launch_description():
         package='ai_map_package',
         executable='costmap',
         name='ai_costmap',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'enable_telemetry': False,
+        }]
     )
 
     mapper_mgn = Node(
@@ -53,7 +56,10 @@ def generate_launch_description():
         package='ai_map_package',
         executable='map_display',
         name='ai_map_displayer',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'enable_telemetry': False,
+        }]
     )
 
     saver_node = Node(

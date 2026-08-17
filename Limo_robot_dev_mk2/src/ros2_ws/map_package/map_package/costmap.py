@@ -105,7 +105,7 @@ class Costmap(Node):
         # Single subscription shared by all active colors
         self.bev_sub = self.create_subscription(
             Image,
-            'limo/base_cv/bev/bird_perspective/raw',
+            'limo/cv_package/bev/bird_perspective/raw',
             self.bev_callback,
             10
         )

@@ -29,6 +29,7 @@ class MapDisplay(Node):
         self.declare_parameter('magenta_factor',      1.0)      
         self.declare_parameter('red_factor',          0.6)      
         self.declare_parameter('green_factor',        0.3)      
+        self.declare_parameter('enable_telemetry',    True)
 
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
@@ -41,6 +42,7 @@ class MapDisplay(Node):
         self.magenta_factor     = self.get_parameter('magenta_factor').value
         self.red_factor         = self.get_parameter('red_factor').value
         self.green_factor       = self.get_parameter('green_factor').value
+        self.debug_telemetry    = self.get_parameter('enable_telemetry').value
 
         # Dynamic canvas dimensions based on chosen resolutions
         self.canvas_px = int(2 * self.view_range_m / self.view_resolution)
@@ -205,12 +207,13 @@ class MapDisplay(Node):
 
         t_end = time.perf_counter()
 
-        self.get_logger().info(
-            f"[TIMER] "
-            f"ego={(t_ego_done-t_timer_start)*1000:.1f}ms "
-            f"grid_pub={(t_end-t_ego_done)*1000:.1f}ms "
-            f"total={(t_end-t_timer_start)*1000:.1f}ms"
-        )
+        if self.debug_telemetry:
+            self.get_logger().info(
+                f"[TIMER] "
+                f"ego={(t_ego_done-t_timer_start)*1000:.1f}ms "
+                f"grid_pub={(t_end-t_ego_done)*1000:.1f}ms "
+                f"total={(t_end-t_timer_start)*1000:.1f}ms"
+            )
 
 def main(args=None):
     rclpy.init(args=args)

@@ -28,6 +28,7 @@ class MapDisplay(Node):
         self.declare_parameter('view_range_m',        3.0)      # Semi-side of ego canvas
         self.declare_parameter('turquoise_factor',    0.6)
         self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('enable_telemetry',    True)
 
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
@@ -39,6 +40,7 @@ class MapDisplay(Node):
         self.view_range_m       = self.get_parameter('view_range_m').value
         self.turquoise_factor   = self.get_parameter('turquoise_factor').value
         self.white_factor       = self.get_parameter('white_factor').value
+        self.debug_telemetry    = self.get_parameter('enable_telemetry').value
 
         # Dynamic canvas dimensions based on chosen resolutions
         self.canvas_px = int(2 * self.view_range_m / self.view_resolution)
@@ -199,12 +201,13 @@ class MapDisplay(Node):
 
         t_end = time.perf_counter()
 
-        self.get_logger().info(
-            f"[TIMER] "
-            f"ego={(t_ego_done-t_timer_start)*1000:.1f}ms "
-            f"grid_pub={(t_end-t_ego_done)*1000:.1f}ms "
-            f"total={(t_end-t_timer_start)*1000:.1f}ms"
-        )
+        if self.debug_telemetry:
+            self.get_logger().info(
+                f"[TIMER] "
+                f"ego={(t_ego_done-t_timer_start)*1000:.1f}ms "
+                f"grid_pub={(t_end-t_ego_done)*1000:.1f}ms "
+                f"total={(t_end-t_timer_start)*1000:.1f}ms"
+            )
 
 def main(args=None):
     rclpy.init(args=args)
