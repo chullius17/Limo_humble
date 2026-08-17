@@ -54,21 +54,9 @@ def generate_launch_description():
         parameters=[use_sim_time]
     )
 
-    tf_base = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='ai_static_tf_base_footprint_to_base_link',
-        arguments=['0', '0', '0.15', 
-                   '0', '0', '0',
-                    'base_footprint',
-                    'base_link'],
-        output='screen',
-        parameters=[use_sim_time]
-    )
-
     tf_launch = TimerAction(
         period=0.5,
-        actions=[tf_map_to_odom, tf_base]
+        actions=[tf_map_to_odom]
     )
 
     # =========================

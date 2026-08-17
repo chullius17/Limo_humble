@@ -166,7 +166,7 @@ class MissionCoordinator(Node):
         future = self.plan_client.call_async(req)
         future.add_done_callback(lambda f: self._on_plan_done(f, goal_handle))
 
-        # ── BLOCCA QUI finché _finalize non setta done_event ──────────────
+        # Block here until _finalize sets done_event.
         while not self.done_event.done():
             time.sleep(0.05)
 
@@ -183,14 +183,14 @@ class MissionCoordinator(Node):
 
         plan = future.result()
 
-        # pubblica goal ordinati
+        # Publish ordered goals.
         pa = PoseArray()
         pa.header.stamp = self.get_clock().now().to_msg()
         pa.header.frame_id = 'odom'
         pa.poses = [g.pose for g in plan.ordered_goals]
         self.ordered_goals_pub.publish(pa)
 
-        # pubblica ogni segmento di path
+        # Publish every path segment.
         for path in plan.paths:
             self.paths_pub.publish(path)
 
@@ -234,7 +234,7 @@ class MissionCoordinator(Node):
         follow_status = result.status
 
         if self.abort_requested:
-            # Il cancel del follow è andato a buon fine, ora abortisco il mission goal
+            # Follow cancellation succeeded; now abort the mission goal.
             self._log_event("ABORTED (follow canceled)")
             self.enable_pub.publish(Bool(data=False))
             self._call_reset()
@@ -287,12 +287,12 @@ class MissionCoordinator(Node):
         self._call_reset()
         self._log_event("ABORTED")
 
-        # Controlla lo stato prima di chiamare abort/canceled
+        # Check the state before calling abort or canceled.
         status = goal_handle.status
         if status == GoalStatus.STATUS_EXECUTING:
             goal_handle.abort()
         elif status == GoalStatus.STATUS_CANCELING:
-            goal_handle.canceled()   # rispetta il protocollo ROS2
+            goal_handle.canceled()   # Follow the ROS 2 action protocol.
 
         self._set_state(MissionState.WAITING)
         if not self.done_event.done():

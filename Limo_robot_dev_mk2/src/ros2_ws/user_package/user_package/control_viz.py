@@ -14,7 +14,7 @@ from limo_interfaces.srv import GenerateControlPlot
 
 
 # ─────────────────────────────────────────────
-#  PALETTE — un colore per goal (ciclica)
+#  PALETTE — CYCLIC COLOR PER GOAL
 # ─────────────────────────────────────────────
 
 GOAL_COLORS = [
@@ -37,7 +37,7 @@ def find_ros2_ws(start: Path):
 # ─────────────────────────────────────────────
 
 def build_time_axis(n_samples: int, goal_reach_times: list) -> np.ndarray:
-    """Asse temporale uniforme [0, T] con T = ultimo goal_reach_time."""
+    """Build a uniform [0, T] time axis, where T is the last goal reach time."""
     if goal_reach_times:
         T = goal_reach_times[-1]
     else:
@@ -46,17 +46,17 @@ def build_time_axis(n_samples: int, goal_reach_times: list) -> np.ndarray:
 
 
 def shade_goals(ax, goal_reach_times: list, n_goals: int, alpha: float = 0.12):
-    """Disegna bande verticali colorate per ogni sotto-traiettoria."""
+    """Draw colored vertical bands for each trajectory segment."""
     boundaries = [0.0] + list(goal_reach_times)
     for i in range(n_goals):
         x0 = boundaries[i]
         x1 = boundaries[i + 1] if i + 1 < len(boundaries) else boundaries[-1]
         ax.axvspan(x0, x1, color=goal_color(i), alpha=alpha)
-        # linea verticale di separazione
+        # Vertical separator.
         if i > 0:
             ax.axvline(x=x0, color=goal_color(i), linewidth=1.0,
                        linestyle='--', alpha=0.6)
-        # etichetta goal centrata nella banda
+        # Goal label centered within the band.
         mid = (x0 + x1) / 2.0
         ax.text(mid, 1.01, f'G{i+1}',
                 transform=ax.get_xaxis_transform(),
@@ -147,7 +147,7 @@ def plot_velocities(t, lin_vels, ang_vels, goal_reach_times, n_goals, output_dir
 
 def plot_summary(t, dist_errors, ang_errors, lin_vels, ang_vels,
                  goal_reach_times, n_goals, output_dir) -> str:
-    """4-panel summary in un unico jpg."""
+    """Create a single JPG containing the mission summary panels."""
     fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
 
     titles  = ['Distance Error [m]', 'Angular Error [deg]', 'Velocities']
@@ -165,7 +165,7 @@ def plot_summary(t, dist_errors, ang_errors, lin_vels, ang_vels,
         ax.set_ylabel(title, fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    # sovrapponi omega sull'ultimo pannello (asse destro)
+    # Overlay omega on the final panel using the right-hand axis.
     ax_omega = axes[2].twinx()
     ax_omega.plot(t, np.degrees(ang_vels), color='#f46d43',
                   linewidth=1.0, linestyle='--', alpha=0.8)
@@ -175,7 +175,7 @@ def plot_summary(t, dist_errors, ang_errors, lin_vels, ang_vels,
     axes[-1].set_xlabel('Time [s]')
     fig.suptitle('Mission Control Summary', fontsize=13, fontweight='bold')
 
-    # legenda goal unica in alto
+    # Shared goal legend at the top.
     fig.legend(handles=goal_legend(n_goals),
                loc='upper right', fontsize=8, bbox_to_anchor=(1.0, 0.98))
     fig.tight_layout(rect=[0, 0, 0.92, 0.96])
@@ -192,13 +192,20 @@ class ControlPlotService(Node):
     def __init__(self):
         super().__init__('control_plot_service')
 
+        self.declare_parameter('ai_mode', False)
+        self.ai_mode = self.get_parameter('ai_mode').value
+
         ws = find_ros2_ws(Path(__file__).resolve())
         if ws is not None:
             project_root = ws.parent.parent
-            self.output_dir = str(project_root / 'control_logs')
+            log_directory = 'ai_control_logs' if self.ai_mode else 'control_logs'
+            self.output_dir = str(project_root / log_directory)
         else:
-            self.output_dir = '/tmp/control_logs'
-            self.get_logger().warn('ros2_ws non trovato, uso /tmp/control_logs')
+            log_directory = 'ai_control_logs' if self.ai_mode else 'control_logs'
+            self.output_dir = str(Path('/tmp') / log_directory)
+            self.get_logger().warn(
+                f'ros2_ws not found; using {self.output_dir}'
+            )
 
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         self.get_logger().info(f'Plot output dir: {self.output_dir}')

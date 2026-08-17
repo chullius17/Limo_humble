@@ -19,16 +19,16 @@ def generate_launch_description():
 
     ai_mode_arg = DeclareLaunchArgument(
         'ai_mode',
-        default_value='false',
+        default_value='true',
         description='Use AI-specific control-log storage'
     )
 
     trajectory_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory('traj_package'),
+                get_package_share_directory('ai_traj_package'),
                 'launch',
-                'trajectory.launch.py'
+                'ai_trajectory.launch.py'
             )
         ),
         launch_arguments={'use_controller': use_controller}.items()

@@ -85,7 +85,7 @@ class MissionVisualizer(Node):
             10
         )
 
-        # ── QUEUED GOALS (dalla UI, non ancora inviati) ──────────────────
+        # ── QUEUED GOALS (FROM THE UI, NOT SENT YET) ────────────────────
         self.create_subscription(
             PoseArray,
             '/limo/mission/queued_goals',
@@ -151,7 +151,7 @@ class MissionVisualizer(Node):
     def goals_astar_cb(self, msg):
         self.get_logger().info(f"Received {len(msg.poses)} A* goals.")
         self.goals_astar = msg.poses
-        self.paths = []  # reset paths quando arriva una nuova missione
+        self.paths = []  # Reset paths when a new mission arrives.
 
     def path_cb(self, msg):
         self.paths.append(msg.poses)  # accumula invece di sovrascrivere
@@ -207,23 +207,23 @@ class MissionVisualizer(Node):
             if spacing_px > 0:
                 h_img, w_img = img.shape[:2]
 
-                # Origine della mappa in pixel immagine
-                # origin_x/y = coordinate odom del pixel (0,0) della mappa ROS
-                # Nel sistema immagine (dopo flip), row=0 è y_max
-                origin_col = 0  # col pixel corrispondente a info.origin.position.x
-                origin_row = 0  # row ROS corrispondente a info.origin.position.y
+                # Map origin in image pixels.
+                # origin_x/y are the odometry coordinates of pixel (0, 0).
+                # In the flipped image coordinate system, row 0 is y_max.
+                origin_col = 0  # Pixel column at info.origin.position.x.
+                origin_row = 0  # ROS row at info.origin.position.y.
 
-                # In world coords, la griglia parte da 0.0 (o dall'origine)
-                # Calcoliamo il primo offset in pixel rispetto all'origine della mappa
-                ox_m = info.origin.position.x  # x_world del pixel col=0
-                oy_m = info.origin.position.y  # y_world del pixel row=0
+                # In world coordinates, the grid starts at 0.0 (or the origin).
+                # Compute the first pixel offset relative to the map origin.
+                ox_m = info.origin.position.x  # World x at pixel column 0.
+                oy_m = info.origin.position.y  # World y at pixel row 0.
 
-                # Prima linea verticale a sinistra di x=0 world
+                # First vertical line to the left of world x=0.
                 first_col = int((-ox_m % spacing_m) / info.resolution)
                 if (-ox_m % spacing_m) < 0:
                     first_col += spacing_px
 
-                # Prima linea orizzontale sotto y=0 world (in coord immagine = sopra)
+                # First horizontal line below world y=0 (above in image coordinates).
                 first_row_ros = int((-oy_m % spacing_m) / info.resolution)
 
                 grid_color = (160, 160, 160)
@@ -233,7 +233,7 @@ class MissionVisualizer(Node):
                 font_thickness = 1
                 text_color = (140, 140, 140)
 
-                # ── LINEE VERTICALI (x = costante) ──
+                # ── VERTICAL LINES (constant x) ──
                 col = first_col
                 while col < w_img:
                     x_world = ox_m + col * info.resolution
@@ -245,12 +245,12 @@ class MissionVisualizer(Node):
                     # Drawing directly avoids a full-map copy for every line.
                     cv2.line(img, (col, 0), (col, h_img - 1), color, thickness)
 
-                    # Etichetta numerica: in basso nell'immagine
+                    # Numeric label at the bottom of the image.
                     label = f"{x_world:.1f}"
                     text_size = cv2.getTextSize(label, font, font_scale, font_thickness)[0]
                     tx = col - text_size[0] // 2
                     ty = h_img - 4
-                    # Piccolo sfondo semi-trasparente per leggibilità
+                    # Small background for readability.
                     cv2.rectangle(img,
                                 (tx - 1, ty - text_size[1] - 1),
                                 (tx + text_size[0] + 1, ty + 1),
@@ -260,8 +260,8 @@ class MissionVisualizer(Node):
 
                     col += spacing_px
 
-                # ── LINEE ORIZZONTALI (y = costante) ──
-                # In immagine (dopo flip): row_img = h_img - 1 - row_ros
+                # ── HORIZONTAL LINES (constant y) ──
+                # In the flipped image: row_img = h_img - 1 - row_ros.
                 row_ros = first_row_ros
                 while row_ros < h_img:
                     row_img = h_img - 1 - row_ros
@@ -306,9 +306,9 @@ class MissionVisualizer(Node):
             cv2.rectangle(img,
                         (px - half, py - half),
                         (px + half, py + half),
-                        (255, 80, 0),   # blu BGR
+                        (255, 80, 0),   # Blue in BGR.
                         2)
-            # numero d'ordine dentro il quadrato
+            # Queue position inside the square.
             cv2.putText(img, str(i + 1), (px - 4, py + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 80, 0), 1, cv2.LINE_AA)
 
@@ -324,19 +324,19 @@ class MissionVisualizer(Node):
             mx_nn, my_nn = self.world_to_map(x_nn, y_nn)
             px_nn, py_nn = self.map_to_image(mx_nn, my_nn)
 
-            # yaw dal quaternione
+            # Extract yaw from the quaternion.
             q = self.nn_pt.orientation
             yaw_nn = math.atan2(
                 2.0 * (q.w * q.z + q.x * q.y),
                 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             )
 
-            # freccia: 12px nella direzione di yaw (y flippata)
+            # Draw a 12 px arrow in the yaw direction (with flipped y).
             arrow_len = 12
             px_tip = int(px_nn + arrow_len * math.cos(yaw_nn))
-            py_tip = int(py_nn - arrow_len * math.sin(yaw_nn))  # minus per flip y
+            py_tip = int(py_nn - arrow_len * math.sin(yaw_nn))  # Minus due to flipped y.
 
-            cv2.circle(img, (px_nn, py_nn), 4, (0, 140, 255), -1)          # arancione
+            cv2.circle(img, (px_nn, py_nn), 4, (0, 140, 255), -1)          # Orange.
             cv2.arrowedLine(img, (px_nn, py_nn), (px_tip, py_tip),
                             (0, 140, 255), 2, tipLength=0.4)
 

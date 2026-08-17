@@ -18,7 +18,7 @@ class RouteCombinator(Node):
         self.declare_parameter('input_map_topic', '/map')
         self.declare_parameter('open_mask_topic', '/limo/ai_routes/selected_mask_grid_open')
         self.declare_parameter('center_road_mask_topic', '/limo/ai_routes/selected_mask_grid_center_road')
-        self.declare_parameter('output_coordinated_map_topic', '/limo/ai_routes/coordinated_map')
+        self.declare_parameter('output_coordinated_map_topic', '/limo/ai_routes_combinator/coordinated_map')
 
         # --- FETCH TOPIC CONFIGURATIONS ---
         input_map_topic = self.get_parameter('input_map_topic').value

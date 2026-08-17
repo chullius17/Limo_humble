@@ -7,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener, TransformException
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 import time
@@ -71,30 +72,30 @@ def astar_grid(grid, start, goal):
 
 
 def odom_to_pixel(ox, oy, info):
-    """Converte coordinate odom (metri) in pixel (row, col)."""
+    """Convert odometry coordinates (meters) to pixels (row, column)."""
     col = int((ox - info.origin.position.x) / info.resolution)
     row = int((oy - info.origin.position.y) / info.resolution)
-    # row=0 è il basso della mappa ROS, quindi non serve flipud qui:
-    # la grid_matrix è già in ordine ROS (row 0 = y minimo)
+    # row=0 is the bottom of the ROS map, so flipud is not needed here:
+    # grid_matrix is already in ROS order (row 0 = minimum y).
     return (row, col)
 
 def pixel_to_odom(row, col, info):
-    """Converte pixel (row, col) in coordinate odom (metri), centro del pixel."""
+    """Convert a pixel (row, column) to its center in odometry coordinates."""
     ox = info.origin.position.x + (col + 0.5) * info.resolution
     oy = info.origin.position.y + (row + 0.5) * info.resolution
     return (ox, oy)
 
 def snap_to_valid(pixel, grid, max_radius_px=30):
     """
-    Trova il pixel valido (costo <= OBSTACLE_THRESHOLD, != -1) più vicino
-    a `pixel` entro un raggio massimo, con BFS sull'intorno.
+    Find the nearest valid pixel (cost <= OBSTACLE_THRESHOLD and != -1)
+    within the maximum radius by searching the neighborhood with BFS.
     """
     row, col = pixel
     height, width = grid.shape
 
     if (0 <= row < height and 0 <= col < width and
             0 <= int(grid[row, col]) <= OBSTACLE_THRESHOLD):
-        return pixel  # già valido
+        return pixel  # Already valid.
 
     visited = set()
     queue = [(0, row, col)]  # (dist_Manhattan, r, c)
@@ -118,15 +119,15 @@ def snap_to_valid(pixel, grid, max_radius_px=30):
                     if (nr, nc) not in visited:
                         heapq.heappush(queue, (max(abs(nr - row), abs(nc - col)), nr, nc))
 
-    return None  # nessun pixel valido nel raggio
+    return None  # No valid pixel within the radius.
 
 
 def nearest_neighbor_ordering(start_px, goal_pixels, grid):
     """
-    Ordina i goal con greedy Nearest Neighbor a partire da start_px.
-    Restituisce (ordered_indices, ordered_pixels, paths)
-    dove paths[i] è il path A* da ordered_pixels[i-1] a ordered_pixels[i]
-    (paths[0] è da start_px al primo goal).
+    Order goals with a greedy nearest-neighbor search starting from start_px.
+    Return (ordered_indices, ordered_pixels, paths), where paths[i] is the A*
+    path from ordered_pixels[i-1] to ordered_pixels[i]. paths[0] runs from
+    start_px to the first goal.
     """
     remaining = list(enumerate(goal_pixels))  # (original_idx, pixel)
     current = start_px
@@ -143,8 +144,8 @@ def nearest_neighbor_ordering(start_px, goal_pixels, grid):
             path = astar_grid(grid, current, gpx)
             if path is None:
                 continue
-            # Costo del path = somma dei g_score simulata dalla lunghezza
-            # (usiamo len come proxy; per precisione si potrebbe ricalcolare)
+            # Use path length as a proxy for the sum of g-scores. Recompute the
+            # score here if greater precision is required.
             cost = len(path)
             if cost < best_cost:
                 best_cost = cost
@@ -152,7 +153,7 @@ def nearest_neighbor_ordering(start_px, goal_pixels, grid):
                 best_path = path
 
         if best_idx_in_remaining is None:
-            # Goal irraggiungibili: li scartiamo loggando
+            # No remaining goal is reachable; discard the rest.
             break
 
         orig_idx, gpx = remaining.pop(best_idx_in_remaining)
@@ -173,7 +174,10 @@ class AStarRefService(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.latest_costmap = None
 
-        self.declare_parameter('topic_map_sub', '/limo/ai_routes/coordinated_map')
+        self.declare_parameter(
+            'topic_map_sub',
+            '/limo/ai_routes_combinator/coordinated_map'
+        )
         self.topic_map_sub = self.get_parameter('topic_map_sub').value
 
         map_qos = QoSProfile(
@@ -193,16 +197,32 @@ class AStarRefService(Node):
             '/ai_plan_sequence_path',
             self.handle_sequence_planning
         )
+        self.health_pub = self.create_publisher(
+            String, '/limo/mission/health/astar', map_qos
+        )
+        self._map_ready_reported = False
+        self._publish_health('READY: waiting for costmap')
         self.get_logger().info('AStarRefService ready.')
+
+    def _publish_health(self, status):
+        self.health_pub.publish(String(data=status))
+        self.get_logger().info(f'[HEALTH] {status}')
 
     def map_callback(self, msg: OccupancyGrid):
         self.latest_costmap = msg
+        if not self._map_ready_reported:
+            self._map_ready_reported = True
+            self._publish_health(
+                f'READY: costmap received ({msg.info.width}x{msg.info.height}, '
+                f'frame={msg.header.frame_id})'
+            )
 
     def handle_sequence_planning(self, request: GetSequencePlan.Request, response: GetSequencePlan.Response):
 
         t0 = time.perf_counter()
         
         self.get_logger().info(f"Received request for {len(request.goals)} sequential objectives.")
+        self._publish_health(f'PLANNING: {len(request.goals)} requested goal(s)')
 
         # If costmap not yet received, wait a short time to allow late publishers
         # (transient_local / latched) to deliver the message and avoid races.
@@ -221,16 +241,19 @@ class AStarRefService(Node):
 
         if self.latest_costmap is None:
             self.get_logger().error("Costmap not available.")
+            self._publish_health('ERROR: costmap not available')
             return response
         if len(request.goals) == 0:
             self.get_logger().warn("Empty goal list.")
+            self._publish_health('ERROR: empty goal list')
             return response
 
-        # 1. ROBOT POSE dal TF
+        # 1. ROBOT POSE FROM TF
         try:
-            tf = self.tf_buffer.lookup_transform("odom", "base_footprint", rclpy.time.Time())
+            tf = self.tf_buffer.lookup_transform("odom", "base_link", rclpy.time.Time())
         except TransformException as e:
-            self.get_logger().error(f"TF odom->base_footprint failed: {e}")
+            self.get_logger().error(f"TF odom->base_link failed: {e}")
+            self._publish_health(f'ERROR: TF odom->base_link unavailable: {e}')
             return response
 
         robot_x = tf.transform.translation.x
@@ -251,9 +274,10 @@ class AStarRefService(Node):
         start_px = snap_to_valid(start_px, grid_matrix)
         if start_px is None:
             self.get_logger().error("Start position not snappable to valid cell.")
+            self._publish_health('ERROR: robot start is outside valid planning cells')
             return response
 
-        # 4. GOAL PIXELS — snap ciascuno al pixel valido più vicino
+        # 4. GOAL PIXELS — SNAP EACH GOAL TO THE NEAREST VALID PIXEL
         goal_pixels = []
         valid_goal_indices = []
         snapped_goals = []
@@ -272,6 +296,7 @@ class AStarRefService(Node):
 
         if not goal_pixels:
             self.get_logger().error("No valid goals after snapping.")
+            self._publish_health('ERROR: no requested goal is on a reachable cell')
             return response
 
         # 5. NEAREST NEIGHBOR ORDERING + A*
@@ -284,7 +309,7 @@ class AStarRefService(Node):
         frame = self.latest_costmap.header.frame_id
 
         for seg_idx, (orig_idx, path_px) in enumerate(zip(ordered_indices, paths)):
-            # --- Path ROS msg per questo segmento ---
+            # --- ROS Path message for this segment ---
             ros_path = Path()
             ros_path.header.stamp = now
             ros_path.header.frame_id = frame
@@ -302,7 +327,7 @@ class AStarRefService(Node):
 
             response.paths.append(ros_path)
 
-            # --- Goal ordinato corrispondente ---
+            # --- Corresponding ordered goal ---
             row, col = ordered_pixels[seg_idx]
 
             gx, gy = pixel_to_odom(row, col, info)
@@ -327,6 +352,13 @@ class AStarRefService(Node):
         self.get_logger().info(
             f"Planning execution time: {elapsed_ms:.2f} ms"
         )
+        if response.paths:
+            self._publish_health(
+                f'OK: planned {len(response.paths)}/{len(request.goals)} segment(s) '
+                f'in {elapsed_ms:.1f} ms'
+            )
+        else:
+            self._publish_health('ERROR: A* returned no path')
         return response
 
 

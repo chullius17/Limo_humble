@@ -342,10 +342,10 @@ class MissionCoordinator(Node):
         self.follow_handle = handle
 
         if self.abort_requested:
-            self.get_logger().warn("Abort già richiesto → cancel follow immediato")
+            self.get_logger().warn("Abort already requested; canceling follow immediately")
             handle.cancel_goal_async()
-            # non aspettare il result, _finalize arriverà da _on_follow_done
-            # oppure forza qui:
+            # Do not wait for the result: _on_follow_done will call _finalize.
+            # Force finalization here as a safeguard.
             self._finalize(goal_handle, "ABORT", "Aborted before follow started")
             return
 
@@ -400,7 +400,7 @@ class MissionCoordinator(Node):
             )
             return
     
-        # ── genera i plot prima di finalizzare ──
+        # Generate plots before finalizing.
         inner = result.result  # FollowSequencePlan.Result
     
         if self.plot_client.wait_for_service(timeout_sec=2.0):
@@ -416,7 +416,7 @@ class MissionCoordinator(Node):
             plot_future = self.plot_client.call_async(req)
             plot_future.add_done_callback(self._on_plot_done)
         else:
-            self.get_logger().warn("ControlPlotService non disponibile, skip plot")
+            self.get_logger().warn("ControlPlotService unavailable; skipping plots")
     
         self._finalize(goal_handle, "SUCCESS", "Mission completed")
  
