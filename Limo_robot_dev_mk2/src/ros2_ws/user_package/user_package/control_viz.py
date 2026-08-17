@@ -194,7 +194,8 @@ class ControlPlotService(Node):
 
         ws = find_ros2_ws(Path(__file__).resolve())
         if ws is not None:
-            self.output_dir = str(ws / 'src' / 'control_logs')
+            project_root = ws.parent.parent
+            self.output_dir = str(project_root / 'control_logs')
         else:
             self.output_dir = '/tmp/control_logs'
             self.get_logger().warn('ros2_ws non trovato, uso /tmp/control_logs')
