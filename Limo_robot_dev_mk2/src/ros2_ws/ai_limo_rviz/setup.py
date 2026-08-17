@@ -2,7 +2,7 @@ from setuptools import setup
 from glob import glob
 import os
 
-package_name = 'ai_traj_package'
+package_name = 'ai_limo_rviz'
 
 setup(
     name=package_name,
@@ -23,10 +23,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'ai_routes             = ai_traj_package.ai_routes_builder:main',
-            'ai_route_combinator   = ai_traj_package.ai_route_combinator:main',
-            'ai_astar              = ai_traj_package.ai_astar_server:main',
-            'ai_coordinator        = ai_traj_package.ai_coordinator:main'
         ],
     },
 )
