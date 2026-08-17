@@ -79,9 +79,6 @@ class RouteCombinator(Node):
 
         self.get_logger().info('Routes Coordinator Node successfully initialized.')
 
-        # --- TIMER ---
-        self.timer = self.create_timer(0.05, self.timer_callback)
-
     # --- CALLBACK METHODS ---
 
     def input_map_callback(self, msg: OccupancyGrid):
@@ -186,19 +183,7 @@ class RouteCombinator(Node):
         img_msg = self.bridge.cv2_to_imgmsg(vis, encoding="bgr8")
         img_msg.header = coordinated_msg.header
         self.debug_pub.publish(img_msg)
-
-    def timer_callback(self):
-
-        if self.coordinated_map_msg is None:
-            return
-
-        self.coordinated_map_msg.header.stamp = (
-            self.get_clock().now().to_msg()
-        )
-
-        self.coordinated_map_pub.publish(
-            self.coordinated_map_msg
-        )
+        self.coordinated_map_pub.publish(coordinated_msg)
 
 def main(args=None):
     rclpy.init(args=args)

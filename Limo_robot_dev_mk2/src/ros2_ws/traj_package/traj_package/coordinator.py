@@ -3,8 +3,9 @@ from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from geometry_msgs.msg import PoseArray
 from nav_msgs.msg import Path
 from action_msgs.msg import GoalStatus
@@ -40,9 +41,11 @@ class MissionCoordinator(Node):
         # ---------------- PARAMETERS ----------------
         self.declare_parameter('plan_service', '/plan_sequence_path')
         self.declare_parameter('follow_action', '/follow_sequence_plan')
+        self.declare_parameter('use_controller', True)
 
         self.plan_service = self.get_parameter('plan_service').value
         self.follow_action = self.get_parameter('follow_action').value
+        self.use_controller = self.get_parameter('use_controller').value
 
         # ---------------- INTERNAL STATE ----------------
         self.state = MissionState.WAITING
@@ -101,6 +104,26 @@ class MissionCoordinator(Node):
         self.ordered_goals_pub = self.create_publisher(PoseArray, '/limo/mission/goals_astar', 10)
         self.paths_pub = self.create_publisher(Path, '/limo/mission/paths', 10)
 
+        health_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE
+        )
+        self.diagnostics_pub = self.create_publisher(
+            String, '/mission/diagnostics', health_qos
+        )
+        self.controller_attached_pub = self.create_publisher(
+            Bool, '/mission/controller_attached', health_qos
+        )
+        self.astar_health = 'UNKNOWN: no A* health received'
+        self.controller_health = 'UNKNOWN: no controller health received'
+        self.astar_health_sub = self.create_subscription(
+            String, '/mission/health/astar', self._on_astar_health, health_qos
+        )
+        self.controller_health_sub = self.create_subscription(
+            String, '/mission/health/controller', self._on_controller_health, health_qos
+        )
+
         # ---------------- ACTION SERVER ----------------
         self.action_server = ActionServer(
             self,
@@ -112,7 +135,25 @@ class MissionCoordinator(Node):
             callback_group=self.cb_group
         )
 
-        self.get_logger().info("MissionCoordinator READY")
+        self.controller_attached_pub.publish(Bool(data=self.use_controller))
+        controller_mode = 'ATTACHED' if self.use_controller else 'DETACHED'
+        self._publish_diagnostic('CONTROLLER LINK', controller_mode)
+        self.get_logger().info(
+            f"MissionCoordinator READY - controller {controller_mode}"
+        )
+
+    def _publish_diagnostic(self, source, status):
+        message = f'{source}: {status}'
+        self.diagnostics_pub.publish(String(data=message))
+        self.get_logger().info(f'[DIAGNOSTIC] {message}')
+
+    def _on_astar_health(self, msg):
+        self.astar_health = msg.data
+        self._publish_diagnostic('A*', msg.data)
+
+    def _on_controller_health(self, msg):
+        self.controller_health = msg.data
+        self._publish_diagnostic('CONTROLLER', msg.data)
 
 
 # =====================================================
@@ -171,7 +212,10 @@ class MissionCoordinator(Node):
 
         # Call planner service
         if not self.plan_client.wait_for_service(timeout_sec=5.0):
-            self._finalize(goal_handle, "ABORT", "Planner unavailable")
+            self._finalize(
+                goal_handle, "ABORT",
+                f"Planner unavailable; last A* health: {self.astar_health}"
+            )
             return self.result
 
         req = GetSequencePlan.Request()
@@ -222,6 +266,13 @@ class MissionCoordinator(Node):
             self._finalize(goal_handle, "ABORT", f"Planner error: {e}")
             return
 
+        if not plan.ordered_goals or not plan.paths:
+            self._finalize(
+                goal_handle, "ABORT",
+                f"Planner returned an empty plan; last A* health: {self.astar_health}"
+            )
+            return
+
         # Publish ordered goals
         pa = PoseArray()
         pa.header.stamp = self.get_clock().now().to_msg()
@@ -232,6 +283,14 @@ class MissionCoordinator(Node):
         # Publish paths
         for path in plan.paths:
             self.paths_pub.publish(path)
+
+        if not self.use_controller:
+            self._finalize(
+                goal_handle,
+                "SUCCESS",
+                "Planning completed; controller detached by use_controller flag"
+            )
+            return
 
         self._set_state(MissionState.MOVING)
         self._start_follow(goal_handle, plan.ordered_goals, plan.paths)
@@ -244,7 +303,10 @@ class MissionCoordinator(Node):
     def _start_follow(self, goal_handle, ordered_goals, paths):
 
         if not self.follow_client.wait_for_server(timeout_sec=5.0):
-            self._finalize(goal_handle, "ABORT", "Follow server unavailable")
+            self._finalize(
+                goal_handle, "ABORT",
+                f"Follow server unavailable; last controller health: {self.controller_health}"
+            )
             return
 
         goal = FollowSequencePlan.Goal()
@@ -262,7 +324,15 @@ class MissionCoordinator(Node):
 
     def _on_follow_response(self, future, goal_handle):
 
-        handle = future.result()
+        try:
+            handle = future.result()
+        except Exception as exc:
+            self.follow_goal_future = None
+            self._finalize(
+                goal_handle, "ABORT",
+                f"Controller rejected goal with error: {exc}; health: {self.controller_health}"
+            )
+            return
         self.follow_goal_future = None
 
         if not handle.accepted:
@@ -309,7 +379,14 @@ class MissionCoordinator(Node):
         if self._finalized:
             return
     
-        result = future.result()
+        try:
+            result = future.result()
+        except Exception as exc:
+            self._finalize(
+                goal_handle, "ABORT",
+                f"Controller result error: {exc}; health: {self.controller_health}"
+            )
+            return
         status = result.status
     
         if self.abort_requested:
@@ -317,7 +394,10 @@ class MissionCoordinator(Node):
             return
     
         if status != GoalStatus.STATUS_SUCCEEDED:
-            self._finalize(goal_handle, "ABORT", f"Follow failed ({status})")
+            self._finalize(
+                goal_handle, "ABORT",
+                f"Follow failed ({status}); controller health: {self.controller_health}"
+            )
             return
     
         # ── genera i plot prima di finalizzare ──
@@ -391,6 +471,8 @@ class MissionCoordinator(Node):
 
         # Set result
         self.result.success = (mode == "SUCCESS")
+        self.result.message = message
+        self._publish_diagnostic('MISSION', f'{mode}: {message}')
 
         # Update ROS action state
         if mode == "SUCCESS":
@@ -423,7 +505,8 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

@@ -8,10 +8,11 @@ from limo_interfaces.srv import MissionCommand
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 
 # Correct and explicit configuration for PyQt5
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot, QEvent
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QColor, QFont, QPainter
 from PyQt5.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -55,6 +56,18 @@ class MissionGuiNode(Node):
             10
         )
 
+        diagnostics_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE
+        )
+        self.diagnostics_sub = self.create_subscription(
+            String,
+            '/mission/diagnostics',
+            self._diagnostics_callback,
+            diagnostics_qos
+        )
+
     def send_cmd_async(self, command_str: str):
         """Sends a service request asynchronously without blocking the GUI."""
         if not self.cli.service_is_ready():
@@ -82,6 +95,9 @@ class MissionGuiNode(Node):
     def _callback_goal(self, msg: String):
         self.signals.update_goal.emit(msg.data)
 
+    def _diagnostics_callback(self, msg: String):
+        self.signals.append_msg.emit(f"[HEALTH] {msg.data}")
+
     def _image_callback(self, msg: Image):
         if msg.encoding == 'rgb8':
             # Use QImage.Format_RGB888 for compatibility with older PyQt5 versions
@@ -95,6 +111,29 @@ class MissionGuiNode(Node):
                 
             q_img = QImage(bytes(bgr_data), msg.width, msg.height, msg.step, QImage.Format_RGB888)
             self.signals.update_image.emit(q_img.copy())
+
+
+class CommandTextEdit(QTextEdit):
+    """
+    QTextEdit with a gray, italic placeholder.
+    Qt's built-in setPlaceholderText() always uses the widget's normal font,
+    so the placeholder is painted manually here instead.
+    """
+
+    def __init__(self, placeholder_text="", parent=None):
+        super().__init__(parent)
+        self._placeholder_text = placeholder_text
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self.toPlainText():
+            painter = QPainter(self.viewport())
+            painter.setPen(QColor(160, 160, 160))
+            font = QFont(self.font())
+            font.setItalic(True)
+            painter.setFont(font)
+            rect = self.viewport().rect().adjusted(4, 4, -4, -4)
+            painter.drawText(rect, Qt.AlignLeft | Qt.TextWordWrap, self._placeholder_text)
 
 
 class GuiSignals(QWidget):
@@ -114,7 +153,7 @@ class MissionMainWindow(QMainWindow):
         self.signals = gui_signals
 
         self.setWindowTitle("Limo Mission Control Panel")
-        self.resize(800, 650)
+        self.resize(900, 650)
 
         # Connect signals to slots
         self.signals.update_state.connect(self.set_state)
@@ -179,11 +218,31 @@ class MissionMainWindow(QMainWindow):
         # =====================================================
         right_layout = QVBoxLayout()
 
-        self.cmd_input = QTextEdit()
-        self.cmd_input.setPlaceholderText("Write the add command here...\nExample:\nadd 1.0 2.5 90\n\n[Press ENTER to insert the goal]")
+        self.commands_help = QTextEdit()
+        self.commands_help.setReadOnly(True)
+        self.commands_help.setHtml(
+            "<h3>COMMANDS</h3>"
+            "<p><b>add X Y [YAW]</b><br>"
+            "Adds a goal to the queue.<br>"
+            "Example: <code>add 1.0 2.5 90</code></p>"
+            "<p><b>list</b><br>Shows the queued goals.</p>"
+            "<p><b>clear</b><br>Clears the goal queue.</p>"
+            "<p><b>send</b><br>Sends the mission.</p>"
+            "<p><b>pause / resume</b><br>Stops or resumes the robot.</p>"
+            "<p><b>abort</b><br>Cancels the active mission.</p>"
+            "<p><i>Type the command in the box below and press ENTER.</i></p>"
+        )
+        self.commands_help.setStyleSheet(
+            "border: 1px solid black; background-color: #f4f4f4; "
+            "color: #202020; padding: 4px;"
+        )
+        right_layout.addWidget(self.commands_help, stretch=1)
+
+        self.cmd_input = CommandTextEdit("add X Y [YAW]  —  press ENTER")
         self.cmd_input.setStyleSheet("border: 1px solid black; background-color: #ffffff; color: #000000;")
+        self.cmd_input.setFixedHeight(58)
         self.cmd_input.installEventFilter(self)
-        right_layout.addWidget(self.cmd_input, stretch=4)
+        right_layout.addWidget(self.cmd_input)
 
         self.btn_send = QPushButton("SEND")
         self.btn_abort = QPushButton("ABORT")
@@ -211,7 +270,7 @@ class MissionMainWindow(QMainWindow):
         # =====================================================
         self.msg_log = QTextEdit()
         self.msg_log.setReadOnly(True)
-        self.msg_log.setPlaceholderText("msgs output log Window...")
+        self.msg_log.setPlaceholderText("Message log output...")
         self.msg_log.setStyleSheet("border: 1px solid black; background-color: #2b2b2b; color: #a9b7c6;")
         self.msg_log.setFixedHeight(130)
         

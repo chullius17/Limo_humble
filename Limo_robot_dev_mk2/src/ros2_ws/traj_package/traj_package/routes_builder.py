@@ -25,7 +25,7 @@ class RoutesBuilder(Node):
         self.declare_parameter('high_cost_image_topic', '/limo/traj_package/routes_builder/high_cost_heatmap')
         self.declare_parameter('debug_distance_topic', '/limo/traj_package/routes_builder/debug_distance_heatmap')
         self.declare_parameter('robot_frame', 'base_footprint')
-        self.declare_parameter('update_rate', 0.05) # 20 Hz
+        self.declare_parameter('update_rate', 0.1)  # 10 Hz for debug images
         self.declare_parameter('mask_occupancy_topic', '/limo/traj_package/routes_builder/selected_mask_grid')
 
         # FLAG: OPEN or CENTER_ROAD
@@ -258,6 +258,13 @@ class RoutesBuilder(Node):
         mask_grid_msg.data = output_grid.flatten().tolist()
         self.mask_occupancy_msg = mask_grid_msg
 
+        # The selected mask changes only when the source map changes.  Publishing
+        # it here avoids forcing the downstream combinator to rebuild a full
+        # occupancy grid on every visualization frame.
+        mask_grid_msg.header.stamp = self.get_clock().now().to_msg()
+        mask_grid_msg.header.frame_id = msg.header.frame_id
+        self.mask_grid_pub.publish(mask_grid_msg)
+
         # --- 7. FLIP AND ENFORCE CONTINUOUS LAYOUT TO BUFFER ---
         self.base_heatmap_img = np.ascontiguousarray(np.flipud(full_color))
         self.high_cost_heatmap_img = np.ascontiguousarray(np.flipud(high_cost_color))
@@ -334,12 +341,6 @@ class RoutesBuilder(Node):
         msg_debug.header.stamp = timestamp
         msg_debug.header.frame_id = msg.header.frame_id
         self.debug_distance_pub.publish(msg_debug)
-
-        # 4. Selected Mask Occupancy Grid
-        if self.mask_occupancy_msg is not None:
-            self.mask_occupancy_msg.header.stamp = timestamp
-            self.mask_occupancy_msg.header.frame_id = msg.header.frame_id
-            self.mask_grid_pub.publish(self.mask_occupancy_msg)
 
 
 def main(args=None):

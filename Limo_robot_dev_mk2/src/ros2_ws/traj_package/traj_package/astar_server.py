@@ -7,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener, TransformException
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 import time
@@ -173,7 +174,7 @@ class AStarRefService(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.latest_costmap = None
 
-        self.declare_parameter('topic_map_sub', '/limo/routes/coordinated_map')
+        self.declare_parameter('topic_map_sub', '/limo/traj_package/routes_combinator/coordinated_map')
         self.topic_map_sub = self.get_parameter('topic_map_sub').value
 
         map_qos = QoSProfile(
@@ -193,16 +194,32 @@ class AStarRefService(Node):
             '/plan_sequence_path',
             self.handle_sequence_planning
         )
+        self.health_pub = self.create_publisher(
+            String, '/mission/health/astar', map_qos
+        )
+        self._map_ready_reported = False
+        self._publish_health('READY: waiting for costmap')
         self.get_logger().info('AStarRefService ready.')
+
+    def _publish_health(self, status):
+        self.health_pub.publish(String(data=status))
+        self.get_logger().info(f'[HEALTH] {status}')
 
     def map_callback(self, msg: OccupancyGrid):
         self.latest_costmap = msg
+        if not self._map_ready_reported:
+            self._map_ready_reported = True
+            self._publish_health(
+                f'READY: costmap received ({msg.info.width}x{msg.info.height}, '
+                f'frame={msg.header.frame_id})'
+            )
 
     def handle_sequence_planning(self, request: GetSequencePlan.Request, response: GetSequencePlan.Response):
 
         t0 = time.perf_counter()
         
         self.get_logger().info(f"Received request for {len(request.goals)} sequential objectives.")
+        self._publish_health(f'PLANNING: {len(request.goals)} requested goal(s)')
 
         # If costmap not yet received, wait a short time to allow late publishers
         # (transient_local / latched) to deliver the message and avoid races.
@@ -221,16 +238,19 @@ class AStarRefService(Node):
 
         if self.latest_costmap is None:
             self.get_logger().error("Costmap not available.")
+            self._publish_health('ERROR: costmap not available')
             return response
         if len(request.goals) == 0:
             self.get_logger().warn("Empty goal list.")
+            self._publish_health('ERROR: empty goal list')
             return response
 
         # 1. ROBOT POSE dal TF
         try:
-            tf = self.tf_buffer.lookup_transform("odom", "base_footprint", rclpy.time.Time())
+            tf = self.tf_buffer.lookup_transform("odom", "base_link", rclpy.time.Time())
         except TransformException as e:
-            self.get_logger().error(f"TF odom->base_footprint failed: {e}")
+            self.get_logger().error(f"TF odom->base_link failed: {e}")
+            self._publish_health(f'ERROR: TF odom->base_link unavailable: {e}')
             return response
 
         robot_x = tf.transform.translation.x
@@ -251,6 +271,7 @@ class AStarRefService(Node):
         start_px = snap_to_valid(start_px, grid_matrix)
         if start_px is None:
             self.get_logger().error("Start position not snappable to valid cell.")
+            self._publish_health('ERROR: robot start is outside valid planning cells')
             return response
 
         # 4. GOAL PIXELS — snap ciascuno al pixel valido più vicino
@@ -272,6 +293,7 @@ class AStarRefService(Node):
 
         if not goal_pixels:
             self.get_logger().error("No valid goals after snapping.")
+            self._publish_health('ERROR: no requested goal is on a reachable cell')
             return response
 
         # 5. NEAREST NEIGHBOR ORDERING + A*
@@ -327,6 +349,13 @@ class AStarRefService(Node):
         self.get_logger().info(
             f"Planning execution time: {elapsed_ms:.2f} ms"
         )
+        if response.paths:
+            self._publish_health(
+                f'OK: planned {len(response.paths)}/{len(request.goals)} segment(s) '
+                f'in {elapsed_ms:.1f} ms'
+            )
+        else:
+            self._publish_health('ERROR: A* returned no path')
         return response
 
 

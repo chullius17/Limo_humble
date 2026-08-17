@@ -157,7 +157,6 @@ class MissionVisualizer(Node):
         self.paths.append(msg.poses)  # accumula invece di sovrascrivere
 
     def ref_cb(self, msg):
-        self.get_logger().info(f"Controller is working: the moving reference will be projected.")
         self.ref_pt = msg.pose
 
     def nn_cb(self, msg):
@@ -243,9 +242,8 @@ class MissionVisualizer(Node):
                     thickness = 1 if is_axis else 1
                     alpha = 0.5 if is_axis else 0.25
 
-                    overlay = img.copy()
-                    cv2.line(overlay, (col, 0), (col, h_img - 1), color, thickness)
-                    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+                    # Drawing directly avoids a full-map copy for every line.
+                    cv2.line(img, (col, 0), (col, h_img - 1), color, thickness)
 
                     # Etichetta numerica: in basso nell'immagine
                     label = f"{x_world:.1f}"
@@ -253,12 +251,10 @@ class MissionVisualizer(Node):
                     tx = col - text_size[0] // 2
                     ty = h_img - 4
                     # Piccolo sfondo semi-trasparente per leggibilità
-                    bg_overlay = img.copy()
-                    cv2.rectangle(bg_overlay,
+                    cv2.rectangle(img,
                                 (tx - 1, ty - text_size[1] - 1),
                                 (tx + text_size[0] + 1, ty + 1),
                                 (50, 50, 50), -1)
-                    cv2.addWeighted(bg_overlay, 0.4, img, 0.6, 0, img)
                     cv2.putText(img, label, (tx, ty),
                                 font, font_scale, text_color, font_thickness, cv2.LINE_AA)
 
@@ -274,21 +270,17 @@ class MissionVisualizer(Node):
                     color = axis_color if is_axis else grid_color
                     alpha = 0.5 if is_axis else 0.25
 
-                    overlay = img.copy()
-                    cv2.line(overlay, (0, row_img), (w_img - 1, row_img), color, 1)
-                    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+                    cv2.line(img, (0, row_img), (w_img - 1, row_img), color, 1)
 
                     label = f"{y_world:.1f}"
                     text_size = cv2.getTextSize(label, font, font_scale, font_thickness)[0]
                     tx = 3
                     ty = row_img + text_size[1] // 2
                     ty = max(text_size[1] + 2, min(ty, h_img - 3))
-                    bg_overlay = img.copy()
-                    cv2.rectangle(bg_overlay,
+                    cv2.rectangle(img,
                                 (tx - 1, ty - text_size[1] - 1),
                                 (tx + text_size[0] + 1, ty + 1),
                                 (50, 50, 50), -1)
-                    cv2.addWeighted(bg_overlay, 0.4, img, 0.6, 0, img)
                     cv2.putText(img, label, (tx, ty),
                                 font, font_scale, text_color, font_thickness, cv2.LINE_AA)
 

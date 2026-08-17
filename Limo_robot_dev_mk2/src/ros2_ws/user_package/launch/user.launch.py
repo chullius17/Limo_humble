@@ -33,6 +33,6 @@ def generate_launch_description():
     return LaunchDescription([
         visualizer,
         ctrl_viz,
-        user_srv,
+        # user_srv,
         gui
     ])

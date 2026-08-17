@@ -10,8 +10,9 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.action.server import ServerGoalHandle
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from geometry_msgs.msg import Twist, PoseStamped
 from tf2_ros import Buffer, TransformListener, TransformException
 
@@ -48,7 +49,7 @@ class FollowSequencePlanServer(Node):
         super().__init__('follow_sequence_plan_server')
 
         self.declare_parameter('cmd_vel_topic',          '/cmd_vel')
-        self.declare_parameter('robot_frame',            'base_footprint')
+        self.declare_parameter('robot_frame',            'base_link')
         self.declare_parameter('world_frame',            'odom')
 
         self.declare_parameter('pursuit_speed',           0.15)   # m/s del punto mobile
@@ -95,6 +96,18 @@ class FollowSequencePlanServer(Node):
         self.nn_pub = self.create_publisher(PoseStamped, '/limo/control/nearest_point', 10)
         self.cmd_pub    = self.create_publisher(Twist, self.cmd_vel_topic, 10)
 
+        health_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE
+        )
+        self.health_pub = self.create_publisher(
+            String, '/mission/health/controller', health_qos
+        )
+        self._last_health = None
+        self._last_health_category = None
+        self._last_health_time = 0.0
+
         self._cb_group = ReentrantCallbackGroup()
         self._action_server = ActionServer(
             self,
@@ -117,12 +130,33 @@ class FollowSequencePlanServer(Node):
             10
         )
 
+        self._publish_health('READY: follow action available')
         self.get_logger().info('FollowSequencePlanServer ready.')
+
+    def _publish_health(self, status):
+        now = time.monotonic()
+        category = status.split(':', 1)[0]
+        if status == self._last_health:
+            return
+        if (
+            category == self._last_health_category
+            and category != 'ERROR'
+            and now - self._last_health_time < 1.0
+        ):
+            return
+        self._last_health = status
+        self._last_health_category = category
+        self._last_health_time = now
+        self.health_pub.publish(String(data=status))
+        self.get_logger().info(f'[HEALTH] {status}')
 
     # ── ACTION CALLBACKS ──────────────────────
 
     def goal_callback(self, goal_request):
         self.get_logger().info('New goal request received.')
+        self._publish_health(
+            f'GOAL_RECEIVED: {len(goal_request.paths)} path segment(s)'
+        )
         return GoalResponse.ACCEPT
 
     def cancel_callback(self, goal_handle):
@@ -145,9 +179,31 @@ class FollowSequencePlanServer(Node):
     # ── EXECUTE ───────────────────────────────
 
     def execute_callback(self, goal_handle: ServerGoalHandle):
+        try:
+            return self._execute_callback_impl(goal_handle)
+        except Exception as exc:
+            self._stop_robot()
+            self._publish_health(f'ERROR: controller exception: {exc}')
+            self.get_logger().error(
+                f'Controller execution failed: {type(exc).__name__}: {exc}'
+            )
+            if goal_handle.is_active:
+                goal_handle.abort()
+            return FollowSequencePlan.Result()
+
+    def _execute_callback_impl(self, goal_handle: ServerGoalHandle):
 
         ordered_goals = goal_handle.request.ordered_goals
         paths         = goal_handle.request.paths
+
+        if not ordered_goals or not paths:
+            self._publish_health('ERROR: empty goals or paths received')
+            goal_handle.abort()
+            return FollowSequencePlan.Result()
+
+        self._publish_health(
+            f'ACTIVE: following {len(paths)} path segment(s)'
+        )
 
         all_dist_errors  = []
         all_ang_errors   = []
@@ -183,6 +239,9 @@ class FollowSequencePlanServer(Node):
 
             if len(waypoints) < 2:
                 self.get_logger().warn(f'Goal {goal_idx+1}: path troppo corto, skip.')
+                self._publish_health(
+                    f'ERROR: path {goal_idx + 1} has only {len(waypoints)} waypoint(s)'
+                )
                 continue
 
             # ── crea il pursuit point per questo segmento ──
@@ -193,8 +252,6 @@ class FollowSequencePlanServer(Node):
             # ── CONTROL LOOP ──
             while rclpy.ok():
                 
-                self.get_logger().info(f"[LOOP] enabled={self._enabled} cancel={goal_handle.is_cancel_requested}") 
-
                 # ── CANCEL: sempre prioritario ─────────────────────
                 if goal_handle.is_cancel_requested:
                     self.get_logger().warn("[LOOP] CANCEL DETECTED → uscita")
@@ -215,6 +272,9 @@ class FollowSequencePlanServer(Node):
                     )
                 except TransformException as e:
                     self.get_logger().warn(f'TF not available: {e}')
+                    self._publish_health(
+                        f'WAITING_TF: {self.world_frame}->{self.robot_frame}: {e}'
+                    )
                     rate.sleep()
                     continue
 
@@ -293,6 +353,11 @@ class FollowSequencePlanServer(Node):
                 gamma = max(-self.max_omega, min(self.max_omega, gamma))
 
                 self._send_cmd(v_star, gamma)
+                self._publish_health(
+                    f'COMMANDING: goal={goal_idx + 1}/{len(ordered_goals)}, '
+                    f'v={v_star:.3f} m/s, omega={gamma:.3f} rad/s, '
+                    f'distance={dist_to_goal:.3f} m'
+                )
 
                 all_dist_errors.append(e_lin_log)
                 all_ang_errors.append(e_ang_log)
@@ -342,6 +407,7 @@ class FollowSequencePlanServer(Node):
 
         goal_handle.succeed()
         self._stop_robot()
+        self._publish_health('READY: sequence completed')
         self.get_logger().info('Sequential plan completed.')
         return result
 
