@@ -204,10 +204,10 @@ class ControlPlotService(Node):
 
         self.srv = self.create_service(
             GenerateControlPlot,
-            '/mission/generate_control_plot',
+            '/limo/mission/generate_control_plot',
             self._handle
         )
-        self.get_logger().info('ControlPlotService ready on /mission/generate_control_plot')
+        self.get_logger().info('ControlPlotService ready on /limo/mission/generate_control_plot')
 
     def _handle(self, request, response):
         try:

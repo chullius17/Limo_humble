@@ -83,7 +83,7 @@ class MissionCoordinator(Node):
 
         self.plot_client = self.create_client(
             GenerateControlPlot,
-            '/mission/generate_control_plot',
+            '/limo/mission/generate_control_plot',
             callback_group=self.cb_group
         )
         
@@ -94,12 +94,12 @@ class MissionCoordinator(Node):
         # ---------------- TOPICS ----------------
         self.pause_sub = self.create_subscription(
             Bool,
-            '/mission/pause',
+            '/limo/mission/pause',
             self._on_pause,
             10
         )
 
-        self.enable_pub = self.create_publisher(Bool, '/mission/enable', 10)
+        self.enable_pub = self.create_publisher(Bool, '/limo/mission/enable', 10)
         self.goals_pub = self.create_publisher(PoseArray, '/limo/mission/goals', 10)
         self.ordered_goals_pub = self.create_publisher(PoseArray, '/limo/mission/goals_astar', 10)
         self.paths_pub = self.create_publisher(Path, '/limo/mission/paths', 10)
@@ -110,25 +110,25 @@ class MissionCoordinator(Node):
             reliability=ReliabilityPolicy.RELIABLE
         )
         self.diagnostics_pub = self.create_publisher(
-            String, '/mission/diagnostics', health_qos
+            String, '/limo/mission/diagnostics', health_qos
         )
         self.controller_attached_pub = self.create_publisher(
-            Bool, '/mission/controller_attached', health_qos
+            Bool, '/limo/mission/controller_attached', health_qos
         )
         self.astar_health = 'UNKNOWN: no A* health received'
         self.controller_health = 'UNKNOWN: no controller health received'
         self.astar_health_sub = self.create_subscription(
-            String, '/mission/health/astar', self._on_astar_health, health_qos
+            String, '/limo/mission/health/astar', self._on_astar_health, health_qos
         )
         self.controller_health_sub = self.create_subscription(
-            String, '/mission/health/controller', self._on_controller_health, health_qos
+            String, '/limo/mission/health/controller', self._on_controller_health, health_qos
         )
 
         # ---------------- ACTION SERVER ----------------
         self.action_server = ActionServer(
             self,
             Mission,
-            '/mission',
+            '/limo/mission',
             execute_callback=self._execute,
             goal_callback=self._accept_goal,
             cancel_callback=self._cancel_goal,

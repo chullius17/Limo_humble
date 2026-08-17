@@ -195,7 +195,7 @@ class AStarRefService(Node):
             self.handle_sequence_planning
         )
         self.health_pub = self.create_publisher(
-            String, '/mission/health/astar', map_qos
+            String, '/limo/mission/health/astar', map_qos
         )
         self._map_ready_reported = False
         self._publish_health('READY: waiting for costmap')

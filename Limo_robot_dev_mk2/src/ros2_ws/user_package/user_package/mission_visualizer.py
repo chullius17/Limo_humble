@@ -71,7 +71,7 @@ class MissionVisualizer(Node):
 
         self.create_subscription(
             PoseStamped,
-            'limo/control/moving_ref',
+            '/limo/control/moving_ref',
             self.ref_cb,
             10
         )
@@ -88,7 +88,7 @@ class MissionVisualizer(Node):
         # ── QUEUED GOALS (dalla UI, non ancora inviati) ──────────────────
         self.create_subscription(
             PoseArray,
-            '/mission/queued_goals',
+            '/limo/mission/queued_goals',
             self.queued_goals_cb,
             10
         )
@@ -96,7 +96,7 @@ class MissionVisualizer(Node):
         # ── IMAGE PUBLISHER ──────────────────
         self.image_pub = self.create_publisher(
             Image,
-            'limo/mission_visualizer/image',
+            '/limo/mission_visualizer/image',
             10
         )
 

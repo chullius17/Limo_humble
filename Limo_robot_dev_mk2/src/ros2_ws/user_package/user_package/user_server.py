@@ -34,7 +34,7 @@ class MissionClient(Node):
         # GUI SERVER
         self._service = self.create_service(
             MissionCommand,
-            '/mission_cmd',
+            '/limo/mission_cmd',
             self._cmd_callback
         )
 
@@ -42,35 +42,35 @@ class MissionClient(Node):
         self._client = ActionClient(
             self,
             Mission,
-            '/mission',
+            '/limo/mission',
             callback_group=self.cb_group
         )
 
         # PAUSE TOPIC
         self._pause_pub = self.create_publisher(
             Bool,
-            '/mission/pause',
+            '/limo/mission/pause',
             10
         )
 
         # VISUALIZATION TOPIC
         self._queued_goals_pub = self.create_publisher(
             PoseArray,
-            '/mission/queued_goals',
+            '/limo/mission/queued_goals',
             10
         )
 
         # STATE PUBLISHER
         self.state_gui_pub = self.create_publisher(
             String,
-            '/mission/state',
+            '/limo/mission/state',
             10
         )
 
         # GOAL PUBLISHER
         self.goal_gui_pub = self.create_publisher(
             String,
-            '/mission/goal',
+            '/limo/mission/goal',
             10
         )
 
@@ -81,13 +81,13 @@ class MissionClient(Node):
         )
         self.diagnostics_sub = self.create_subscription(
             String,
-            '/mission/diagnostics',
+            '/limo/mission/diagnostics',
             self._diagnostic_cb,
             diagnostics_qos
         )
         self.controller_attached_sub = self.create_subscription(
             Bool,
-            '/mission/controller_attached',
+            '/limo/mission/controller_attached',
             self._controller_attached_cb,
             diagnostics_qos
         )
@@ -100,12 +100,12 @@ class MissionClient(Node):
         self.last_state = None
         self.last_goal = None
 
-        self.get_logger().info("MissionClient ready: service /mission_cmd available")
+        self.get_logger().info("MissionClient ready: service /limo/mission_cmd available")
         self._log_terminal_help()
 
         # Direct interactive console when the node is started with `ros2 run`.
         # Launch files commonly provide no TTY, so in that case commands remain
-        # available through /mission_cmd and the GUI.
+        # available through /limo/mission_cmd and the GUI.
         if sys.stdin.isatty():
             self._console_thread = threading.Thread(
                 target=self._console_loop,
@@ -115,7 +115,7 @@ class MissionClient(Node):
             self._console_thread.start()
         else:
             self.get_logger().info(
-                "Interactive stdin unavailable; use /mission_cmd from another terminal"
+                "Interactive stdin unavailable; use /limo/mission_cmd from another terminal"
             )
 
     def _console_loop(self):
@@ -141,11 +141,11 @@ class MissionClient(Node):
     def _log_terminal_help(self):
         self.get_logger().info(
             "Type commands directly at the 'mission>' prompt, or from another terminal:\n"
-            "  ros2 service call /mission_cmd limo_interfaces/srv/MissionCommand "
+            "  ros2 service call /limo/mission_cmd limo_interfaces/srv/MissionCommand "
             "\"{command: 'add 1.0 2.0 90'}\"\n"
-            "  ros2 service call /mission_cmd limo_interfaces/srv/MissionCommand "
+            "  ros2 service call /limo/mission_cmd limo_interfaces/srv/MissionCommand "
             "\"{command: 'list'}\"\n"
-            "  ros2 service call /mission_cmd limo_interfaces/srv/MissionCommand "
+            "  ros2 service call /limo/mission_cmd limo_interfaces/srv/MissionCommand "
             "\"{command: 'send'}\"\n"
             "  Commands: add X Y [YAW_DEG], list, clear, send, pause, resume, abort, help"
         )
@@ -304,7 +304,7 @@ class MissionClient(Node):
 
         if not self._client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error("Mission action server /mission not available")
-            return False, "mission action server /mission not available"
+            return False, "mission action server /limo/mission not available"
 
         goal_msg = Mission.Goal()
         goal_msg.goals = list(self._goals)

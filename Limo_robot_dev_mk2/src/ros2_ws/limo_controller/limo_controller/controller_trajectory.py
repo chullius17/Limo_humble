@@ -102,7 +102,7 @@ class FollowSequencePlanServer(Node):
             reliability=ReliabilityPolicy.RELIABLE
         )
         self.health_pub = self.create_publisher(
-            String, '/mission/health/controller', health_qos
+            String, '/limo/mission/health/controller', health_qos
         )
         self._last_health = None
         self._last_health_category = None
@@ -125,7 +125,7 @@ class FollowSequencePlanServer(Node):
 
         self.enable_sub = self.create_subscription(
             Bool,
-            '/mission/enable',
+            '/limo/mission/enable',
             self._enable_callback,
             10
         )

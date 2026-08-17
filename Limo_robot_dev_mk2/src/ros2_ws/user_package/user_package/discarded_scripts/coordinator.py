@@ -78,24 +78,24 @@ class MissionCoordinator(Node):
         )
 
         # ---------------- COMMUNICATION ----------------
-        self.enable_pub = self.create_publisher(Bool, '/mission/enable', 10)
+        self.enable_pub = self.create_publisher(Bool, '/limo/mission/enable', 10)
 
         self.pause_sub = self.create_subscription(
             Bool,
-            '/mission/pause',
+            '/limo/mission/pause',
             self._on_pause,
             10
         )
 
         self.ordered_goals_pub = self.create_publisher(PoseArray, '/limo/mission/goals_astar', 10)
-        self.goals_pub = self.create_publisher(PoseArray, 'limo/mission/goals', 10)
-        self.paths_pub = self.create_publisher(Path, 'limo/mission/paths', 10)
+        self.goals_pub = self.create_publisher(PoseArray, '/limo/mission/goals', 10)
+        self.paths_pub = self.create_publisher(Path, '/limo/mission/paths', 10)
 
         # ---------------- ACTION SERVER ----------------
         self.action_server = ActionServer(
             self,
             Mission,
-            '/mission',
+            '/limo/mission',
             execute_callback=self._execute,
             goal_callback=self._accept_goal,
             cancel_callback=self._cancel_goal,

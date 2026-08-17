@@ -34,18 +34,18 @@ class MissionGuiNode(Node):
         self.signals = gui_signals
 
         # SERVICE CLIENT
-        self.cli = self.create_client(MissionCommand, '/mission_cmd')
+        self.cli = self.create_client(MissionCommand, '/limo/mission_cmd')
         
         # SUBSCRIPTIONS
         self.state_sub = self.create_subscription(
             String,
-            '/mission/state',
+            '/limo/mission/state',
             self._state_callback,
             10
         )
         self.goal_sub = self.create_subscription(
             String,
-            '/mission/goal',
+            '/limo/mission/goal',
             self._callback_goal,
             10
         )
@@ -63,7 +63,7 @@ class MissionGuiNode(Node):
         )
         self.diagnostics_sub = self.create_subscription(
             String,
-            '/mission/diagnostics',
+            '/limo/mission/diagnostics',
             self._diagnostics_callback,
             diagnostics_qos
         )
@@ -71,7 +71,7 @@ class MissionGuiNode(Node):
     def send_cmd_async(self, command_str: str):
         """Sends a service request asynchronously without blocking the GUI."""
         if not self.cli.service_is_ready():
-            self.signals.append_msg.emit("[GUI ERROR] Service /mission_cmd not available")
+            self.signals.append_msg.emit("[GUI ERROR] Service /limo/mission_cmd not available")
             return
 
         req = MissionCommand.Request()
