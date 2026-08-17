@@ -21,12 +21,12 @@ class RoutesBuilder(Node):
 
         # --- PARAMETER DECLARATIONS (WITH DEFAULTS) ---
         self.declare_parameter('map_topic', '/map')
-        self.declare_parameter('image_topic', '/limo/routes/global_map_heatmap')
-        self.declare_parameter('high_cost_image_topic', '/limo/routes/high_cost_heatmap')
-        self.declare_parameter('debug_distance_topic', '/limo/routes/debug_distance_heatmap')
+        self.declare_parameter('image_topic', '/limo/traj_package/routes_builder/global_map_heatmap')
+        self.declare_parameter('high_cost_image_topic', '/limo/traj_package/routes_builder/high_cost_heatmap')
+        self.declare_parameter('debug_distance_topic', '/limo/traj_package/routes_builder/debug_distance_heatmap')
         self.declare_parameter('robot_frame', 'base_footprint')
         self.declare_parameter('update_rate', 0.05) # 20 Hz
-        self.declare_parameter('mask_occupancy_topic', '/limo/routes/selected_mask_grid')
+        self.declare_parameter('mask_occupancy_topic', '/limo/traj_package/routes_builder/selected_mask_grid')
 
         # FLAG: OPEN or CENTER_ROAD
         self.declare_parameter('flag', 'OPEN')
@@ -35,9 +35,10 @@ class RoutesBuilder(Node):
         self.declare_parameter('high_cost_min',     60)
         self.declare_parameter('high_cost_max',    100)
 
-        # Distance threshold for open space zones 
-        self.declare_parameter('open_cost_threshold',       60)
-        self.declare_parameter('open_distance_threshold', 0.05) # meters
+        # OPEN zones: minimum-cost core plus nearby low-cost outer layers.
+        self.declare_parameter('open_min_cost_threshold',     5)
+        self.declare_parameter('open_cost_threshold',        60)
+        self.declare_parameter('open_distance_threshold',  0.1)  # meters
 
         # Thresholds for center road zones
         self.declare_parameter('center_cost_threshold', 0)
@@ -74,8 +75,17 @@ class RoutesBuilder(Node):
         self.high_cost_min = self.get_parameter('high_cost_min').value
         self.high_cost_max = self.get_parameter('high_cost_max').value
 
+        self.open_min_cost_thresh = self.get_parameter('open_min_cost_threshold').value
         self.open_cost_thresh = self.get_parameter('open_cost_threshold').value
         self.open_dist_thresh = self.get_parameter('open_distance_threshold').value
+
+        if not 0 <= self.open_min_cost_thresh <= self.open_cost_thresh <= 100:
+            raise ValueError(
+                'OPEN cost thresholds must satisfy '
+                '0 <= open_min_cost_threshold <= open_cost_threshold <= 100'
+            )
+        if self.open_dist_thresh < 0.0:
+            raise ValueError('open_distance_threshold must be non-negative')
 
         self.center_cost_thresh = self.get_parameter('center_cost_threshold').value
         self.center_dist_min = self.get_parameter('center_distance_min').value
@@ -118,7 +128,7 @@ class RoutesBuilder(Node):
 
         # --- TIMERS ---
         self.timer = self.create_timer(update_rate, self.timer_callback)
-        self.get_logger().info('Parameterized Multi-Topic Heatmap Node initialized (Eloquent Compatible).')
+        self.get_logger().info('Parameterized Multi-Topic Heatmap Node initialized.')
 
     def map_callback(self, msg: OccupancyGrid):
         """
@@ -161,16 +171,34 @@ class RoutesBuilder(Node):
         high_cost_color = cv2.applyColorMap(high_cost_src, cv2.COLORMAP_JET)
         high_cost_color[~mask_high_cost] = [0, 0, 0]
 
-        # --- 3. DISTANCE TRANSFORM 1: CYAN ZONE ---
-        distance_mask_all = np.zeros_like(grid_data, dtype=np.uint8)
-        distance_mask_all[grid_data <= self.open_cost_thresh] = 255  
-        dist_map_all = cv2.distanceTransform(distance_mask_all, cv2.DIST_L2, 5)
-        
-        pixel_threshold_open = self.open_dist_thresh / res
-        mask_open_zone = (
-            (dist_map_all > pixel_threshold_open) & 
-            (grid_data >= 0) & (grid_data <= self.open_cost_thresh)
-        )
+        # --- 3. OPEN ZONE: MINIMUM-COST CORE + LOW-COST OUTER LAYERS ---
+        valid_mask = grid_data >= 0
+        min_cost_core = valid_mask & (grid_data <= self.open_min_cost_thresh)
+        low_cost_space = valid_mask & (grid_data <= self.open_cost_thresh)
+
+        # distanceTransform measures the distance of every non-zero pixel from
+        # the nearest zero pixel. The minimum-cost core is therefore encoded as
+        # zero, while all other cells are encoded as non-zero.
+        if np.any(min_cost_core):
+            distance_from_core_input = np.full_like(grid_data, 255, dtype=np.uint8)
+            distance_from_core_input[min_cost_core] = 0
+            distance_from_core = cv2.distanceTransform(
+                distance_from_core_input,
+                cv2.DIST_L2,
+                5,
+            )
+            max_outer_distance_px = self.open_dist_thresh / res
+            low_cost_outer_layers = (
+                low_cost_space
+                & ~min_cost_core
+                & (distance_from_core <= max_outer_distance_px)
+            )
+            mask_open_zone = min_cost_core | low_cost_outer_layers
+        else:
+            # Without a minimum-cost core there is no valid OPEN region to
+            # expand, even if isolated low-cost cells exist elsewhere.
+            distance_from_core = np.zeros_like(grid_data, dtype=np.float32)
+            mask_open_zone = np.zeros_like(grid_data, dtype=bool)
 
         # --- 4. DISTANCE TRANSFORM 2: PURPLE ZONE ---
         distance_mask_gt = np.zeros_like(grid_data, dtype=np.uint8)

@@ -16,9 +16,9 @@ class RouteCombinator(Node):
 
         # --- PARAMETER DECLARATIONS (WITH DEFAULTS) ---
         self.declare_parameter('input_map_topic', '/map')
-        self.declare_parameter('open_mask_topic', '/limo/routes/selected_mask_grid_open')
-        self.declare_parameter('center_road_mask_topic', '/limo/routes/selected_mask_grid_center_road')
-        self.declare_parameter('output_coordinated_map_topic', '/limo/routes/coordinated_map')
+        self.declare_parameter('open_mask_topic', '/limo/traj_package/routes_builder/selected_mask_grid_open')
+        self.declare_parameter('center_road_mask_topic', '/limo/traj_package/routes_builder/selected_mask_grid_center_road')
+        self.declare_parameter('output_coordinated_map_topic', '/limo/traj_package/routes_combinator/coordinated_map')
 
         # --- FETCH TOPIC CONFIGURATIONS ---
         input_map_topic = self.get_parameter('input_map_topic').value
@@ -71,7 +71,7 @@ class RouteCombinator(Node):
 
         self.debug_pub = self.create_publisher(
             Image,
-            '/limo/routes/debug_heatmap',
+            '/limo/traj_package/routes_combinator/debug_heatmap',
             10
         )
 

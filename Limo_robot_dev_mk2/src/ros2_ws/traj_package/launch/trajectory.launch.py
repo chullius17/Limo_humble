@@ -48,5 +48,5 @@ def generate_launch_description():
         open_spaces_network,
         network_combination,
         astar,
-        #coordinator
+        coordinator
     ])
