@@ -12,6 +12,7 @@
 /useful_scripts/**/*.avi
 /useful_scripts/**/*.mov
 /useful_scripts/**/*.mkv
+/useful_scripts/**/*.pt
 
 # Generated local development artifacts.
 **/__pycache__/
