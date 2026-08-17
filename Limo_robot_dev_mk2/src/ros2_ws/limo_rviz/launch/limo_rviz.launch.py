@@ -2,23 +2,26 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import PathJoinSubstitution
 from pathlib import Path
 
 
-def find_ros2_ws(start: Path):
-    for parent in [start] + list(start.parents):
-        if parent.name == "ros2_ws":
-            return parent
+def find_project_root(start: Path):
+    """Find the project root from source, build, or install paths."""
+    for candidate in [start] + list(start.parents):
+        if (candidate / "src" / "ros2_ws").is_dir():
+            return candidate
     return None
 
 
 def generate_launch_description():
 
-    ws = find_ros2_ws(Path(__file__).resolve())
-    if ws is None:
-        raise RuntimeError("Workspace ros2_ws non trovato")
+    project_root = find_project_root(Path(__file__).resolve())
+    if project_root is None:
+        raise RuntimeError("Root del progetto LIMO non trovata")
 
-    default_map_path = str(ws / "src" / "ros2_maps" / "limo_map.yaml")
+    default_map_path = str(project_root / "ros2_maps" / "limo_map.yaml")
 
     map_yaml_file = LaunchConfiguration('map_yaml_file')
 
@@ -29,6 +32,11 @@ def generate_launch_description():
     )
 
     use_sim_time = {'use_sim_time': True}
+    rviz_config = PathJoinSubstitution([
+        FindPackageShare('limo_rviz'),
+        'config',
+        'limo_rviz.rviz',
+    ])
 
     # =========================
     # TF STATICI
@@ -44,23 +52,6 @@ def generate_launch_description():
                    'odom'],
         output='screen',
         parameters=[use_sim_time]
-    )
-
-    tf_base = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_tf_base_footprint_to_base_link',
-        arguments=['0', '0', '0.15', 
-                   '0', '0', '0',
-                    'base_footprint',
-                    'base_link'],
-        output='screen',
-        parameters=[use_sim_time]
-    )
-
-    tf_launch = TimerAction(
-        period=0.5,
-        actions=[tf_map_to_odom, tf_base]
     )
 
     # =========================
@@ -91,16 +82,6 @@ def generate_launch_description():
         ]
     )
 
-    map_launch = TimerAction(
-        period=2.0,
-        actions=[map_server]
-    )
-
-    lifecycle_launch = TimerAction(
-        period=3.5,
-        actions=[lifecycle_manager]
-    )
-
     # =========================
     # RVIZ
     # =========================
@@ -110,12 +91,32 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
+        arguments=['-d', rviz_config],
         parameters=[use_sim_time]
     )
 
+    # =========================
+    # LAUNCH DELAYED
+    # =========================
+
+    tf_launch = TimerAction(
+        period=0.5,
+        actions=[tf_map_to_odom]
+        )
+
+    map_launch = TimerAction(
+        period=1.0,
+        actions=[map_server]         
+    )
+
     rviz_launch = TimerAction(
-        period=5.0,
-        actions=[rviz]
+        period=1.5,
+        actions=[rviz]                 
+    )
+
+    lifecycle_launch = TimerAction(
+        period=6.0,                    
+        actions=[lifecycle_manager]
     )
 
     # =========================

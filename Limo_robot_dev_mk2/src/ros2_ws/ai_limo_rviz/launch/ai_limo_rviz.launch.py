@@ -2,23 +2,26 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import PathJoinSubstitution
 from pathlib import Path
 
 
-def find_ros2_ws(start: Path):
-    for parent in [start] + list(start.parents):
-        if parent.name == "ros2_ws":
-            return parent
+def find_project_root(start: Path):
+    """Find the project root from source, build, or install paths."""
+    for candidate in [start] + list(start.parents):
+        if (candidate / "src" / "ros2_ws").is_dir():
+            return candidate
     return None
 
 
 def generate_launch_description():
 
-    ws = find_ros2_ws(Path(__file__).resolve())
-    if ws is None:
-        raise RuntimeError("Workspace ros2_ws non trovato")
+    project_root = find_project_root(Path(__file__).resolve())
+    if project_root is None:
+        raise RuntimeError("Root del progetto LIMO non trovata")
 
-    default_map_path = str(ws.parent.parent / "ai_ros2_maps" / "limo_map.yaml")
+    default_map_path = str(project_root / "ai_ros2_maps" / "limo_map.yaml")
 
     map_yaml_file = LaunchConfiguration('map_yaml_file')
 
@@ -29,6 +32,11 @@ def generate_launch_description():
     )
 
     use_sim_time = {'use_sim_time': True}
+    rviz_config = PathJoinSubstitution([
+        FindPackageShare('ai_limo_rviz'),
+        'config',
+        'ai_limo_rviz.rviz',
+    ])
 
     # =========================
     # TF STATICI
@@ -110,11 +118,14 @@ def generate_launch_description():
         executable='rviz2',
         name='ai_rviz2',
         output='screen',
+        arguments=['-d', rviz_config],
         parameters=[use_sim_time]
     )
 
     rviz_launch = TimerAction(
-        period=5.0,
+        # RViz must subscribe before the static map is published. Its default
+        # Map display uses volatile durability and cannot retrieve old samples.
+        period=0.5,
         actions=[rviz]
     )
 
