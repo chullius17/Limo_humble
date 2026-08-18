@@ -19,8 +19,8 @@ class ColorLaneDetector(Node):
         super().__init__('color_lane_detector')
 
         # ROS 2 Publishers
-        self.raw_mask_pub = self.create_publisher(Image, 'limo/cv_package/detection/lane_masks/raw', 10)
-        self.image_pub = self.create_publisher(Image, 'limo/cv_package/detection/lane_overlay/raw', 10)
+        self.raw_mask_pub = self.create_publisher(Image, 'limo/nav_cv_package/detection/lane_masks/raw', 10)
+        self.image_pub = self.create_publisher(Image, 'limo/nav_cv_package/detection/lane_overlay/raw', 10)
         
         self.bridge = CvBridge()
 

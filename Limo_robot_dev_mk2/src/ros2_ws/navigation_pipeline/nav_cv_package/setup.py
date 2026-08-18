@@ -26,6 +26,7 @@ setup(
             'lane_detector = nav_cv_package.detector:main',
             'boundaries = nav_cv_package.boundaries:main',
             'bev_node = nav_cv_package.bev:main',
+            'classification = nav_cv_package.classes:main',
         ],
     },
 )

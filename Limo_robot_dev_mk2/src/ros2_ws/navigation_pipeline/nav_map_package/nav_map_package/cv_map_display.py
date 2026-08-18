@@ -1,4 +1,7 @@
+import copy
+
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image
@@ -11,35 +14,31 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 import time
 
-class MapDisplay(Node):
+class CVMapDisplay(Node):
     """
-    Listens to processed OccupancyGrids, combines them into a high-resolution 
-    global costmap canvas, generates lightweight downsampled images for visualization,
-    and publishes the combined local ego canvas as a ROS2 OccupancyGrid.
+    Combines the complete filtering grids and renders a separate robot-centric view.
     """
 
     def __init__(self):
-        super().__init__('map_display_node')
+        super().__init__('cv_map_display')
 
-        self.declare_parameter('global_frame',        'odom')
         self.declare_parameter('robot_frame',         'base_link')
-        self.declare_parameter('costmap_resolution',  0.005)    # High definition for navigation (5mm/px)
         self.declare_parameter('view_resolution',     0.02)     # Lightweight definition for images (2cm/px)
         self.declare_parameter('view_range_m',        3.0)      # Semi-side of ego canvas
         self.declare_parameter('turquoise_factor',    0.6)
         self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('magenta_factor',      1.0)
         self.declare_parameter('enable_telemetry',    True)
 
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
 
-        self.global_frame       = self.get_parameter('global_frame').value
         self.robot_frame        = self.get_parameter('robot_frame').value
-        self.costmap_resolution = self.get_parameter('costmap_resolution').value
         self.view_resolution    = self.get_parameter('view_resolution').value
         self.view_range_m       = self.get_parameter('view_range_m').value
         self.turquoise_factor   = self.get_parameter('turquoise_factor').value
         self.white_factor       = self.get_parameter('white_factor').value
+        self.magenta_factor     = self.get_parameter('magenta_factor').value
         self.debug_telemetry    = self.get_parameter('enable_telemetry').value
 
         # Dynamic canvas dimensions based on chosen resolutions
@@ -52,39 +51,30 @@ class MapDisplay(Node):
         # Storage for incoming occupancy grid messages
         self.map_data_turquoise = None
         self.map_data_white = None
+        self.map_data_magenta = None
 
         # --- SUBSCRIPTIONS WITH ROI PROJECTORS ---
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_turquoise', self.turquoise_map_callback, 10)
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_white', self.white_map_callback, 10)
-        self.get_logger().info('Subscribing to TURQUOISE and WHITE maps')
+        self.create_subscription(OccupancyGrid, '/limo/nav_map_package/filtering/map_paper_turquoise', self.turquoise_map_callback, 10)
+        self.create_subscription(OccupancyGrid, '/limo/nav_map_package/filtering/map_paper_white', self.white_map_callback, 10)
+        self.create_subscription(OccupancyGrid, '/limo/nav_map_package/filtering/map_paper_magenta', self.magenta_map_callback, 10)
+        self.get_logger().info('Subscribing to TURQUOISE, WHITE and MAGENTA maps')
 
         # --- COMBINED IMAGE PUBLISHERS ---
-        self.firstp_img_pub         = self.create_publisher(Image, '/limo/map_package/map_display/map_firstp_combined', 10)
+        self.firstp_img_pub = self.create_publisher(
+            Image,
+            '/limo/nav_map_package/cv_map_display/cv_map_image/raw',
+            10,
+        )
         
         # --- NEW PUBLISHER: COMBINED OCCUPANCY GRID ---
-        self.grid_pub               = self.create_publisher(OccupancyGrid, '/limo/map_package/map_display/global_map_combined', 10)
-
-        # Pre-allocate the OccupancyGrid message to optimize CPU usage
-        self.combined_grid_msg      = self.get_default_occupancy_grid()
+        self.grid_pub = self.create_publisher(
+            OccupancyGrid,
+            '/limo/nav_map_package/cv_map_display/cv_map_occupancy_grid',
+            10,
+        )
 
         self.create_timer(0.1, self.timer_callback)
-        self.get_logger().info('MapDisplay (Visualization & OccupancyGrid) node started')
-
-    def get_default_occupancy_grid(self) -> OccupancyGrid:
-        """Initialize metadata for the combined occupancy grid centered on the robot."""
-        msg = OccupancyGrid()
-        msg.header.frame_id = self.robot_frame  # Since it is robot-centric (ego), the frame of reference is the robot itself
-        msg.info.resolution = self.view_resolution
-        msg.info.width = self.canvas_px
-        msg.info.height = self.canvas_px
-        
-        # The origin must shift the grid backward and left by half of its total size
-        # so that the (0,0) point relative to the robot is exactly at the center of the canvas
-        msg.info.origin.position.x = -self.view_range_m
-        msg.info.origin.position.y = -self.view_range_m
-        msg.info.origin.position.z = 0.0
-        msg.info.origin.orientation.w = 1.0
-        return msg
+        self.get_logger().info('CVMapDisplay (Visualization & OccupancyGrid) node started')
 
     # ------------------------------------------------------------------
 
@@ -93,6 +83,57 @@ class MapDisplay(Node):
 
     def white_map_callback(self, msg: OccupancyGrid):
         self.map_data_white = msg
+
+    def magenta_map_callback(self, msg: OccupancyGrid):
+        self.map_data_magenta = msg
+
+    @staticmethod
+    def _same_geometry(first: OccupancyGrid, second: OccupancyGrid) -> bool:
+        first_origin = first.info.origin
+        second_origin = second.info.origin
+        return (
+            first.header.frame_id == second.header.frame_id
+            and first.info.width == second.info.width
+            and first.info.height == second.info.height
+            and math.isclose(first.info.resolution, second.info.resolution)
+            and math.isclose(first_origin.position.x, second_origin.position.x)
+            and math.isclose(first_origin.position.y, second_origin.position.y)
+            and math.isclose(first_origin.orientation.z, second_origin.orientation.z)
+            and math.isclose(first_origin.orientation.w, second_origin.orientation.w)
+        )
+
+    def _combine_full_maps(self):
+        layers = [
+            (self.map_data_turquoise, self.turquoise_factor),
+            (self.map_data_white, self.white_factor),
+            (self.map_data_magenta, self.magenta_factor),
+        ]
+        reference = next((msg for msg, _ in layers if msg is not None), None)
+        if reference is None:
+            return None, None
+
+        shape = (reference.info.height, reference.info.width)
+        combined = np.zeros(shape, dtype=np.float32)
+        seen = np.zeros(shape, dtype=bool)
+
+        for msg, factor in layers:
+            if msg is None:
+                continue
+            if not self._same_geometry(reference, msg):
+                self.get_logger().warn(
+                    'Skipping filtering grid with geometry different from the reference',
+                    throttle_duration_sec=2.0,
+                )
+                continue
+
+            grid = np.asarray(msg.data, dtype=np.int16).reshape(shape)
+            known = grid >= 0
+            scaled = np.clip(grid, 0, 100).astype(np.float32) * factor
+            np.maximum(combined, np.where(known, scaled, 0.0), out=combined)
+            np.logical_or(seen, known, out=seen)
+
+        combined_grid = np.where(seen, np.clip(combined, 0, 100), -1).astype(np.int8)
+        return reference, combined_grid
 
     # ------------------------------------------------------------------
 
@@ -136,15 +177,15 @@ class MapDisplay(Node):
     def timer_callback(self):
         t_timer_start = time.perf_counter()
 
-        if all(m is None for m in (
-            self.map_data_turquoise,
-            self.map_data_white,
-        )):
+        reference, combined_grid = self._combine_full_maps()
+        if reference is None:
             return
 
         try:
             tf = self.tf_buffer.lookup_transform(
-                self.global_frame, self.robot_frame, rclpy.time.Time()
+                reference.header.frame_id,
+                self.robot_frame,
+                rclpy.time.Time(),
             )
         except TransformException as e:
             self.get_logger().warn(f'TF not available: {e}', throttle_duration_sec=2.0)
@@ -168,22 +209,20 @@ class MapDisplay(Node):
             self._project_grid_layer_optimized(self.map_data_turquoise, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.turquoise_factor)
         if self.map_data_white is not None:
             self._project_grid_layer_optimized(self.map_data_white, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.white_factor)
+        if self.map_data_magenta is not None:
+            self._project_grid_layer_optimized(self.map_data_magenta, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.magenta_factor)
 
         t_ego_done = time.perf_counter()
 
-        # ------------------------------------------------------------------
-        # NEW LOGIC: COMBINED OCCUPANCY GRID PUBLICATION
-        # ------------------------------------------------------------------
-        # Convert ego_canvas matrix (0-100 float) to int8 required by ROS2.
-        # Optional: you can use np.rot90 or flipping if you notice axis inversions in RViz.
-        grid_data = np.where(seen_canvas, np.clip(ego_canvas, 0, 100), -1).astype(np.int8)
-        
-        # Update timestamp and insert data into the pre-allocated grid message
+        # Publish the complete filtering map without ego cropping or axis
+        # conversion. Geometry and frame stay identical to the input grids.
         current_time = self.get_clock().now().to_msg()
-        self.combined_grid_msg.header.stamp = current_time
-        self.combined_grid_msg.data = grid_data.flatten().tolist()
-        self.grid_pub.publish(self.combined_grid_msg)
-        # ------------------------------------------------------------------
+        output_grid = OccupancyGrid()
+        output_grid.header.stamp = current_time
+        output_grid.header.frame_id = reference.header.frame_id
+        output_grid.info = copy.deepcopy(reference.info)
+        output_grid.data = combined_grid.ravel().tolist()
+        self.grid_pub.publish(output_grid)
 
         # 2. Rendering firstp from ego canvas
         norm_e   = (np.clip(ego_canvas, 0, 100) / 100.0 * 255.0).astype(np.uint8)
@@ -211,14 +250,18 @@ class MapDisplay(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MapDisplay()
+    node = CVMapDisplay()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

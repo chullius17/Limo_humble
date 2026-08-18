@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from nav_msgs.msg import OccupancyGrid
@@ -21,40 +22,33 @@ from collections import deque
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 
 
-class Costmap(Node):
+class MetricBEV(Node):
     """
-    Converts the turquoise and white channels of a BEV image into ROS2 costmaps.
+    Converts the turquoise, white and magenta channels into metric cost grids.
     """
 
-    COLORS = ['TURQUOISE', 'WHITE']
+    COLORS = ['TURQUOISE', 'WHITE', 'MAGENTA']
 
     COLOR_MAP = {
         'TURQUOISE': np.array([255, 255,   0], dtype=np.uint8),
         'WHITE': np.array([255, 255, 255], dtype=np.uint8),
+        'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
     }
 
     TOLERANCE = 30          # Pixel-value tolerance for color matching
 
     CONFIG_MAP = {
-        'TURQUOISE': {'peak_cost': 60.0,  'radius': 5},
-        'WHITE': {
-            'peak_cost': 40.0, 'radius': 10,
-            'interior_max_cost': 100.0,   # max cost at the core of thick blobs
-            'interior_radius': 220,         # px of interior depth needed to saturate
-        },
+        'TURQUOISE': {'peak_cost': 60.0, 'radius': 5},
+        'WHITE': {'peak_cost': 40.0, 'radius': 10},
+        'MAGENTA': {'peak_cost': 100.0, 'radius': 10},
     }
 
     DECAY = 8.0
     ROI_FRACTION = 0.4
     RULER_FRACTION = 0.08
 
-    # Scales the vertical (row-axis) interior distance based on how far a row is
-    # from the robot, to compensate for sparser/noisier depth at range.
-    # 0.0 = no correction.
-    VERTICAL_SCALE_PER_METER = 8.0
-
     def __init__(self):
-        super().__init__('costmap_node')
+        super().__init__('metric_bev')
         self.bridge = CvBridge()
 
         self.latest_bev_stamp = None
@@ -67,6 +61,15 @@ class Costmap(Node):
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL
         )
 
+        # Debug images are realtime data: stale frames are less useful than a
+        # dropped frame, so never let a slow visualizer build up a backlog.
+        debug_image_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+        )
+
         # Force use_sim_time parameter configuration
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
                              rclpy.Parameter.Type.BOOL, True)])
@@ -74,7 +77,7 @@ class Costmap(Node):
         self.colors = self.COLORS
         self.color_map = self.COLOR_MAP
         self.config_map = self.CONFIG_MAP
-        self.get_logger().info('Using TURQUOISE and WHITE color maps')
+        self.get_logger().info('Using TURQUOISE, WHITE and MAGENTA color maps')
 
         # Global (color-independent) parameters
         self.declare_parameter('fixed_frame', 'base_link')
@@ -105,7 +108,7 @@ class Costmap(Node):
         # Single subscription shared by all active colors
         self.bev_sub = self.create_subscription(
             Image,
-            'limo/cv_package/bev/bird_perspective/raw',
+            'limo/nav_cv_package/classification/output/raw',
             self.bev_callback,
             10
         )
@@ -113,7 +116,10 @@ class Costmap(Node):
         # Global ROI debug publishers
         if self.publish_debug:
             self.roi_debug_pub = self.create_publisher(
-                Image, '/limo/map_package/costmap/roi_debug', 10)
+                Image,
+                '/limo/nav_map_package/metric_bev/roi_debug',
+                debug_image_qos,
+            )
 
         # Per-color publisher bundle.
         self.color_state = {}
@@ -124,12 +130,12 @@ class Costmap(Node):
                 output = {'topic_suffix': suffix}
                 output['costmap_pub'] = self.create_publisher(
                     OccupancyGrid,
-                    f'/limo/map_package/costmap/costmap_grid_{suffix}',
+                    f'/limo/nav_map_package/metric_bev/cost_grid_{suffix}',
                     map_qos_profile,
                 )
                 if self.publish_debug:
                     output['debug_pub'] = self.create_publisher(
-                        Image, f'/limo/map_package/costmap/costmap_debug_{suffix}', 10)
+                        Image, f'/limo/nav_map_package/metric_bev/debug_{suffix}', 10)
                 state['outputs'][suffix] = output
 
             self.color_state[color] = state
@@ -159,8 +165,8 @@ class Costmap(Node):
         }
 
         self.get_logger().info(
-            f'Costmap node initialized for channels {self.colors}, '
-            f'publishing frames: {self.fixed_frame} -> cv_origin_<color>'
+            f'MetricBEV node initialized for channels {self.colors}, '
+            f'publishing frames: {self.fixed_frame} -> metric_bev_origin_<color>'
         )
 
         self.bev_queue = queue.Queue(maxsize=1)
@@ -194,7 +200,7 @@ class Costmap(Node):
             t = TransformStamped()
             t.header.stamp = stamp
             t.header.frame_id = self.fixed_frame   # base_link
-            t.child_frame_id = f'cv_origin_{suffix}'
+            t.child_frame_id = f'metric_bev_origin_{suffix}'
             t.transform.translation.x = 0.6
             t.transform.translation.y = 0.0
             t.transform.translation.z = 0.0
@@ -215,66 +221,26 @@ class Costmap(Node):
         hi = np.clip(exact_color.astype(np.int16) + self.TOLERANCE, 0, 255).astype(np.uint8)
         return cv2.inRange(bgr, lo, hi)
 
-    def _axis_distance_to_zero(self, binary: np.ndarray, axis: int) -> np.ndarray:
-        """
-        For every pixel, distance (in px) to the nearest background (0) pixel,
-        measured ONLY along `axis` (1 = horizontal/per-row, 0 = vertical/per-column).
-        Rows/columns with no background at all get a sentinel value of n (image size along axis).
-        Fully vectorized (no Python loops over pixels).
-        """
-        fg = binary > 0
-        n = binary.shape[axis]
-        idx_shape = [1, 1]
-        idx_shape[axis] = n
-        idx = np.broadcast_to(np.arange(n).reshape(idx_shape), binary.shape)
-
-        # Nearest background index scanning "backward" along axis
-        left_src = np.where(fg, -1, idx)
-        left = np.maximum.accumulate(left_src, axis=axis)
-        dist_left = np.where(left < 0, n, idx - left)
-
-        # Nearest background index scanning "forward" along axis
-        right_src = np.where(fg, n, idx)
-        right = np.flip(np.minimum.accumulate(np.flip(right_src, axis=axis), axis=axis), axis=axis)
-        dist_right = np.where(right >= n, n, right - idx)
-
-        return np.minimum(dist_left, dist_right).astype(np.float32)
-
-    def _inflate_layer(self, mask: np.ndarray, peak_cost: float, radius_px: int,
-                        interior_max_cost: float = None, interior_radius: float = None) -> np.ndarray:
-        # --- Outward halo: unchanged, distance from nearest mask pixel ---
+    def _build_cost_layer(self, mask: np.ndarray, peak_cost: float,
+                          radius_px: int) -> np.ndarray:
+        # Outward inflation: distance from every external pixel to the nearest
+        # pixel belonging to this color mask.
         obstacle = cv2.bitwise_not(mask)
-        dist = cv2.distanceTransform(obstacle, cv2.DIST_L2, cv2.DIST_MASK_3)
+        distance_from_mask = cv2.distanceTransform(
+            obstacle,
+            cv2.DIST_L2,
+            cv2.DIST_MASK_3,
+        )
 
-        cost_layer = np.zeros_like(dist, dtype=np.float32)
-        within_radius = dist <= radius_px
-
+        cost_layer = np.zeros(mask.shape, dtype=np.float32)
+        within_radius = distance_from_mask <= radius_px
         if np.any(within_radius):
-            d_valid = dist[within_radius]
-            norm_dist = d_valid / max(radius_px, 1)
-            cost_layer[within_radius] = peak_cost * np.exp(-self.DECAY * norm_dist)
-
-        # --- Interior growth: directional (h/v) distance-to-edge, saturating toward max ---
-        if interior_max_cost is not None:
-            mask_bool = mask > 0
-            if np.any(mask_bool):
-                dist_h = self._axis_distance_to_zero(mask, axis=1)  # horizontal-only
-                dist_v = self._axis_distance_to_zero(mask, axis=0)  # vertical-only
-
-                # Rows farther from the robot -> depth estimate sparser/noisier -> widen
-                # the effective vertical interior distance to compensate.
-                h = mask.shape[0]
-                row_idx = np.arange(h).reshape(-1, 1)
-                # Assumes row (h-1) is the row closest to the robot (bottom of the ROI crop).
-                dist_from_robot_m = ((h - 1) - row_idx) * self.resolution
-                vertical_scale = 1.0 + self.VERTICAL_SCALE_PER_METER * dist_from_robot_m
-                dist_v_scaled = dist_v * vertical_scale
-
-                dist_in = np.minimum(dist_h, dist_v_scaled)
-
-                norm_in = dist_in[mask_bool] / max(interior_radius, 1e-3)
-                cost_layer[mask_bool] = peak_cost + (interior_max_cost - peak_cost) * (
-                    1.0 - np.exp(-self.DECAY * norm_in))
+            normalized_distance = (
+                distance_from_mask[within_radius] / max(radius_px, 1)
+            )
+            cost_layer[within_radius] = peak_cost * np.exp(
+                -self.DECAY * normalized_distance
+            )
 
         return np.clip(cost_layer, 0, 100).astype(np.uint8)
 
@@ -284,10 +250,10 @@ class Costmap(Node):
 
         mask = self._make_mask(bgr, target_color)
 
-        return self._inflate_layer(
-            mask, config['peak_cost'], config['radius'],
-            interior_max_cost=config.get('interior_max_cost'),
-            interior_radius=config.get('interior_radius'),
+        return self._build_cost_layer(
+            mask,
+            config['peak_cost'],
+            config['radius'],
         )
 
     def _costmap_to_occupancy_grid(self, cost_img: np.ndarray, header: Header, topic_suffix: str) -> OccupancyGrid:
@@ -298,7 +264,7 @@ class Costmap(Node):
         grid = OccupancyGrid()
 
         grid.header.stamp = header.stamp
-        grid.header.frame_id = f'cv_origin_{topic_suffix}'
+        grid.header.frame_id = f'metric_bev_origin_{topic_suffix}'
 
         grid.info.resolution = self.resolution
         grid.info.width = w
@@ -444,7 +410,7 @@ class Costmap(Node):
 
             active_colors_str = "+".join(self.colors)
             lines = [
-                f"\n================ COSTMAP [{active_colors_str}] WORKER @ {fps:.1f} FPS ================",
+                f"\n================ METRIC BEV [{active_colors_str}] WORKER @ {fps:.1f} FPS ================",
                 f"  Frames processed: {self.frame_count}",
                 f"  [Total Latency]        Current: {t['total']:.2f} ms | Avg ({self.window_size}f): {avg_shared['total']:.2f} ms",
                 f"  -----------------------------------------------------------------",
@@ -468,14 +434,18 @@ class Costmap(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Costmap()
+    node = MetricBEV()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

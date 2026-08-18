@@ -20,13 +20,16 @@ class RoutesBuilder(Node):
         super().__init__('map_to_heatmap_image_publisher')
 
         # --- PARAMETER DECLARATIONS (WITH DEFAULTS) ---
-        self.declare_parameter('map_topic', '/map')
-        self.declare_parameter('image_topic', '/limo/traj_package/routes_builder/global_map_heatmap')
-        self.declare_parameter('high_cost_image_topic', '/limo/traj_package/routes_builder/high_cost_heatmap')
-        self.declare_parameter('debug_distance_topic', '/limo/traj_package/routes_builder/debug_distance_heatmap')
+        self.declare_parameter(
+            'map_topic',
+            '/limo/nav_map_package/nav_map/combined_grid',
+        )
+        self.declare_parameter('image_topic', '/limo/nav_traj_package/routes_builder/global_map_heatmap')
+        self.declare_parameter('high_cost_image_topic', '/limo/nav_traj_package/routes_builder/high_cost_heatmap')
+        self.declare_parameter('debug_distance_topic', '/limo/nav_traj_package/routes_builder/debug_distance_heatmap')
         self.declare_parameter('robot_frame', 'base_footprint')
         self.declare_parameter('update_rate', 0.1)  # 10 Hz for debug images
-        self.declare_parameter('mask_occupancy_topic', '/limo/traj_package/routes_builder/selected_mask_grid')
+        self.declare_parameter('mask_occupancy_topic', '/limo/nav_traj_package/routes_builder/selected_mask_grid')
 
         # FLAG: OPEN or CENTER_ROAD
         self.declare_parameter('flag', 'OPEN')

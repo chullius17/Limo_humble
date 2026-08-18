@@ -15,10 +15,13 @@ class RouteCombinator(Node):
         super().__init__('routes_coordinator')
 
         # --- PARAMETER DECLARATIONS (WITH DEFAULTS) ---
-        self.declare_parameter('input_map_topic', '/map')
-        self.declare_parameter('open_mask_topic', '/limo/traj_package/routes_builder/selected_mask_grid_open')
-        self.declare_parameter('center_road_mask_topic', '/limo/traj_package/routes_builder/selected_mask_grid_center_road')
-        self.declare_parameter('output_coordinated_map_topic', '/limo/traj_package/routes_combinator/coordinated_map')
+        self.declare_parameter(
+            'input_map_topic',
+            '/limo/nav_map_package/nav_map/combined_grid',
+        )
+        self.declare_parameter('open_mask_topic', '/limo/nav_traj_package/routes_builder/selected_mask_grid_open')
+        self.declare_parameter('center_road_mask_topic', '/limo/nav_traj_package/routes_builder/selected_mask_grid_center_road')
+        self.declare_parameter('output_coordinated_map_topic', '/limo/nav_traj_package/routes_combinator/coordinated_map')
 
         # --- FETCH TOPIC CONFIGURATIONS ---
         input_map_topic = self.get_parameter('input_map_topic').value
@@ -71,7 +74,7 @@ class RouteCombinator(Node):
 
         self.debug_pub = self.create_publisher(
             Image,
-            '/limo/traj_package/routes_combinator/debug_heatmap',
+            '/limo/nav_traj_package/routes_combinator/debug_heatmap',
             10
         )
 

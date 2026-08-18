@@ -1,4 +1,5 @@
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image
@@ -10,18 +11,19 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
-class Mapper(Node):
+class Filtering(Node):
     CHANNELS = {
         'TURQUOISE': 'turquoise',
         'WHITE': 'white',
+        'MAGENTA': 'magenta',
     }
 
     def __init__(self):
-        super().__init__('mapper_node')
+        super().__init__('filtering')
 
         # --- ROS2 PARAMETERS ---
         self.declare_parameter('color', 'TURQUOISE')
-        self.declare_parameter('global_frame', 'odom')
+        self.declare_parameter('global_frame', 'map')
         self.declare_parameter('resolution', 0.02)
         self.declare_parameter('map_size_meters', 10.0)
         self.declare_parameter('roi_x_min_m', 0.0)
@@ -59,12 +61,12 @@ class Mapper(Node):
         # --- DYNAMIC TOPIC CONFIGURATION ---
         self.color_suffix = self.color_flag.lower()
         self.costmap_suffix = self.CHANNELS[self.color_flag]
-        costmap_topic = f'/limo/map_package/costmap/costmap_grid_{self.costmap_suffix}'
-        map_topic = f'/limo/map_package/mapper/map_paper_{self.color_suffix}'
+        costmap_topic = f'/limo/nav_map_package/metric_bev/cost_grid_{self.costmap_suffix}'
+        map_topic = f'/limo/nav_map_package/filtering/map_paper_{self.color_suffix}'
 
         self.filtered_publisher = self.create_publisher(OccupancyGrid, map_topic, 10)
         self.roi_debug_publisher = self.create_publisher(
-            Image, f'/limo/map_package/mapper/roi_debug_{self.color_suffix}', 10
+            Image, f'/limo/nav_map_package/filtering/roi_debug_{self.color_suffix}', 10
         )
 
         # --- BAYESIAN LOG-ODDS FILTER CONFIGURATION ---
@@ -91,7 +93,10 @@ class Mapper(Node):
         # Pre-allocation of the output message to optimize real-time performance
         self.grid_msg_filtered = self.get_default_occupancy_grid()
 
-        self.get_logger().info(f'Probabilistic Mapper initialized for channel [{self.color_flag}] on topic {costmap_topic}')
+        self.get_logger().info(
+            f'Probabilistic filtering initialized for channel [{self.color_flag}] '
+            f'on topic {costmap_topic}; publishing on {map_topic}'
+        )
         self.get_logger().info(
             'Bayesian ROI: '
             f'x=[{self.roi_x_min_m:.2f}, {self.roi_x_max_m:.2f}] m, '
@@ -123,7 +128,9 @@ class Mapper(Node):
         try:
             # Retrieving the transformation between the global world (odom) and the local sensor origin
             tf = self.tf_buffer.lookup_transform(
-                self.global_frame, f'cv_origin_{self.costmap_suffix}', rclpy.time.Time()
+                self.global_frame,
+                f'metric_bev_origin_{self.costmap_suffix}',
+                rclpy.time.Time(),
             )
             origin_x = tf.transform.translation.x
             origin_y = tf.transform.translation.y
@@ -252,14 +259,18 @@ class Mapper(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Mapper()
+    node = Filtering()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

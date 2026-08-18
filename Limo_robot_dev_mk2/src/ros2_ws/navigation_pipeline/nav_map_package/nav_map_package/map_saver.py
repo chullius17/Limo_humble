@@ -1,275 +1,168 @@
-import rclpy
-from rclpy.node import Node
-from nav_msgs.msg import OccupancyGrid
-import numpy as np
-import cv2
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
-from tf2_ros import TransformException
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
-import math
+"""Service bridge used to save the final combined map through Nav2."""
+
 from pathlib import Path
+from threading import Event
+
+import rclpy
+from nav2_msgs.srv import SaveMap
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+from rclpy.node import Node
+from std_srvs.srv import Trigger
+
 
 def find_project_root(start: Path):
-    """Find the LIMO project root from source, build, or install paths."""
+    """Find the LIMO project root from source or install paths."""
     for candidate in [start] + list(start.parents):
         if (candidate / 'src' / 'ros2_ws').is_dir():
             return candidate
     return None
 
+
 class MapSaver(Node):
-    """
-    Listens to processed OccupancyGrids, combines them into a high-resolution 
-    global costmap canvas on-demand (event-driven), and saves the final grid 
-    as PGM/YAML upon shutdown.
-    """
+    """Expose a simple service and delegate the actual map write to Nav2."""
 
     def __init__(self):
-        super().__init__('map_saver_node')
+        super().__init__('nav_map_saver')
 
-        # --- ROS2 PARAMETERS ---
-        self.declare_parameter('global_frame',        'odom')
-        self.declare_parameter('view_resolution',     0.02)     
-        self.declare_parameter('turquoise_factor',    0.6)
-        self.declare_parameter('white_factor',        0.3)
-        self.declare_parameter('canvas_size_meters',  10.0)     
-        self.declare_parameter('robot_frame',         'base_link')
-        self.declare_parameter('save_directory',      '')
-        
-        self.robot_frame = self.get_parameter('robot_frame').value
-        self.tf_buffer   = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.declare_parameter(
+            'request_service',
+            '/limo/nav_map_package/map_saver/save_map',
+        )
+        self.declare_parameter('nav2_service', '/map_saver/save_map')
+        self.declare_parameter(
+            'map_topic',
+            '/limo/nav_map_package/nav_map/combined_grid',
+        )
+        self.declare_parameter('save_directory', '')
+        self.declare_parameter('map_name', 'limo_map')
+        self.declare_parameter('image_format', 'pgm')
+        self.declare_parameter('map_mode', 'trinary')
+        self.declare_parameter('free_thresh', 0.25)
+        self.declare_parameter('occupied_thresh', 0.65)
+        self.declare_parameter('nav2_service_timeout_sec', 10.0)
+        self.declare_parameter('save_timeout_sec', 30.0)
 
-        self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
-                             rclpy.Parameter.Type.BOOL, True)])
-
-        self.global_frame       = self.get_parameter('global_frame').value
-        self.view_resolution    = self.get_parameter('view_resolution').value
-        self.turquoise_factor   = self.get_parameter('turquoise_factor').value
-        self.white_factor       = self.get_parameter('white_factor').value
-        self.canvas_size_meters = self.get_parameter('canvas_size_meters').value
-        save_directory          = self.get_parameter('save_directory').value
-
-        # Dynamic canvas dimensions based on chosen resolutions
-        self.canvas_px = int(self.canvas_size_meters / self.view_resolution)
-
-        self.bridge = CvBridge()
-        self.img_pub = self.create_publisher(Image, '/limo/map_package/map_saver/global_map_jet', 10)
-
-        # Storage for incoming occupancy grid messages
-        self.map_data_turquoise = None
-        self.map_data_white = None
-
-        # --- SUBSCRIPTIONS ---
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_turquoise', self.turquoise_map_callback, 10)
-        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_white', self.white_map_callback, 10)
-        self.get_logger().info('Subscribing to TURQUOISE and WHITE maps')
-
-        # Pre-allocation of the OccupancyGrid message to optimize CPU usage
-        self.grid_msg_combined = self.get_default_occupancy_grid()
-
+        save_directory = self.get_parameter('save_directory').value
         if save_directory:
             self.save_directory = Path(save_directory).expanduser().resolve()
         else:
             project_root = find_project_root(Path(__file__).resolve())
             if project_root is None:
                 raise RuntimeError(
-                    'Cannot locate the project root; set the save_directory parameter'
+                    'Cannot locate project root; set save_directory explicitly'
                 )
             self.save_directory = project_root / 'ros2_maps'
-
         self.save_directory.mkdir(parents=True, exist_ok=True)
 
-        # Canvas preallocation
-        self.global_canvas   = np.zeros((self.canvas_px, self.canvas_px), dtype=np.float32)
-        self.seen_canvas     = np.zeros((self.canvas_px, self.canvas_px), dtype=bool)
-        
-        # Last valid grid stored for final storage/saving
-        self.latest_grid_data = np.full((self.canvas_px, self.canvas_px), -1, dtype=np.int8)
+        self.callback_group = ReentrantCallbackGroup()
+        nav2_service = self.get_parameter('nav2_service').value
+        request_service = self.get_parameter('request_service').value
+        self.save_client = self.create_client(
+            SaveMap,
+            nav2_service,
+            callback_group=self.callback_group,
+        )
+        self.save_service = self.create_service(
+            Trigger,
+            request_service,
+            self.save_callback,
+            callback_group=self.callback_group,
+        )
+        self.saving = False
 
         self.get_logger().info(
-            f'Map Saver node started; maps will be saved in {self.save_directory}'
+            f'Ready on {request_service}; Nav2 target is {nav2_service}'
         )
 
-    def get_default_occupancy_grid(self) -> OccupancyGrid:
-        """Initializes metadata for the combined occupancy grid centered on the robot."""
-        msg = OccupancyGrid()
-        msg.header.frame_id = self.global_frame
-        msg.info.resolution = self.view_resolution
-        msg.info.width = self.canvas_px
-        msg.info.height = self.canvas_px
-        half = self.canvas_size_meters / 2.0
-        msg.info.origin.position.x = -half
-        msg.info.origin.position.y = -half
-        msg.info.origin.position.z = 0.0
-        msg.info.origin.orientation.w = 1.0
-        return msg
+    def save_callback(self, _request, response):
+        if self.saving:
+            response.success = False
+            response.message = 'A map save request is already running'
+            return response
 
-    def turquoise_map_callback(self, msg: OccupancyGrid):
-        self.map_data_turquoise = msg
-        self.update_and_publish_map()
-
-    def white_map_callback(self, msg: OccupancyGrid):
-        self.map_data_white = msg
-        self.update_and_publish_map()
-
-    def _project_grid_layer_optimized(self, m: OccupancyGrid,
-                                    canvas: np.ndarray,
-                                    seen_canvas: np.ndarray,
-                                    factor: float = 1.0) -> None:
-        grid = np.array(m.data, dtype=np.int8).reshape(
-            (m.info.height, m.info.width)).astype(np.float32)
-
-        unknown_mask = (grid < 0)
-        grid = np.clip(grid, 0, 100) * factor
-        grid[unknown_mask] = -1.0
-
-        observed = (grid >= 0)
-        np.maximum(canvas, np.where(observed, grid, 0), out=canvas) 
-        np.logical_or(seen_canvas, observed, out=seen_canvas)
-
-    def save_map_to_disk(self):
-        """
-        Saves the map by converting cost levels into proportional grayscale values 
-        for RViz/Nav2, avoiding rendering everything as black.
-        """
-        # Initialize the saving canvas as "Unknown" (Grayscale 205)
-        pgm_img = np.full_like(self.latest_grid_data, 205, dtype=np.uint8)
-        
-        # 1. Free Space (value 0 in grid_data -> 254 in PGM)
-        pgm_img[self.latest_grid_data == 0] = 254  
-        
-        # 2. Cost Levels / Obstacles (values from 1 to 100)
-        # Map proportionally: cost 100 -> grayscale 0 (black), cost 1 -> grayscale ~250 (almost white)
-        mask_occupied = self.latest_grid_data > 0
-        costs = self.latest_grid_data[mask_occupied].astype(np.float32)
-        
-        # Inverted linear conversion formula to make high costs appear darker
-        pgm_img[mask_occupied] = (254 - (costs / 100.0 * 254.0)).astype(np.uint8)
-
-        # Vertical flip to synchronize the OpenCV origin with the ROS display orientation
-        pgm_img = np.flipud(pgm_img)
-
-        img_path = self.save_directory / 'limo_map.pgm'
-        yaml_path = self.save_directory / 'limo_map.yaml'
-        
-        if not cv2.imwrite(str(img_path), pgm_img):
-            raise RuntimeError(f'Failed to write map image to {img_path}')
-
-        half = self.canvas_size_meters / 2.0
-        yaml_content = (
-            f"image: limo_map.pgm\n"
-            f"resolution: {self.view_resolution}\n"
-            f"origin: [{-half}, {-half}, 0.0]\n"
-            f"negate: 0\n"
-            f"occupied_thresh: 0.65\n"
-            f"free_thresh: 0.196\n"
-            f"mode: scale\n"
-        )
-        
-        with yaml_path.open('w') as f:
-            f.write(yaml_content)
-            
-        self.get_logger().info(f'Map saved in {self.save_directory}')
-
-    def update_and_publish_map(self):
-        if all(m is None for m in (
-            self.map_data_turquoise,
-            self.map_data_white,
-        )):
-            return
-
-        # CRITICAL: Clear canvases before re-projecting to avoid incorrect data accumulation
-        self.global_canvas.fill(0)
-        self.seen_canvas.fill(False)
-
-        if self.map_data_turquoise is not None:
-            self._project_grid_layer_optimized(self.map_data_turquoise, self.global_canvas, self.seen_canvas, self.turquoise_factor)
-        if self.map_data_white is not None:
-            self._project_grid_layer_optimized(self.map_data_white, self.global_canvas, self.seen_canvas, self.white_factor)
-
-        grid_data = np.where(self.seen_canvas,
-                             np.clip(self.global_canvas, 0, 100),
-                             -1).astype(np.int8)
-
-        self.latest_grid_data = grid_data
-
-        # --- JET Visualization ---
-        norm = (np.clip(self.global_canvas, 0, 100) / 100.0 * 255.0).astype(np.uint8)
-        
-        # Invert canvas vertically so ROS +Y points UP in OpenCV image space
-        norm_flipped = np.flipud(norm)
-        seen_flipped = np.flipud(self.seen_canvas)
-
-        jet_img = cv2.applyColorMap(norm_flipped, cv2.COLORMAP_JET)
-        unseen = ~seen_flipped
-        jet_img[unseen] = (30, 30, 30)
-
+        self.saving = True
         try:
-            tf = self.tf_buffer.lookup_transform(
-                self.global_frame, self.robot_frame, rclpy.time.Time()
+            service_timeout = float(
+                self.get_parameter('nav2_service_timeout_sec').value
             )
-            robot_x = tf.transform.translation.x
-            robot_y = tf.transform.translation.y
-            q = tf.transform.rotation
-            yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-
-            half_m = self.canvas_size_meters / 2.0
-            
-            # ROS World to Pixel coordinates conversion
-            rx = int((robot_x + half_m) / self.view_resolution)
-            # Invert Y coordinate so +Y moves UP in image plane
-            ry = self.canvas_px - 1 - int((robot_y + half_m) / self.view_resolution)
-
-            if 0 <= rx < self.canvas_px and 0 <= ry < self.canvas_px:
-                arrow_len = 25
-                
-                # Forward vector (Red arrow = Robot Heading / X-axis)
-                dx_x = int(arrow_len * math.cos(yaw))
-                dy_x = int(-arrow_len * math.sin(yaw))  # Inverted for image coordinate space
-                cv2.arrowedLine(jet_img, (rx, ry), (rx + dx_x, ry + dy_x), (0, 0, 255), 2, tipLength=0.3)
-
-                # Lateral vector (Green arrow = Robot Left / Y-axis)
-                dx_y = int(-arrow_len * math.sin(yaw))
-                dy_y = int(-arrow_len * math.cos(yaw))  # Inverted for image coordinate space
-                cv2.arrowedLine(jet_img, (rx, ry), (rx + dx_y, ry + dy_y), (0, 255, 0), 2, tipLength=0.3)
-                
-                cv2.circle(jet_img, (rx, ry), 6, (0, 0, 0), -1)
-                cv2.circle(jet_img, (rx, ry), 4, (255, 255, 255), -1)
-                label_x = min(rx + 8, self.canvas_px - 75)
-                label_y = max(ry - 8, 15)
-                cv2.putText(
-                    jet_img,
-                    self.robot_frame,
-                    (label_x, label_y),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
+            if not self.save_client.wait_for_service(
+                timeout_sec=service_timeout
+            ):
+                response.success = False
+                response.message = (
+                    f"Nav2 service '{self.save_client.srv_name}' unavailable"
                 )
+                self.get_logger().error(response.message)
+                return response
 
-        except TransformException as e:
-            self.get_logger().warn(f'TF not available: {e}', throttle_duration_sec=2.0)
+            map_name = self.get_parameter('map_name').value
+            save_path = self.save_directory / map_name
+            request = SaveMap.Request()
+            request.map_topic = self.get_parameter('map_topic').value
+            request.map_url = str(save_path)
+            request.image_format = self.get_parameter('image_format').value
+            request.map_mode = self.get_parameter('map_mode').value
+            request.free_thresh = float(
+                self.get_parameter('free_thresh').value
+            )
+            request.occupied_thresh = float(
+                self.get_parameter('occupied_thresh').value
+            )
 
-        img_msg = self.bridge.cv2_to_imgmsg(jet_img, encoding='bgr8')
-        img_msg.header.stamp = self.get_clock().now().to_msg()
-        img_msg.header.frame_id = self.global_frame
-        self.img_pub.publish(img_msg)
+            self.get_logger().info(
+                f"Asking Nav2 to save {request.map_topic} as '{save_path}'"
+            )
+            future = self.save_client.call_async(request)
+            completed = Event()
+            future.add_done_callback(lambda _future: completed.set())
+            save_timeout = float(
+                self.get_parameter('save_timeout_sec').value
+            )
+            if not completed.wait(timeout=save_timeout):
+                response.success = False
+                response.message = 'Timed out while Nav2 was saving the map'
+                self.get_logger().error(response.message)
+                return response
+
+            try:
+                nav2_response = future.result()
+            except Exception as exc:
+                response.success = False
+                response.message = f'Nav2 SaveMap call failed: {exc}'
+                self.get_logger().error(response.message)
+                return response
+
+            response.success = bool(nav2_response.result)
+            if response.success:
+                response.message = f'Map saved as {save_path}.yaml/.pgm'
+                self.get_logger().info(response.message)
+            else:
+                response.message = 'Nav2 received the request but failed to save'
+                self.get_logger().error(response.message)
+            return response
+        finally:
+            self.saving = False
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = MapSaver()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        node.get_logger().info('CTRL+C received, saving map...')
+        executor.spin()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    except Exception:
+        if rclpy.ok():
+            raise
     finally:
-        # Saving safely occurs here during controlled node shutdown
-        node.save_map_to_disk()
+        executor.shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

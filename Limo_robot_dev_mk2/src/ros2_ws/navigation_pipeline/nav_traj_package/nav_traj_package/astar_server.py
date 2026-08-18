@@ -174,7 +174,7 @@ class AStarRefService(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.latest_costmap = None
 
-        self.declare_parameter('topic_map_sub', '/limo/traj_package/routes_combinator/coordinated_map')
+        self.declare_parameter('topic_map_sub', '/limo/nav_traj_package/routes_combinator/coordinated_map')
         self.topic_map_sub = self.get_parameter('topic_map_sub').value
 
         map_qos = QoSProfile(

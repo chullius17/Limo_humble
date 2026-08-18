@@ -26,14 +26,14 @@ class CurbDetector(Node):
         # Topic Subscription
         self.image_sub = self.create_subscription(
             Image,
-            'limo/cv_package/detection/lane_masks/raw',
+            'limo/nav_cv_package/detection/lane_masks/raw',
             self.image_callback,
             10
         )
 
         # Publishers
-        self.debug_pub = self.create_publisher(Image, 'limo/cv_package/boundaries/curb_points_debug/raw', 10)
-        self.lines_pub = self.create_publisher(Image, 'limo/cv_package/boundaries/lines_and_curbs/raw', 10)
+        self.debug_pub = self.create_publisher(Image, 'limo/nav_cv_package/boundaries/curb_points_debug/raw', 10)
+        self.lines_pub = self.create_publisher(Image, 'limo/nav_cv_package/boundaries/lines_and_curbs/raw', 10)
 
         # Threading and Queue Setup
         self.frame_queue = Queue(maxsize=1)

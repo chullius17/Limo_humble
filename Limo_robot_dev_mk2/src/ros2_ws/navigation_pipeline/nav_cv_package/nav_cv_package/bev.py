@@ -42,7 +42,7 @@ class BirdPerspective(Node):
 
         # ROS 2 Subscriptions
         self.rgb_sub = self.create_subscription(
-            Image, 'limo/cv_package/boundaries/lines_and_curbs/raw', self.rgb_callback, 10
+            Image, 'limo/nav_cv_package/boundaries/lines_and_curbs/raw', self.rgb_callback, 10
         )
 
         self.declare_parameter('camera_info_topic', '/rgb/camera_info')
@@ -59,7 +59,7 @@ class BirdPerspective(Node):
 
         # ROS 2 Publisher
         self.bird_pub = self.create_publisher(
-            Image, 'limo/cv_package/bev/bird_perspective/raw', 10
+            Image, 'limo/nav_cv_package/bev/bird_perspective/raw', 10
         )
 
         # Queue and worker thread setup for multithreaded processing

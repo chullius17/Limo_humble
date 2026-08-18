@@ -24,10 +24,12 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'costmap = nav_map_package.costmap:main',
-            'mapper = nav_map_package.mapper:main',
-            'map_display = nav_map_package.map_display:main',
-            'map_save = nav_map_package.map_saver:main'
+            'metric_bev = nav_map_package.metric_bev:main',
+            'filtering = nav_map_package.filtering:main',
+            'cv_map_display = nav_map_package.cv_map_display:main',
+            'nav_map = nav_map_package.nav_map:main',
+            'map_saver = nav_map_package.map_saver:main',
+            'nav_map_signal_guard = nav_map_package.signal_guard:main',
         ],
     },
 )
