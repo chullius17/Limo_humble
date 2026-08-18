@@ -87,8 +87,8 @@ Es würde einfach in andere Datei angerufen werden. -->
             <xacro:insert_block name="joint_pose"/>
             <axis xyz="0 0 1" />
             <!-- Paramenten von Herstellern -->
-            <limit lower="-0.523598767" upper="0.523598767" effort="5" velocity="0.5" />
-            <dynamics damping="1.0" friction="2.0"/>
+            <limit lower="-0.523598767" upper="0.523598767" effort="20" velocity="3.0" />
+            <dynamics damping="0.1" friction="0.1"/>
         </joint>
 
         <transmission name="${wheel_prefix}_hinge_trans" type="SimpleTransmission">
@@ -165,8 +165,8 @@ Es würde einfach in andere Datei angerufen werden. -->
             <child link="${wheel_prefix}_steer_link"/>
             <xacro:insert_block name="joint_pose"/>
             <axis xyz="0 0 -1"/>
-            <limit lower="-0.523598767" upper="0.523598767" effort="5" velocity="0.5" />
-            <dynamics damping="1.0" friction="2.0"/>
+            <limit lower="-0.523598767" upper="0.523598767" effort="20" velocity="3.0" />
+            <dynamics damping="0.1" friction="0.1"/>
         </joint>
 
         <transmission name="${wheel_prefix}_hinge_trans" type="SimpleTransmission">
@@ -369,7 +369,7 @@ Es würde einfach in andere Datei angerufen werden. -->
                 <publish_wheel_tf>true</publish_wheel_tf>
                 <odometry_topic>odom</odometry_topic>
                 <odometry_frame>odom</odometry_frame>
-                <robot_base_frame>base_footprint</robot_base_frame>
+                <robot_base_frame>base_link</robot_base_frame>
                 <odometry_source>1</odometry_source>
             </plugin>
         </gazebo>
