@@ -2,14 +2,21 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    RegisterEventHandler,
+)
 from launch.event_handlers import OnExecutionComplete, OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     custom_start_share = get_package_share_directory('custom_start')
+    offline_mode = LaunchConfiguration('offline_mode')
     nav_rviz_config = os.path.join(
         custom_start_share,
         'config',
@@ -52,6 +59,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{'enable_telemetry': False}],
     )
+
     filtering_turquoise = Node(
         package='nav_map_package',
         executable='filtering',
@@ -73,6 +81,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{'color': 'MAGENTA', **filtering_roi}],
     )
+
     cv_map_display = Node(
         package='nav_map_package',
         executable='cv_map_display',
@@ -80,6 +89,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{'enable_telemetry': False}],
     )
+
     nav_map = Node(
         package='nav_map_package',
         executable='nav_map',
@@ -88,9 +98,13 @@ def generate_launch_description():
         parameters=[{
             'global_frame': 'map',
             'static_map_topic': '/map',
-            'cv_grid_topic': (
+            'offline_mode': ParameterValue(offline_mode, value_type=bool),
+            'offline_cv_grid_topic': (
                 '/limo/nav_map_package/cv_map_display/'
                 'cv_map_occupancy_grid'
+            ),
+            'online_cv_grid_topic': (
+                '/limo/nav_map_package/metric_bev/online/cost_grid_combined'
             ),
             'scan_topic': '/scan',
             'output_topic': '/limo/nav_map_package/nav_map/combined_grid',
@@ -98,6 +112,7 @@ def generate_launch_description():
             'lidar_cost': 100,
         }],
     )
+
     nav2_map_saver = Node(
         package='nav2_map_server',
         executable='map_saver_server',
@@ -132,8 +147,10 @@ def generate_launch_description():
             'request_service': '/limo/nav_map_package/map_saver/save_map',
             'nav2_service': '/map_saver/save_map',
             'map_name': 'limo_map',
+            'map_mode': 'scale',
         }],
     )
+
     map_save_gui = Node(
         package='nav_map_package',
         executable='map_save_gui',
@@ -171,6 +188,14 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'offline_mode',
+            default_value='true',
+            description=(
+                'Use the offline CV map display grid instead of the online '
+                'MetricBEV combined grid.'
+            ),
+        ),
         start_mapping_nodes,
         start_visualization,
         limo_mapping,

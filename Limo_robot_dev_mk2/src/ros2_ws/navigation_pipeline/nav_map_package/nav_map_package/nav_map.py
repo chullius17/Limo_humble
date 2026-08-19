@@ -25,9 +25,14 @@ class NavMap(Node):
 
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('static_map_topic', '/map')
+        self.declare_parameter('offline_mode', False)
         self.declare_parameter(
-            'cv_grid_topic',
+            'offline_cv_grid_topic',
             '/limo/nav_map_package/cv_map_display/cv_map_occupancy_grid',
+        )
+        self.declare_parameter(
+            'online_cv_grid_topic',
+            '/limo/nav_map_package/metric_bev/online/cost_grid_combined',
         )
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter(
@@ -39,7 +44,15 @@ class NavMap(Node):
 
         self.global_frame = self.get_parameter('global_frame').value
         self.static_map_topic = self.get_parameter('static_map_topic').value
-        self.cv_grid_topic = self.get_parameter('cv_grid_topic').value
+        self.offline_mode = bool(self.get_parameter('offline_mode').value)
+        if self.offline_mode:
+            self.cv_grid_topic = self.get_parameter(
+                'offline_cv_grid_topic'
+            ).value
+        else:
+            self.cv_grid_topic = self.get_parameter(
+                'online_cv_grid_topic'
+            ).value
         self.scan_topic = self.get_parameter('scan_topic').value
         self.output_topic = self.get_parameter('output_topic').value
         publish_rate_hz = float(self.get_parameter('publish_rate_hz').value)
@@ -90,7 +103,8 @@ class NavMap(Node):
         self.create_timer(1.0 / publish_rate_hz, self.publish_combined_map)
 
         self.get_logger().info(
-            f'Combining static={self.static_map_topic}, cv={self.cv_grid_topic}, '
+            f'Mode={"offline" if self.offline_mode else "online"}; '
+            f'combining static={self.static_map_topic}, cv={self.cv_grid_topic}, '
             f'laser={self.scan_topic} -> {self.output_topic}'
         )
 

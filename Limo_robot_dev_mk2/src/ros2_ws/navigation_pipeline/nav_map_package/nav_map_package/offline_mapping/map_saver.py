@@ -39,7 +39,7 @@ class MapSaver(Node):
         self.declare_parameter('save_directory', '')
         self.declare_parameter('map_name', 'limo_map')
         self.declare_parameter('image_format', 'pgm')
-        self.declare_parameter('map_mode', 'trinary')
+        self.declare_parameter('map_mode', 'scale')
         self.declare_parameter('free_thresh', 0.25)
         self.declare_parameter('occupied_thresh', 0.65)
         self.declare_parameter('nav2_service_timeout_sec', 10.0)

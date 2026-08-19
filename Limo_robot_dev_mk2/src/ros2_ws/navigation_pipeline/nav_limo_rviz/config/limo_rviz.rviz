@@ -8,6 +8,7 @@ Panels:
         - /TF1
         - /LaserScan1
         - /Map1
+        - /MetricBEV Combined1
         - /Camera RGB1
       Splitter Ratio: 0.5
     Tree Height: 611
@@ -54,6 +55,17 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /map
+    - Alpha: 0.85
+      Class: rviz_default_plugins/Map
+      Color Scheme: costmap
+      Enabled: true
+      Name: MetricBEV Combined
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /limo/nav_map_package/metric_bev/online/cost_grid_combined
     - Class: rviz_default_plugins/Image
       Enabled: true
       Topic:

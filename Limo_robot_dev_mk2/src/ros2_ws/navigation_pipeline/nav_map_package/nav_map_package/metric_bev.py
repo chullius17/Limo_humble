@@ -39,7 +39,7 @@ class MetricBEV(Node):
 
     CONFIG_MAP = {
         'TURQUOISE': {'peak_cost': 60.0, 'radius': 2},
-        'WHITE': {'peak_cost': 40.0, 'radius': 5},
+        'WHITE': {'peak_cost': 30.0, 'radius': 5},
         'MAGENTA': {'peak_cost': 100.0, 'radius': 5},
     }
 
@@ -140,6 +140,12 @@ class MetricBEV(Node):
 
             self.color_state[color] = state
 
+        self.combined_costmap_pub = self.create_publisher(
+            OccupancyGrid,
+            '/limo/nav_map_package/metric_bev/online/cost_grid_combined',
+            map_qos_profile,
+        )
+
         # Debug parameter to enable/disable telemetry logging
         self.declare_parameter('enable_telemetry', True)
         self.debug_telemetry = self.get_parameter('enable_telemetry').value
@@ -196,6 +202,7 @@ class MetricBEV(Node):
             for state in self.color_state.values()
             for suffix in state['outputs']
         ]
+        output_suffixes.append('combined')
         for suffix in output_suffixes:
             t = TransformStamped()
             t.header.stamp = stamp
@@ -357,11 +364,13 @@ class MetricBEV(Node):
             t['roi_debug'] = (time.perf_counter() - t_start) * 1000
 
         # --- Per-color processing ---
+        cost_layers = []
         for color in self.colors:
             state = self.color_state[color]
 
             t_start = time.perf_counter()
             cost_img_cropped = self._image_to_costmap(roi_bgr, color)
+            cost_layers.append(cost_img_cropped)
             t_color[color]['mask_inflate'] = (time.perf_counter() - t_start) * 1000
 
             t_start = time.perf_counter()
@@ -386,6 +395,18 @@ class MetricBEV(Node):
                         debug_msg.header = msg.header
                         state['outputs'][suffix]['debug_pub'].publish(debug_msg)
                     t_color[color]['debug_render'] = (time.perf_counter() - t_start) * 1000
+
+        # The semantic costs match CVMapDisplay: turquoise=60, white=30 and
+        # magenta=100. Taking the cell-wise maximum preserves the dominant
+        # class wherever inflated layers overlap.
+        combined_cost = np.maximum.reduce(cost_layers)
+        self.combined_costmap_pub.publish(
+            self._costmap_to_occupancy_grid(
+                combined_cost,
+                msg.header,
+                'combined',
+            )
+        )
 
         t['total'] = (time.perf_counter() - start_total) * 1000
         self.log_diagnostics(t, t_color)

@@ -4,7 +4,7 @@ import sys
 import threading
 
 import rclpy
-from PyQt5.QtCore import QTime, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, QTime, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication,
     QLabel,
@@ -92,6 +92,7 @@ class MapSaveWindow(QWidget):
         super().__init__()
         self.node = node
         self.setWindowTitle('LIMO Map Saver')
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
         self.setMinimumWidth(360)
 
         layout = QVBoxLayout(self)
@@ -154,6 +155,8 @@ def main(args=None):
 
     window = MapSaveWindow(node, signals)
     window.show()
+    window.raise_()
+    window.activateWindow()
     try:
         app.exec_()
     finally:

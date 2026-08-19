@@ -1,6 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction
-from launch.substitutions import LaunchConfiguration
+from launch.actions import TimerAction
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import PathJoinSubstitution
@@ -21,14 +20,11 @@ def generate_launch_description():
     if project_root is None:
         raise RuntimeError("Root del progetto LIMO non trovata")
 
-    default_map_path = str(project_root / "ros2_maps" / "limo_map.yaml")
-
-    map_yaml_file = LaunchConfiguration('map_yaml_file')
-
-    declare_map_yaml_cmd = DeclareLaunchArgument(
-        'map_yaml_file',
-        default_value=default_map_path,
-        description='Path to map yaml'
+    map_yaml_file = str(
+        project_root
+        / 'ros2_maps'
+        / 'nav_pipeline'
+        / 'limo_map.yaml'
     )
 
     use_sim_time = {'use_sim_time': True}
@@ -124,8 +120,6 @@ def generate_launch_description():
     # =========================
 
     return LaunchDescription([
-        declare_map_yaml_cmd,
-
         tf_launch,
         map_launch,
         lifecycle_launch,
