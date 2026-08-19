@@ -58,7 +58,7 @@ class MapSaver(Node):
                 raise RuntimeError(
                     'Cannot locate project root; set save_directory explicitly'
                 )
-            self.save_directory = project_root / 'ros2_maps'
+            self.save_directory = project_root / 'ros2_maps' / 'nav_pipeline'
         self.save_directory.mkdir(parents=True, exist_ok=True)
 
         self.callback_group = ReentrantCallbackGroup()

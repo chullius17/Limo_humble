@@ -9,7 +9,7 @@ def generate_launch_description():
     ai_mode_arg = DeclareLaunchArgument(
         'ai_mode',
         default_value='false',
-        description='Store control plots in ai_control_logs when enabled'
+        description='Store control plots in the base AI CV folder when enabled'
     )
 
     visualizer = Node(

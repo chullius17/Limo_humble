@@ -196,13 +196,22 @@ class ControlPlotService(Node):
         self.ai_mode = self.get_parameter('ai_mode').value
 
         ws = find_ros2_ws(Path(__file__).resolve())
+        pipeline_directory = 'ai_cv' if self.ai_mode else 'base_cv'
         if ws is not None:
             project_root = ws.parent.parent
-            log_directory = 'ai_control_logs' if self.ai_mode else 'control_logs'
-            self.output_dir = str(project_root / log_directory)
+            self.output_dir = str(
+                project_root
+                / 'control_logs'
+                / 'base_pipeline'
+                / pipeline_directory
+            )
         else:
-            log_directory = 'ai_control_logs' if self.ai_mode else 'control_logs'
-            self.output_dir = str(Path('/tmp') / log_directory)
+            self.output_dir = str(
+                Path('/tmp')
+                / 'control_logs'
+                / 'base_pipeline'
+                / pipeline_directory
+            )
             self.get_logger().warn(
                 f'ros2_ws not found; using {self.output_dir}'
             )

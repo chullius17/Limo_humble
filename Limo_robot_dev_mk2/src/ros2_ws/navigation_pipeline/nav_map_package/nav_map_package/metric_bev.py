@@ -38,9 +38,9 @@ class MetricBEV(Node):
     TOLERANCE = 30          # Pixel-value tolerance for color matching
 
     CONFIG_MAP = {
-        'TURQUOISE': {'peak_cost': 60.0, 'radius': 5},
-        'WHITE': {'peak_cost': 40.0, 'radius': 10},
-        'MAGENTA': {'peak_cost': 100.0, 'radius': 10},
+        'TURQUOISE': {'peak_cost': 60.0, 'radius': 2},
+        'WHITE': {'peak_cost': 40.0, 'radius': 5},
+        'MAGENTA': {'peak_cost': 100.0, 'radius': 5},
     }
 
     DECAY = 8.0
