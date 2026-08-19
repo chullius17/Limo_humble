@@ -1,20 +1,20 @@
-import signal
+import os
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import EmitEvent, RegisterEventHandler
-from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown, matches_action
-from launch.events.process import SignalProcess
+from launch.actions import IncludeLaunchDescription, RegisterEventHandler
+from launch.event_handlers import OnExecutionComplete, OnProcessStart
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
+
 def generate_launch_description():
-    protected_process = {
-        'prefix': 'python3 -m nav_map_package.signal_guard',
-        # The normal launch escalation must not kill the map saver while the
-        # final request is still running. OnProcessExit below stops it sooner.
-        'sigterm_timeout': '60.0',
-        'sigkill_timeout': '5.0',
-    }
+    custom_start_share = get_package_share_directory('custom_start')
+    nav_rviz_config = os.path.join(
+        custom_start_share,
+        'config',
+        'nav_mapping.rviz',
+    )
 
     filtering_roi = {
         'roi_x_min_m': 0.0,
@@ -23,64 +23,63 @@ def generate_launch_description():
         'roi_width_far_m': 2.65,
     }
 
+    limo_mapping = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                custom_start_share,
+                'launch',
+                'limo_mapping.launch.py',
+            )
+        )
+    )
+    limo_visualization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                custom_start_share,
+                'launch',
+                'limo_viz_slam.launch.py',
+            )
+        ),
+        launch_arguments={
+            'rviz_config': nav_rviz_config,
+        }.items(),
+    )
+
     metric_bev = Node(
         package='nav_map_package',
         executable='metric_bev',
         name='metric_bev',
         output='screen',
-        parameters=[{
-            'enable_telemetry': False,
-        }],
-        **protected_process,
+        parameters=[{'enable_telemetry': False}],
     )
-
     filtering_turquoise = Node(
         package='nav_map_package',
         executable='filtering',
         name='filtering_turquoise',
         output='screen',
-        parameters=[{
-            'color': 'TURQUOISE',
-            **filtering_roi,
-        }],
-        **protected_process,
+        parameters=[{'color': 'TURQUOISE', **filtering_roi}],
     )
-
     filtering_white = Node(
         package='nav_map_package',
         executable='filtering',
         name='filtering_white',
         output='screen',
-        parameters=[{
-            'color': 'WHITE',
-            **filtering_roi,
-        }],
-        **protected_process,
+        parameters=[{'color': 'WHITE', **filtering_roi}],
     )
-
     filtering_magenta = Node(
         package='nav_map_package',
         executable='filtering',
         name='filtering_magenta',
         output='screen',
-        parameters=[{
-            'color': 'MAGENTA',
-            **filtering_roi,
-        }],
-        **protected_process,
+        parameters=[{'color': 'MAGENTA', **filtering_roi}],
     )
-
     cv_map_display = Node(
         package='nav_map_package',
         executable='cv_map_display',
         name='cv_map_display',
         output='screen',
-        parameters=[{
-            'enable_telemetry': False,
-        }],
-        **protected_process,
+        parameters=[{'enable_telemetry': False}],
     )
-
     nav_map = Node(
         package='nav_map_package',
         executable='nav_map',
@@ -89,14 +88,16 @@ def generate_launch_description():
         parameters=[{
             'global_frame': 'map',
             'static_map_topic': '/map',
-            'cv_grid_topic': '/limo/nav_map_package/cv_map_display/cv_map_occupancy_grid',
+            'cv_grid_topic': (
+                '/limo/nav_map_package/cv_map_display/'
+                'cv_map_occupancy_grid'
+            ),
             'scan_topic': '/scan',
             'output_topic': '/limo/nav_map_package/nav_map/combined_grid',
             'publish_rate_hz': 10.0,
             'lidar_cost': 100,
-        }]
+        }],
     )
-
     nav2_map_saver = Node(
         package='nav2_map_server',
         executable='map_saver_server',
@@ -109,9 +110,7 @@ def generate_launch_description():
             'occupied_thresh_default': 0.65,
             'map_subscribe_transient_local': True,
         }],
-        **protected_process,
     )
-
     map_saver_lifecycle = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
@@ -122,9 +121,7 @@ def generate_launch_description():
             'autostart': True,
             'node_names': ['map_saver'],
         }],
-        **protected_process,
     )
-
     saver_node = Node(
         package='nav_map_package',
         executable='map_saver',
@@ -136,44 +133,18 @@ def generate_launch_description():
             'nav2_service': '/map_saver/save_map',
             'map_name': 'limo_map',
         }],
-        **protected_process,
+    )
+    map_save_gui = Node(
+        package='nav_map_package',
+        executable='map_save_gui',
+        name='map_save_gui',
+        output='screen',
+        parameters=[{
+            'save_service': '/limo/nav_map_package/map_saver/save_map',
+        }],
     )
 
-    protected_nodes = (
-        metric_bev,
-        filtering_turquoise,
-        filtering_white,
-        filtering_magenta,
-        cv_map_display,
-        nav2_map_saver,
-        map_saver_lifecycle,
-        saver_node,
-    )
-
-    stop_protected_nodes = [
-        EmitEvent(
-            event=SignalProcess(
-                signal_number=signal.SIGTERM,
-                process_matcher=matches_action(node),
-            )
-        )
-        for node in protected_nodes
-    ]
-
-    shutdown_after_nav_map = RegisterEventHandler(
-        OnProcessExit(
-            target_action=nav_map,
-            on_exit=stop_protected_nodes + [
-                EmitEvent(
-                    event=Shutdown(
-                        reason='nav_map finished after final map save'
-                    )
-                )
-            ],
-        )
-    )
-    
-    return LaunchDescription([
+    mapping_nodes = [
         metric_bev,
         filtering_turquoise,
         filtering_white,
@@ -183,5 +154,24 @@ def generate_launch_description():
         nav2_map_saver,
         map_saver_lifecycle,
         saver_node,
-        shutdown_after_nav_map,
+        map_save_gui,
+    ]
+
+    start_mapping_nodes = RegisterEventHandler(
+        OnExecutionComplete(
+            target_action=limo_mapping,
+            on_completion=mapping_nodes,
+        )
+    )
+    start_visualization = RegisterEventHandler(
+        OnProcessStart(
+            target_action=map_save_gui,
+            on_start=[limo_visualization],
+        )
+    )
+
+    return LaunchDescription([
+        start_mapping_nodes,
+        start_visualization,
+        limo_mapping,
     ])

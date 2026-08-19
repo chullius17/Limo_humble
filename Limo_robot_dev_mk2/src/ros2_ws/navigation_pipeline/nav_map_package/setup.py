@@ -29,7 +29,7 @@ setup(
             'cv_map_display = nav_map_package.cv_map_display:main',
             'nav_map = nav_map_package.nav_map:main',
             'map_saver = nav_map_package.map_saver:main',
-            'nav_map_signal_guard = nav_map_package.signal_guard:main',
+            'map_save_gui = nav_map_package.map_save_gui:main',
         ],
     },
 )

@@ -1,4 +1,4 @@
-"""Service bridge used to save the final combined map through Nav2."""
+"""Service bridge used to save the combined map through Nav2."""
 
 from pathlib import Path
 from threading import Event
@@ -8,6 +8,8 @@ from nav2_msgs.srv import SaveMap
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 
@@ -42,6 +44,10 @@ class MapSaver(Node):
         self.declare_parameter('occupied_thresh', 0.65)
         self.declare_parameter('nav2_service_timeout_sec', 10.0)
         self.declare_parameter('save_timeout_sec', 30.0)
+        self.declare_parameter(
+            'status_topic',
+            '/limo/nav_map_package/map_saver/status',
+        )
 
         save_directory = self.get_parameter('save_directory').value
         if save_directory:
@@ -58,6 +64,17 @@ class MapSaver(Node):
         self.callback_group = ReentrantCallbackGroup()
         nav2_service = self.get_parameter('nav2_service').value
         request_service = self.get_parameter('request_service').value
+        status_topic = self.get_parameter('status_topic').value
+        status_qos = QoSProfile(
+            depth=10,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.status_publisher = self.create_publisher(
+            String,
+            status_topic,
+            status_qos,
+        )
         self.save_client = self.create_client(
             SaveMap,
             nav2_service,
@@ -71,20 +88,39 @@ class MapSaver(Node):
         )
         self.saving = False
 
-        self.get_logger().info(
+        self.publish_status(
+            'INFO',
             f'Ready on {request_service}; Nav2 target is {nav2_service}'
         )
+
+    def publish_status(self, level, message):
+        """Publish a saver event for the GUI terminal and ROS logs."""
+        status = String()
+        status.data = f'[{level}] {message}'
+        self.status_publisher.publish(status)
+        logger = (
+            self.get_logger().error
+            if level == 'ERROR'
+            else self.get_logger().info
+        )
+        logger(message)
 
     def save_callback(self, _request, response):
         if self.saving:
             response.success = False
             response.message = 'A map save request is already running'
+            self.publish_status('ERROR', response.message)
             return response
 
         self.saving = True
+        self.publish_status('INFO', 'Map save request received')
         try:
             service_timeout = float(
                 self.get_parameter('nav2_service_timeout_sec').value
+            )
+            self.publish_status(
+                'INFO',
+                f"Waiting for Nav2 service '{self.save_client.srv_name}'",
             )
             if not self.save_client.wait_for_service(
                 timeout_sec=service_timeout
@@ -93,7 +129,7 @@ class MapSaver(Node):
                 response.message = (
                     f"Nav2 service '{self.save_client.srv_name}' unavailable"
                 )
-                self.get_logger().error(response.message)
+                self.publish_status('ERROR', response.message)
                 return response
 
             map_name = self.get_parameter('map_name').value
@@ -110,8 +146,9 @@ class MapSaver(Node):
                 self.get_parameter('occupied_thresh').value
             )
 
-            self.get_logger().info(
-                f"Asking Nav2 to save {request.map_topic} as '{save_path}'"
+            self.publish_status(
+                'INFO',
+                f"Saving {request.map_topic} as '{save_path}'",
             )
             future = self.save_client.call_async(request)
             completed = Event()
@@ -122,7 +159,7 @@ class MapSaver(Node):
             if not completed.wait(timeout=save_timeout):
                 response.success = False
                 response.message = 'Timed out while Nav2 was saving the map'
-                self.get_logger().error(response.message)
+                self.publish_status('ERROR', response.message)
                 return response
 
             try:
@@ -130,16 +167,16 @@ class MapSaver(Node):
             except Exception as exc:
                 response.success = False
                 response.message = f'Nav2 SaveMap call failed: {exc}'
-                self.get_logger().error(response.message)
+                self.publish_status('ERROR', response.message)
                 return response
 
             response.success = bool(nav2_response.result)
             if response.success:
                 response.message = f'Map saved as {save_path}.yaml/.pgm'
-                self.get_logger().info(response.message)
+                self.publish_status('SUCCESS', response.message)
             else:
                 response.message = 'Nav2 received the request but failed to save'
-                self.get_logger().error(response.message)
+                self.publish_status('ERROR', response.message)
             return response
         finally:
             self.saving = False

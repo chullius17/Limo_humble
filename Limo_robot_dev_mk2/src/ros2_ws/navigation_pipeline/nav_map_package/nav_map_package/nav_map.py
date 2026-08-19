@@ -5,7 +5,6 @@ import numpy as np
 import rclpy
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
-from rclpy.signals import SignalHandlerOptions
 from rclpy.qos import (
     DurabilityPolicy,
     HistoryPolicy,
@@ -15,7 +14,6 @@ from rclpy.qos import (
 )
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
-from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
@@ -38,12 +36,6 @@ class NavMap(Node):
         )
         self.declare_parameter('publish_rate_hz', 10.0)
         self.declare_parameter('lidar_cost', 100)
-        self.declare_parameter(
-            'save_service',
-            '/limo/nav_map_package/map_saver/save_map',
-        )
-        self.declare_parameter('save_service_timeout_sec', 10.0)
-        self.declare_parameter('save_response_timeout_sec', 45.0)
 
         self.global_frame = self.get_parameter('global_frame').value
         self.static_map_topic = self.get_parameter('static_map_topic').value
@@ -52,7 +44,6 @@ class NavMap(Node):
         self.output_topic = self.get_parameter('output_topic').value
         publish_rate_hz = float(self.get_parameter('publish_rate_hz').value)
         self.lidar_cost = int(self.get_parameter('lidar_cost').value)
-        self.save_service_name = self.get_parameter('save_service').value
 
         if publish_rate_hz <= 0.0:
             raise ValueError('publish_rate_hz must be greater than zero')
@@ -96,59 +87,12 @@ class NavMap(Node):
             self.output_topic,
             map_qos,
         )
-        self.save_client = self.create_client(
-            Trigger,
-            self.save_service_name,
-        )
-        self.save_requested = False
         self.create_timer(1.0 / publish_rate_hz, self.publish_combined_map)
 
         self.get_logger().info(
             f'Combining static={self.static_map_topic}, cv={self.cv_grid_topic}, '
             f'laser={self.scan_topic} -> {self.output_topic}'
         )
-
-    def save_map_before_shutdown(self) -> bool:
-        """Request the final Nav2 save and wait before allowing shutdown."""
-        if self.save_requested:
-            return True
-        self.save_requested = True
-
-        service_timeout = float(
-            self.get_parameter('save_service_timeout_sec').value
-        )
-        self.get_logger().info(
-            f'Waiting for final map save service {self.save_service_name}...'
-        )
-        if not self.save_client.wait_for_service(timeout_sec=service_timeout):
-            self.get_logger().error(
-                f'Map save service {self.save_service_name} is unavailable'
-            )
-            return False
-
-        future = self.save_client.call_async(Trigger.Request())
-        response_timeout = float(
-            self.get_parameter('save_response_timeout_sec').value
-        )
-        rclpy.spin_until_future_complete(
-            self,
-            future,
-            timeout_sec=response_timeout,
-        )
-        if not future.done():
-            self.get_logger().error('Timed out waiting for final map save')
-            return False
-        try:
-            response = future.result()
-        except Exception as exc:
-            self.get_logger().error(f'Final map save call failed: {exc}')
-            return False
-
-        if response.success:
-            self.get_logger().info(response.message)
-            return True
-        self.get_logger().error(response.message)
-        return False
 
     def static_map_callback(self, msg: OccupancyGrid) -> None:
         self.static_map = msg
@@ -316,20 +260,13 @@ class NavMap(Node):
 
 
 def main(args=None):
-    # Keep the ROS context alive after SIGINT so the final service request can
-    # still be completed before this process exits.
-    rclpy.init(
-        args=args,
-        signal_handler_options=SignalHandlerOptions.NO,
-    )
+    rclpy.init(args=args)
     node = NavMap()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info('Shutdown requested; saving final map...')
+        pass
     finally:
-        if rclpy.ok():
-            node.save_map_before_shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

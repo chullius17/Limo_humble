@@ -24,10 +24,12 @@
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>custom_start</exec_depend>
 
   <!-- Python dependencies -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-pyqt5</exec_depend>
 
   <!-- Needed for get_package_share_directory -->
   <exec_depend>ament_index_python</exec_depend>
