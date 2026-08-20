@@ -351,9 +351,9 @@ Es würde einfach in andere Datei angerufen werden. -->
                 <steering_wheel_joint>/</steering_wheel_joint> 
 
                 <left_steering_pid_gain>10000 100 10</left_steering_pid_gain>
-                <left_steering_i_rang>0 0</left_steering_i_rang>
+                <left_steering_i_range>0 0</left_steering_i_range>
                 <right_steering_pid_gain>10000 100 10</right_steering_pid_gain>
-                <right_steering_i_rang>0 0</right_steering_i_rang>
+                <right_steering_i_range>0 0</right_steering_i_range>
                 <linear_velocity_pid_gain>0.5 10 0.001</linear_velocity_pid_gain>
                 <linear_velocity_i_range>0 0</linear_velocity_i_range>
 
@@ -365,12 +365,23 @@ Es würde einfach in andere Datei angerufen werden. -->
                 <max_wheel_acceleration>1.0</max_wheel_acceleration>
                 <command_topic>cmd_vel</command_topic>
                 <publish_odom>true</publish_odom>
-                <publish_odom_tf>true</publish_odom_tf>
+                <publish_odom_tf>false</publish_odom_tf>        <!-- Set to false in order to use EKF node -->
                 <publish_wheel_tf>true</publish_wheel_tf>
                 <odometry_topic>odom</odometry_topic>
                 <odometry_frame>odom</odometry_frame>
                 <robot_base_frame>base_link</robot_base_frame>
                 <odometry_source>1</odometry_source>
+            </plugin>
+
+            <!--
+                Publish the measured steering joint positions for diagnostics.
+                Source: https://github.com/ros-simulation/gazebo_ros_pkgs/blob/ros2/gazebo_plugins/src/gazebo_ros_joint_state_publisher.cpp
+            -->
+            <plugin name="steering_joint_state_publisher"
+                    filename="libgazebo_ros_joint_state_publisher.so">
+                <update_rate>100</update_rate>
+                <joint_name>front_left_steer_joint</joint_name>
+                <joint_name>front_right_steer_joint</joint_name>
             </plugin>
         </gazebo>
     </xacro:macro>

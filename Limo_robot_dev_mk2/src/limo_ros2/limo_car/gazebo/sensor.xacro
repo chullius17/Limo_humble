@@ -201,14 +201,17 @@ realisierbar elektrische Komponente, also Sensoren aus Gazebo-Package. Diese Ant
                 <topic>__default_topic__</topic>
                 <pose>0 0 0 0 0 0</pose>
 
+                <!--
+                    ROS 2 GazeboRosImuSensor publishes on ~/out; remap it to the
+                    topic consumed by robot_localization.
+                    Source: https://github.com/ros-simulation/gazebo_ros_pkgs/blob/ros2/gazebo_plugins/src/gazebo_ros_imu_sensor.cpp
+                -->
                 <plugin filename="libgazebo_ros_imu_sensor.so" name="imu_plugin">
-                    <topicName>/limo/imu</topicName>
-                    <bodyName>${frame_prefix}_link</bodyName>
-                    <updateRateHZ>100.0</updateRateHZ>
-                    <gaussianNoise>0.001</gaussianNoise>
-                    <xyzOffset>0 0 0</xyzOffset>
-                    <rpyOffset>0 0 0</rpyOffset>
-                    <frameName>${frame_prefix}_link</frameName>
+                    <ros>
+                        <remapping>~/out:=/limo/imu</remapping>
+                    </ros>
+                    <frame_name>${frame_prefix}_link</frame_name>
+                    <initial_orientation_as_reference>false</initial_orientation_as_reference>
                 </plugin>
             </sensor>
         </gazebo>

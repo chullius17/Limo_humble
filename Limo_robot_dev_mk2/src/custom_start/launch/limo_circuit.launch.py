@@ -23,16 +23,29 @@ def generate_launch_description():
     default_world = os.path.join(
         custom_start_share, 'worlds', 'limo_circuit_world.world'
     )
+    ekf_config = os.path.join(custom_start_share, 'config', 'ekf.yaml')
     model_path = os.path.join(custom_start_share, 'models')
 
     world = LaunchConfiguration('world')
     gui = LaunchConfiguration('gui')
+    use_sim_time = LaunchConfiguration('use_sim_time')
 
     robot_state_publisher = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(limo_car_share, 'launch', 'ackermann.launch.py')
         ),
-        launch_arguments={'use_sim_time': 'true'}.items(),
+        launch_arguments={'use_sim_time': use_sim_time}.items(),
+    )
+
+    ekf_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[
+            ekf_config,
+            {'use_sim_time': use_sim_time},
+        ],
     )
 
     gazebo_server = ExecuteProcess(
@@ -69,6 +82,10 @@ def generate_launch_description():
             'gui', default_value='true',
             description='Start the Gazebo graphical client.',
         ),
+        DeclareLaunchArgument(
+            'use_sim_time', default_value='true',
+            description='Use the clock published by Gazebo.',
+        ),
         SetEnvironmentVariable(
             'GAZEBO_MODEL_PATH',
             [model_path, ':', EnvironmentVariable('GAZEBO_MODEL_PATH', default_value='')],
@@ -77,4 +94,5 @@ def generate_launch_description():
         gazebo_server,
         gazebo_client,
         spawn_robot,
+        ekf_node,
     ])

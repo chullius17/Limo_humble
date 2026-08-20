@@ -14,8 +14,13 @@ def generate_launch_description():
     default_config = os.path.join(
         custom_start_share, 'config', 'limo_mapping.rviz'
     )
+    use_sim_time = LaunchConfiguration('use_sim_time')
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'use_sim_time', default_value='true',
+            description='Use the clock published by Gazebo.',
+        ),
         DeclareLaunchArgument(
             'rviz_config', default_value=default_config,
             description='Absolute path of the RViz configuration file.',
@@ -26,5 +31,6 @@ def generate_launch_description():
             name='rviz2',
             output='screen',
             arguments=['-d', LaunchConfiguration('rviz_config')],
+            parameters=[{'use_sim_time': use_sim_time}],
         ),
     ])
