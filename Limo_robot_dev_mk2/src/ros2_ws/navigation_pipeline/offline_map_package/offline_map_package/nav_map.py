@@ -397,8 +397,14 @@ class NavMap(Node):
         # Derive the dedicated CV map after the combined map so thresholding
         # does not change the combined output. "Greater than" is intentional:
         # a cost equal to the configured threshold is considered free.
-        cv_map = cv_layer.copy()
-        cv_map[cv_map <= self.cv_cost_threshold] = 0
+        # AMCL-style binary layer: every retained CV obstacle is occupied and
+        # every other cell is free. Do not preserve semantic 30/60/100 costs in
+        # this dedicated map; those remain available in the combined map.
+        cv_map = np.where(
+            cv_layer > self.cv_cost_threshold,
+            100,
+            0,
+        ).astype(np.int16)
         self.laser_map_pub.publish(self._make_output_message(laser_map, stamp))
         self.cv_map_pub.publish(self._make_output_message(cv_map, stamp))
 

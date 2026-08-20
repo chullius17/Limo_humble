@@ -22,7 +22,7 @@ from collections import deque
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 
 
-class MetricBEV(Node):
+class OfflineMetricBEV(Node):
     """
     Converts the turquoise, white and magenta channels into metric cost grids.
     """
@@ -47,21 +47,13 @@ class MetricBEV(Node):
     ROI_FRACTION = 0.4
     RULER_FRACTION = 0.08
 
-    def __init__(
-        self,
-        node_name='metric_bev',
-        publish_individual=True,
-        publish_combined=True,
-        topic_namespace='metric_bev',
-        frame_prefix='metric_bev_origin',
-        default_publish_debug=True,
-    ):
-        super().__init__(node_name)
+    def __init__(self):
+        super().__init__('offline_metric_bev')
         self.bridge = CvBridge()
-        self.publish_individual = publish_individual
-        self.publish_combined = publish_combined
-        self.topic_namespace = topic_namespace
-        self.frame_prefix = frame_prefix
+        self.publish_individual = True
+        self.publish_combined = False
+        self.topic_namespace = 'offline/metric_bev'
+        self.frame_prefix = 'offline_metric_bev_origin'
 
         self.latest_bev_stamp = None
 
@@ -95,7 +87,7 @@ class MetricBEV(Node):
         self.declare_parameter('fixed_frame', 'base_link')
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.0092)
-        self.declare_parameter('publish_debug', default_publish_debug)
+        self.declare_parameter('publish_debug', True)
 
         self.fixed_frame   = self.get_parameter('fixed_frame').value
         self.global_frame  = self.get_parameter('global_frame').value
@@ -188,7 +180,7 @@ class MetricBEV(Node):
         }
 
         self.get_logger().info(
-            f'{node_name} initialized for channels {self.colors}; '
+            f'offline_metric_bev initialized for channels {self.colors}; '
             f'individual={self.publish_individual}, combined={self.publish_combined}'
         )
 
@@ -479,7 +471,7 @@ class MetricBEV(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MetricBEV()
+    node = OfflineMetricBEV()
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):

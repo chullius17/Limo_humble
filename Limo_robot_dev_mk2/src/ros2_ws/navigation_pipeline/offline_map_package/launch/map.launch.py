@@ -45,7 +45,7 @@ def generate_launch_description():
     )
 
     offline_metric_bev = Node(
-        package='nav_map_package',
+        package='offline_map_package',
         executable='offline_metric_bev',
         name='offline_metric_bev',
         output='screen',
@@ -53,7 +53,7 @@ def generate_launch_description():
     )
     filtering_nodes = [
         Node(
-            package='nav_map_package',
+            package='offline_map_package',
             executable='filtering',
             name=f'filtering_{color.lower()}',
             output='screen',
@@ -62,14 +62,14 @@ def generate_launch_description():
         for color in ('TURQUOISE', 'WHITE', 'MAGENTA')
     ]
     cv_map_display = Node(
-        package='nav_map_package',
+        package='offline_map_package',
         executable='cv_map_display',
         name='cv_map_display',
         output='screen',
         parameters=[{'enable_telemetry': False}],
     )
     nav_map = Node(
-        package='nav_map_package',
+        package='offline_map_package',
         executable='nav_map',
         name='nav_map',
         output='screen',
@@ -121,24 +121,34 @@ def generate_launch_description():
         }],
     )
     saver_node = Node(
-        package='nav_map_package',
+        package='offline_map_package',
         executable='map_saver',
         name='nav_map_saver',
         output='screen',
         parameters=[{
-            'map_topic': (
+            'combined_map_topic': (
                 '/limo/nav_map_package/offline/nav_map/combined_grid'
+            ),
+            'laser_map_topic': (
+                '/limo/nav_map_package/offline/nav_map/laser_map'
+            ),
+            'cv_map_topic': (
+                '/limo/nav_map_package/offline/nav_map/cv_map'
             ),
             'request_service': (
                 '/limo/nav_map_package/offline/map_saver/save_map'
             ),
             'nav2_service': '/map_saver/save_map',
-            'map_name': 'limo_map',
-            'map_mode': 'scale',
+            'combined_map_name': 'limo_map_combined',
+            'laser_map_name': 'limo_map_laser',
+            'cv_map_name': 'limo_map_cv',
+            'combined_map_mode': 'scale',
+            'laser_map_mode': 'trinary',
+            'cv_map_mode': 'trinary',
         }],
     )
     map_save_gui = Node(
-        package='nav_map_package',
+        package='offline_map_package',
         executable='map_save_gui',
         name='map_save_gui',
         output='screen',

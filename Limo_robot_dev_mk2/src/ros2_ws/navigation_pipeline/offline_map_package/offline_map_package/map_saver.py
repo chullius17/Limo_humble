@@ -1,4 +1,4 @@
-"""Service bridge used to save the combined map through Nav2."""
+"""Service bridge used to save all maps produced by ``nav_map``."""
 
 from pathlib import Path
 from threading import Event
@@ -22,7 +22,7 @@ def find_project_root(start: Path):
 
 
 class MapSaver(Node):
-    """Expose a simple service and delegate the actual map write to Nav2."""
+    """Expose one service that saves the combined, laser and CV maps."""
 
     def __init__(self):
         super().__init__('nav_map_saver')
@@ -33,13 +33,25 @@ class MapSaver(Node):
         )
         self.declare_parameter('nav2_service', '/map_saver/save_map')
         self.declare_parameter(
-            'map_topic',
+            'combined_map_topic',
             '/limo/nav_map_package/offline/nav_map/combined_grid',
         )
+        self.declare_parameter(
+            'laser_map_topic',
+            '/limo/nav_map_package/offline/nav_map/laser_map',
+        )
+        self.declare_parameter(
+            'cv_map_topic',
+            '/limo/nav_map_package/offline/nav_map/cv_map',
+        )
         self.declare_parameter('save_directory', '')
-        self.declare_parameter('map_name', 'limo_map')
+        self.declare_parameter('combined_map_name', 'limo_map_combined')
+        self.declare_parameter('laser_map_name', 'limo_map_laser')
+        self.declare_parameter('cv_map_name', 'limo_map_cv')
         self.declare_parameter('image_format', 'pgm')
-        self.declare_parameter('map_mode', 'scale')
+        self.declare_parameter('combined_map_mode', 'scale')
+        self.declare_parameter('laser_map_mode', 'trinary')
+        self.declare_parameter('cv_map_mode', 'trinary')
         self.declare_parameter('free_thresh', 0.25)
         self.declare_parameter('occupied_thresh', 0.65)
         self.declare_parameter('nav2_service_timeout_sec', 10.0)
@@ -132,54 +144,96 @@ class MapSaver(Node):
                 self.publish_status('ERROR', response.message)
                 return response
 
-            map_name = self.get_parameter('map_name').value
-            save_path = self.save_directory / map_name
-            request = SaveMap.Request()
-            request.map_topic = self.get_parameter('map_topic').value
-            request.map_url = str(save_path)
-            request.image_format = self.get_parameter('image_format').value
-            request.map_mode = self.get_parameter('map_mode').value
-            request.free_thresh = float(
-                self.get_parameter('free_thresh').value
+            maps = (
+                (
+                    'combined',
+                    'combined_map_topic',
+                    'combined_map_name',
+                    'combined_map_mode',
+                ),
+                (
+                    'laser',
+                    'laser_map_topic',
+                    'laser_map_name',
+                    'laser_map_mode',
+                ),
+                ('CV', 'cv_map_topic', 'cv_map_name', 'cv_map_mode'),
             )
-            request.occupied_thresh = float(
-                self.get_parameter('occupied_thresh').value
-            )
+            saved = []
+            failed = []
+            for label, topic_parameter, name_parameter, mode_parameter in maps:
+                topic = self.get_parameter(topic_parameter).value
+                map_name = self.get_parameter(name_parameter).value
+                map_mode = self.get_parameter(mode_parameter).value
+                if self._save_map(label, topic, map_name, map_mode):
+                    saved.append(map_name)
+                else:
+                    failed.append(map_name)
 
-            self.publish_status(
-                'INFO',
-                f"Saving {request.map_topic} as '{save_path}'",
-            )
-            future = self.save_client.call_async(request)
-            completed = Event()
-            future.add_done_callback(lambda _future: completed.set())
-            save_timeout = float(
-                self.get_parameter('save_timeout_sec').value
-            )
-            if not completed.wait(timeout=save_timeout):
-                response.success = False
-                response.message = 'Timed out while Nav2 was saving the map'
-                self.publish_status('ERROR', response.message)
-                return response
-
-            try:
-                nav2_response = future.result()
-            except Exception as exc:
-                response.success = False
-                response.message = f'Nav2 SaveMap call failed: {exc}'
-                self.publish_status('ERROR', response.message)
-                return response
-
-            response.success = bool(nav2_response.result)
+            response.success = not failed
             if response.success:
-                response.message = f'Map saved as {save_path}.yaml/.pgm'
+                response.message = 'Saved all three maps: ' + ', '.join(saved)
                 self.publish_status('SUCCESS', response.message)
             else:
-                response.message = 'Nav2 received the request but failed to save'
+                response.message = (
+                    f"Saved {len(saved)}/3 maps; failed: {', '.join(failed)}"
+                )
                 self.publish_status('ERROR', response.message)
             return response
         finally:
             self.saving = False
+
+    def _save_map(self, label, topic, map_name, map_mode):
+        """Save one OccupancyGrid through Nav2 and report its result."""
+        save_path = self.save_directory / map_name
+        request = SaveMap.Request()
+        request.map_topic = topic
+        request.map_url = str(save_path)
+        request.image_format = self.get_parameter('image_format').value
+        request.map_mode = map_mode
+        request.free_thresh = float(self.get_parameter('free_thresh').value)
+        request.occupied_thresh = float(
+            self.get_parameter('occupied_thresh').value
+        )
+
+        self.publish_status(
+            'INFO',
+            f"Saving {label} map in {map_mode} mode from {topic} "
+            f"as '{save_path}'",
+        )
+        future = self.save_client.call_async(request)
+        completed = Event()
+        future.add_done_callback(lambda _future: completed.set())
+        save_timeout = float(self.get_parameter('save_timeout_sec').value)
+        if not completed.wait(timeout=save_timeout):
+            self.publish_status(
+                'ERROR',
+                f'Timed out while Nav2 was saving the {label} map',
+            )
+            return False
+
+        try:
+            nav2_response = future.result()
+        except Exception as exc:
+            self.publish_status(
+                'ERROR',
+                f'Nav2 failed while saving the {label} map: {exc}',
+            )
+            return False
+
+        if not nav2_response.result:
+            self.publish_status(
+                'ERROR',
+                f'Nav2 could not save the {label} map from {topic}',
+            )
+            return False
+
+        image_format = self.get_parameter('image_format').value
+        self.publish_status(
+            'SUCCESS',
+            f"Saved {label} map as {save_path}.yaml/.{image_format}",
+        )
+        return True
 
 
 def main(args=None):

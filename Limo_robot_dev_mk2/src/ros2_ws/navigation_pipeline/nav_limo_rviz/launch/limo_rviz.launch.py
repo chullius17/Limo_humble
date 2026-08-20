@@ -1,8 +1,9 @@
 from launch import LaunchDescription
-from launch.actions import TimerAction
+from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from pathlib import Path
 
 
@@ -28,6 +29,7 @@ def generate_launch_description():
     )
 
     use_sim_time = {'use_sim_time': True}
+    start_map_server = LaunchConfiguration('start_map_server')
     rviz_config = PathJoinSubstitution([
         FindPackageShare('nav_limo_rviz'),
         'config',
@@ -102,7 +104,8 @@ def generate_launch_description():
 
     map_launch = TimerAction(
         period=1.0,
-        actions=[map_server]         
+        actions=[map_server],
+        condition=IfCondition(start_map_server),
     )
 
     rviz_launch = TimerAction(
@@ -111,8 +114,9 @@ def generate_launch_description():
     )
 
     lifecycle_launch = TimerAction(
-        period=6.0,                    
-        actions=[lifecycle_manager]
+        period=6.0,
+        actions=[lifecycle_manager],
+        condition=IfCondition(start_map_server),
     )
 
     # =========================
@@ -120,6 +124,11 @@ def generate_launch_description():
     # =========================
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'start_map_server',
+            default_value='true',
+            description='Start the default single Nav2 map server.',
+        ),
         tf_launch,
         map_launch,
         lifecycle_launch,
