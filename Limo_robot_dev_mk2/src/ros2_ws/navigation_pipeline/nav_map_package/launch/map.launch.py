@@ -17,6 +17,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     custom_start_share = get_package_share_directory('custom_start')
     offline_mode = LaunchConfiguration('offline_mode')
+    cost_threshold = LaunchConfiguration('cost_threshold')
     nav_rviz_config = os.path.join(
         custom_start_share,
         'config',
@@ -58,6 +59,19 @@ def generate_launch_description():
         name='metric_bev',
         output='screen',
         parameters=[{'enable_telemetry': False}],
+    )
+
+    cv_2_ptcld = Node(
+        package='nav_map_package',
+        executable='cv_2_ptcld',
+        name='cv_2_ptcld',
+        output='screen',
+        parameters=[{
+            'cost_threshold': ParameterValue(
+                cost_threshold,
+                value_type=float,
+            ),
+        }],
     )
 
     filtering_turquoise = Node(
@@ -163,6 +177,7 @@ def generate_launch_description():
 
     mapping_nodes = [
         metric_bev,
+        cv_2_ptcld,
         filtering_turquoise,
         filtering_white,
         filtering_magenta,
@@ -195,6 +210,11 @@ def generate_launch_description():
                 'Use the offline CV map display grid instead of the online '
                 'MetricBEV combined grid.'
             ),
+        ),
+        DeclareLaunchArgument(
+            'cost_threshold',
+            default_value='40.0',
+            description='Publish only cells with a cost above this value.',
         ),
         start_mapping_nodes,
         start_visualization,

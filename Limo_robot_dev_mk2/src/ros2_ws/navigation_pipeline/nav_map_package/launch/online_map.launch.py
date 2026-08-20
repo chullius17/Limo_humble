@@ -2,13 +2,16 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
+    cost_threshold = LaunchConfiguration('cost_threshold')
 
     limo_rviz = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -27,6 +30,19 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'enable_telemetry': False,
+        }],
+    )
+
+    cv_2_ptcld = Node(
+        package='nav_map_package',
+        executable='cv_2_ptcld',
+        name='cv_2_ptcld',
+        output='screen',
+        parameters=[{
+            'cost_threshold': ParameterValue(
+                cost_threshold,
+                value_type=float,
+            ),
         }],
     )
 
@@ -51,7 +67,13 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'cost_threshold',
+            default_value='40.0',
+            description='Publish only cells with a cost above this value.',
+        ),
         limo_rviz,
         metric_bev,
+        cv_2_ptcld,
         nav_map,
     ])
