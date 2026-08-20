@@ -55,14 +55,13 @@ def generate_launch_description():
 
     nav_map = Node(
         package='nav_map_package',
-        executable='nav_map',
+        executable='online_nav_map',
         name='online_nav_map',
         output='screen',
         parameters=[{
             'global_frame': 'map',
             'static_map_topic': '/map',
-            'offline_mode': False,
-            'online_cv_grid_topic': (
+            'cv_grid_topic': (
                 '/limo/nav_map_package/online/metric_bev/'
                 'cost_grid_combined'
             ),

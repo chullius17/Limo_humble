@@ -31,6 +31,7 @@ setup(
             'filtering = nav_map_package.offline_mapping.filtering:main',
             'cv_map_display = nav_map_package.offline_mapping.cv_map_display:main',
             'nav_map = nav_map_package.nav_map:main',
+            'online_nav_map = nav_map_package.online_nav_map:main',
             'map_saver = nav_map_package.offline_mapping.map_saver:main',
             'map_save_gui = nav_map_package.offline_mapping.map_save_gui:main',
         ],
