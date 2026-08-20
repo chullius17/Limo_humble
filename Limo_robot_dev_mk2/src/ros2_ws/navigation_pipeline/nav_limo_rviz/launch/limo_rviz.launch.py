@@ -31,7 +31,7 @@ def generate_launch_description():
     rviz_config = PathJoinSubstitution([
         FindPackageShare('nav_limo_rviz'),
         'config',
-        'limo_rviz.rviz',
+        'online_nav_map.rviz',
     ])
 
     # =========================

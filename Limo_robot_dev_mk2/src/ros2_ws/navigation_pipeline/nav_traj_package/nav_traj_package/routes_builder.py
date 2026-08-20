@@ -22,7 +22,7 @@ class RoutesBuilder(Node):
         # --- PARAMETER DECLARATIONS (WITH DEFAULTS) ---
         self.declare_parameter(
             'map_topic',
-            '/limo/nav_map_package/nav_map/combined_grid',
+            '/limo/nav_map_package/online/nav_map/combined_grid',
         )
         self.declare_parameter('image_topic', '/limo/nav_traj_package/routes_builder/global_map_heatmap')
         self.declare_parameter('high_cost_image_topic', '/limo/nav_traj_package/routes_builder/high_cost_heatmap')

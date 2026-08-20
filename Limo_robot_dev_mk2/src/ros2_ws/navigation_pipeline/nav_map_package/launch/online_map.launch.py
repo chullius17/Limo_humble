@@ -23,10 +23,10 @@ def generate_launch_description():
         )
     )
 
-    metric_bev = Node(
+    online_metric_bev = Node(
         package='nav_map_package',
-        executable='metric_bev',
-        name='metric_bev',
+        executable='online_metric_bev',
+        name='online_metric_bev',
         output='screen',
         parameters=[{
             'enable_telemetry': False,
@@ -46,21 +46,30 @@ def generate_launch_description():
         }],
     )
 
+    laser_cv_fusion = Node(
+        package='nav_map_package',
+        executable='laser_cv_fusion',
+        name='laser_cv_fusion',
+        output='screen',
+    )
+
     nav_map = Node(
         package='nav_map_package',
         executable='nav_map',
-        name='nav_map',
+        name='online_nav_map',
         output='screen',
         parameters=[{
             'global_frame': 'map',
             'static_map_topic': '/map',
             'offline_mode': False,
             'online_cv_grid_topic': (
-                '/limo/nav_map_package/metric_bev/online/'
+                '/limo/nav_map_package/online/metric_bev/'
                 'cost_grid_combined'
             ),
             'scan_topic': '/scan',
-            'output_topic': '/limo/nav_map_package/nav_map/combined_grid',
+            'output_topic': (
+                '/limo/nav_map_package/online/nav_map/combined_grid'
+            ),
             'publish_rate_hz': 10.0,
             'lidar_cost': 100,
         }],
@@ -73,7 +82,8 @@ def generate_launch_description():
             description='Publish only cells with a cost above this value.',
         ),
         limo_rviz,
-        metric_bev,
+        online_metric_bev,
         cv_2_ptcld,
+        laser_cv_fusion,
         nav_map,
     ])

@@ -29,12 +29,12 @@ class MapSaver(Node):
 
         self.declare_parameter(
             'request_service',
-            '/limo/nav_map_package/map_saver/save_map',
+            '/limo/nav_map_package/offline/map_saver/save_map',
         )
         self.declare_parameter('nav2_service', '/map_saver/save_map')
         self.declare_parameter(
             'map_topic',
-            '/limo/nav_map_package/nav_map/combined_grid',
+            '/limo/nav_map_package/offline/nav_map/combined_grid',
         )
         self.declare_parameter('save_directory', '')
         self.declare_parameter('map_name', 'limo_map')
@@ -46,7 +46,7 @@ class MapSaver(Node):
         self.declare_parameter('save_timeout_sec', 30.0)
         self.declare_parameter(
             'status_topic',
-            '/limo/nav_map_package/map_saver/status',
+            '/limo/nav_map_package/offline/map_saver/status',
         )
 
         save_directory = self.get_parameter('save_directory').value

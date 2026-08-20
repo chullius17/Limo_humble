@@ -53,7 +53,7 @@ Visualization Manager:
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /limo/nav_map_package/nav_map/combined_grid
+        Value: /limo/nav_map_package/offline/nav_map/combined_grid
     - Class: rviz_default_plugins/Image
       Enabled: true
       Image Topic:

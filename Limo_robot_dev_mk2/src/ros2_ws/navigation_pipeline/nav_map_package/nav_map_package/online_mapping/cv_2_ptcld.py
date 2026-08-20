@@ -27,15 +27,15 @@ class CvToPointCloud(Node):
 
         self.declare_parameter(
             'input_topic',
-            '/limo/nav_map_package/metric_bev/online/cost_grid_combined',
+            '/limo/nav_map_package/online/metric_bev/cost_grid_combined',
         )
         self.declare_parameter(
             'output_topic',
-            '/limo/nav_map_package/cv_2_ptcld/points',
+            '/limo/nav_map_package/online/cv_2_ptcld/points',
         )
         self.declare_parameter(
             'debug_topic',
-            '/limo/nav_map_package/cv_2_ptcld/debug',
+            '/limo/nav_map_package/online/cv_2_ptcld/debug',
         )
         self.declare_parameter('cost_threshold', 40.0)
         self.declare_parameter('point_z', 0.0)

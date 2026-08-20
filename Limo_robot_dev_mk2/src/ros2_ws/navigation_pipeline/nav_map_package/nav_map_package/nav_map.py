@@ -28,16 +28,16 @@ class NavMap(Node):
         self.declare_parameter('offline_mode', False)
         self.declare_parameter(
             'offline_cv_grid_topic',
-            '/limo/nav_map_package/cv_map_display/cv_map_occupancy_grid',
+            '/limo/nav_map_package/offline/cv_map_display/cv_map_occupancy_grid',
         )
         self.declare_parameter(
             'online_cv_grid_topic',
-            '/limo/nav_map_package/metric_bev/online/cost_grid_combined',
+            '/limo/nav_map_package/online/metric_bev/cost_grid_combined',
         )
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter(
             'output_topic',
-            '/limo/nav_map_package/nav_map/combined_grid',
+            '/limo/nav_map_package/online/nav_map/combined_grid',
         )
         self.declare_parameter('publish_rate_hz', 10.0)
         self.declare_parameter('lidar_cost', 100)
@@ -133,11 +133,20 @@ class NavMap(Node):
     def _lookup_transform(self, source_frame: str, stamp):
         if not source_frame:
             raise TransformException('Input message has an empty frame_id')
-        return self.tf_buffer.lookup_transform(
-            self.global_frame,
-            source_frame,
-            Time.from_msg(stamp),
-        )
+        try:
+            return self.tf_buffer.lookup_transform(
+                self.global_frame,
+                source_frame,
+                Time.from_msg(stamp),
+            )
+        except TransformException:
+            # Sensor messages can fall between two simulated-clock TF updates.
+            # Use the freshest transform rather than dropping the whole layer.
+            return self.tf_buffer.lookup_transform(
+                self.global_frame,
+                source_frame,
+                Time(),
+            )
 
     def _transform_xy(self, x: np.ndarray, y: np.ndarray, transform):
         yaw = self._yaw_from_quaternion(transform.transform.rotation)

@@ -34,11 +34,11 @@ class MapSaveGuiNode(Node):
         self.signals = signals
         self.declare_parameter(
             'save_service',
-            '/limo/nav_map_package/map_saver/save_map',
+            '/limo/nav_map_package/offline/map_saver/save_map',
         )
         self.declare_parameter(
             'status_topic',
-            '/limo/nav_map_package/map_saver/status',
+            '/limo/nav_map_package/offline/map_saver/status',
         )
         service_name = self.get_parameter('save_service').value
         status_topic = self.get_parameter('status_topic').value

@@ -24,8 +24,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'metric_bev = nav_map_package.metric_bev:main',
+            'offline_metric_bev = nav_map_package.offline_mapping.offline_metric_bev:main',
+            'online_metric_bev = nav_map_package.online_mapping.online_metric_bev:main',
             'cv_2_ptcld = nav_map_package.online_mapping.cv_2_ptcld:main',
+            'laser_cv_fusion = nav_map_package.online_mapping.laser_cv_fusion:main',
             'filtering = nav_map_package.offline_mapping.filtering:main',
             'cv_map_display = nav_map_package.offline_mapping.cv_map_display:main',
             'nav_map = nav_map_package.nav_map:main',

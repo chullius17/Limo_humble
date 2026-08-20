@@ -65,7 +65,7 @@ Visualization Manager:
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /limo/nav_map_package/metric_bev/online/cost_grid_combined
+        Value: /limo/nav_map_package/online/metric_bev/cost_grid_combined
     - Class: rviz_default_plugins/Image
       Enabled: true
       Topic:

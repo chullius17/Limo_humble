@@ -54,22 +54,38 @@ class CVMapDisplay(Node):
         self.map_data_magenta = None
 
         # --- SUBSCRIPTIONS WITH ROI PROJECTORS ---
-        self.create_subscription(OccupancyGrid, '/limo/nav_map_package/filtering/map_paper_turquoise', self.turquoise_map_callback, 10)
-        self.create_subscription(OccupancyGrid, '/limo/nav_map_package/filtering/map_paper_white', self.white_map_callback, 10)
-        self.create_subscription(OccupancyGrid, '/limo/nav_map_package/filtering/map_paper_magenta', self.magenta_map_callback, 10)
+        filtering_topic = '/limo/nav_map_package/offline/filtering'
+        self.create_subscription(
+            OccupancyGrid,
+            f'{filtering_topic}/map_paper_turquoise',
+            self.turquoise_map_callback,
+            10,
+        )
+        self.create_subscription(
+            OccupancyGrid,
+            f'{filtering_topic}/map_paper_white',
+            self.white_map_callback,
+            10,
+        )
+        self.create_subscription(
+            OccupancyGrid,
+            f'{filtering_topic}/map_paper_magenta',
+            self.magenta_map_callback,
+            10,
+        )
         self.get_logger().info('Subscribing to TURQUOISE, WHITE and MAGENTA maps')
 
         # --- COMBINED IMAGE PUBLISHERS ---
         self.firstp_img_pub = self.create_publisher(
             Image,
-            '/limo/nav_map_package/cv_map_display/cv_map_image/raw',
+            '/limo/nav_map_package/offline/cv_map_display/cv_map_image/raw',
             10,
         )
         
         # --- NEW PUBLISHER: COMBINED OCCUPANCY GRID ---
         self.grid_pub = self.create_publisher(
             OccupancyGrid,
-            '/limo/nav_map_package/cv_map_display/cv_map_occupancy_grid',
+            '/limo/nav_map_package/offline/cv_map_display/cv_map_occupancy_grid',
             10,
         )
 

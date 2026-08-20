@@ -47,9 +47,21 @@ class MetricBEV(Node):
     ROI_FRACTION = 0.4
     RULER_FRACTION = 0.08
 
-    def __init__(self):
-        super().__init__('metric_bev')
+    def __init__(
+        self,
+        node_name='metric_bev',
+        publish_individual=True,
+        publish_combined=True,
+        topic_namespace='metric_bev',
+        frame_prefix='metric_bev_origin',
+        default_publish_debug=True,
+    ):
+        super().__init__(node_name)
         self.bridge = CvBridge()
+        self.publish_individual = publish_individual
+        self.publish_combined = publish_combined
+        self.topic_namespace = topic_namespace
+        self.frame_prefix = frame_prefix
 
         self.latest_bev_stamp = None
 
@@ -83,7 +95,7 @@ class MetricBEV(Node):
         self.declare_parameter('fixed_frame', 'base_link')
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.0092)
-        self.declare_parameter('publish_debug', True)
+        self.declare_parameter('publish_debug', default_publish_debug)
 
         self.fixed_frame   = self.get_parameter('fixed_frame').value
         self.global_frame  = self.get_parameter('global_frame').value
@@ -117,7 +129,7 @@ class MetricBEV(Node):
         if self.publish_debug:
             self.roi_debug_pub = self.create_publisher(
                 Image,
-                '/limo/nav_map_package/metric_bev/roi_debug',
+                f'/limo/nav_map_package/{self.topic_namespace}/roi_debug',
                 debug_image_qos,
             )
 
@@ -126,25 +138,30 @@ class MetricBEV(Node):
         for color in self.colors:
             suffixes = [color.lower()]
             state = {'outputs': {}}
-            for suffix in suffixes:
+            for suffix in suffixes if self.publish_individual else []:
                 output = {'topic_suffix': suffix}
                 output['costmap_pub'] = self.create_publisher(
                     OccupancyGrid,
-                    f'/limo/nav_map_package/metric_bev/cost_grid_{suffix}',
+                    f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_{suffix}',
                     map_qos_profile,
                 )
                 if self.publish_debug:
                     output['debug_pub'] = self.create_publisher(
-                        Image, f'/limo/nav_map_package/metric_bev/debug_{suffix}', 10)
+                        Image,
+                        f'/limo/nav_map_package/{self.topic_namespace}/debug_{suffix}',
+                        10,
+                    )
                 state['outputs'][suffix] = output
 
             self.color_state[color] = state
 
-        self.combined_costmap_pub = self.create_publisher(
-            OccupancyGrid,
-            '/limo/nav_map_package/metric_bev/online/cost_grid_combined',
-            map_qos_profile,
-        )
+        self.combined_costmap_pub = None
+        if self.publish_combined:
+            self.combined_costmap_pub = self.create_publisher(
+                OccupancyGrid,
+                f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_combined',
+                map_qos_profile,
+            )
 
         # Debug parameter to enable/disable telemetry logging
         self.declare_parameter('enable_telemetry', True)
@@ -171,8 +188,8 @@ class MetricBEV(Node):
         }
 
         self.get_logger().info(
-            f'MetricBEV node initialized for channels {self.colors}, '
-            f'publishing frames: {self.fixed_frame} -> metric_bev_origin_<color>'
+            f'{node_name} initialized for channels {self.colors}; '
+            f'individual={self.publish_individual}, combined={self.publish_combined}'
         )
 
         self.bev_queue = queue.Queue(maxsize=1)
@@ -197,17 +214,16 @@ class MetricBEV(Node):
             else:
                 stamp = self.get_clock().now().to_msg()
 
-        output_suffixes = [
-            suffix
-            for state in self.color_state.values()
-            for suffix in state['outputs']
-        ]
-        output_suffixes.append('combined')
+        output_suffixes = []
+        if self.publish_individual:
+            output_suffixes.extend(color.lower() for color in self.colors)
+        if self.publish_combined:
+            output_suffixes.append('combined')
         for suffix in output_suffixes:
             t = TransformStamped()
             t.header.stamp = stamp
             t.header.frame_id = self.fixed_frame   # base_link
-            t.child_frame_id = f'metric_bev_origin_{suffix}'
+            t.child_frame_id = f'{self.frame_prefix}_{suffix}'
             t.transform.translation.x = 0.6
             t.transform.translation.y = 0.0
             t.transform.translation.z = 0.0
@@ -271,7 +287,7 @@ class MetricBEV(Node):
         grid = OccupancyGrid()
 
         grid.header.stamp = header.stamp
-        grid.header.frame_id = f'metric_bev_origin_{topic_suffix}'
+        grid.header.frame_id = f'{self.frame_prefix}_{topic_suffix}'
 
         grid.info.resolution = self.resolution
         grid.info.width = w
@@ -373,15 +389,22 @@ class MetricBEV(Node):
             cost_layers.append(cost_img_cropped)
             t_color[color]['mask_inflate'] = (time.perf_counter() - t_start) * 1000
 
-            t_start = time.perf_counter()
-            output_layers = {color.lower(): cost_img_cropped}
-            for suffix, cost_layer in output_layers.items():
-                state['outputs'][suffix]['costmap_pub'].publish(
-                    self._costmap_to_occupancy_grid(cost_layer, msg.header, suffix)
-                )
-            t_color[color]['occupancy_publish'] = (time.perf_counter() - t_start) * 1000
+            if self.publish_individual:
+                t_start = time.perf_counter()
+                output_layers = {color.lower(): cost_img_cropped}
+                for suffix, cost_layer in output_layers.items():
+                    state['outputs'][suffix]['costmap_pub'].publish(
+                        self._costmap_to_occupancy_grid(
+                            cost_layer,
+                            msg.header,
+                            suffix,
+                        )
+                    )
+                t_color[color]['occupancy_publish'] = (
+                    time.perf_counter() - t_start
+                ) * 1000
 
-            if self.publish_debug:
+            if self.publish_individual and self.publish_debug:
                 debug_outputs = [
                     (suffix, cost_layer)
                     for suffix, cost_layer in output_layers.items()
@@ -399,14 +422,15 @@ class MetricBEV(Node):
         # The semantic costs match CVMapDisplay: turquoise=60, white=30 and
         # magenta=100. Taking the cell-wise maximum preserves the dominant
         # class wherever inflated layers overlap.
-        combined_cost = np.maximum.reduce(cost_layers)
-        self.combined_costmap_pub.publish(
-            self._costmap_to_occupancy_grid(
-                combined_cost,
-                msg.header,
-                'combined',
+        if self.publish_combined:
+            combined_cost = np.maximum.reduce(cost_layers)
+            self.combined_costmap_pub.publish(
+                self._costmap_to_occupancy_grid(
+                    combined_cost,
+                    msg.header,
+                    'combined',
+                )
             )
-        )
 
         t['total'] = (time.perf_counter() - start_total) * 1000
         self.log_diagnostics(t, t_color)

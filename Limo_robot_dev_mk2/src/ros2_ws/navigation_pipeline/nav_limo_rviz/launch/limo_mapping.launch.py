@@ -10,11 +10,11 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    custom_start_share = get_package_share_directory('custom_start')
+    nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
     slam_toolbox_share = get_package_share_directory('slam_toolbox')
 
     params_file = os.path.join(
-        custom_start_share, 'config', 'slam_toolbox.yaml'
+        nav_limo_rviz_share, 'config', 'slam_toolbox.yaml'
     )
     use_sim_time = LaunchConfiguration('use_sim_time')
 

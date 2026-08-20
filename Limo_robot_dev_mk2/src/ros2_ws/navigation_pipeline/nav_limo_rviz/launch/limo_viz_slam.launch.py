@@ -10,9 +10,9 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    custom_start_share = get_package_share_directory('custom_start')
+    nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
     default_config = os.path.join(
-        custom_start_share, 'config', 'limo_mapping.rviz'
+        nav_limo_rviz_share, 'config', 'base_mapping.rviz'
     )
     use_sim_time = LaunchConfiguration('use_sim_time')
 

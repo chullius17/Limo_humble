@@ -61,12 +61,21 @@ class Filtering(Node):
         # --- DYNAMIC TOPIC CONFIGURATION ---
         self.color_suffix = self.color_flag.lower()
         self.costmap_suffix = self.CHANNELS[self.color_flag]
-        costmap_topic = f'/limo/nav_map_package/metric_bev/cost_grid_{self.costmap_suffix}'
-        map_topic = f'/limo/nav_map_package/filtering/map_paper_{self.color_suffix}'
+        costmap_topic = (
+            '/limo/nav_map_package/offline/metric_bev/'
+            f'cost_grid_{self.costmap_suffix}'
+        )
+        map_topic = (
+            '/limo/nav_map_package/offline/filtering/'
+            f'map_paper_{self.color_suffix}'
+        )
 
         self.filtered_publisher = self.create_publisher(OccupancyGrid, map_topic, 10)
         self.roi_debug_publisher = self.create_publisher(
-            Image, f'/limo/nav_map_package/filtering/roi_debug_{self.color_suffix}', 10
+            Image,
+            '/limo/nav_map_package/offline/filtering/'
+            f'roi_debug_{self.color_suffix}',
+            10,
         )
 
         # --- BAYESIAN LOG-ODDS FILTER CONFIGURATION ---
@@ -129,7 +138,7 @@ class Filtering(Node):
             # Retrieving the transformation between the global world (odom) and the local sensor origin
             tf = self.tf_buffer.lookup_transform(
                 self.global_frame,
-                f'metric_bev_origin_{self.costmap_suffix}',
+                f'offline_metric_bev_origin_{self.costmap_suffix}',
                 rclpy.time.Time(),
             )
             origin_x = tf.transform.translation.x

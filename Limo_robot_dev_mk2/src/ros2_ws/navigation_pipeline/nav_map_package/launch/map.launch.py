@@ -7,6 +7,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     RegisterEventHandler,
 )
+from launch.conditions import IfCondition, UnlessCondition
 from launch.event_handlers import OnExecutionComplete, OnProcessStart
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -15,13 +16,18 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    custom_start_share = get_package_share_directory('custom_start')
+    nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
     offline_mode = LaunchConfiguration('offline_mode')
     cost_threshold = LaunchConfiguration('cost_threshold')
-    nav_rviz_config = os.path.join(
-        custom_start_share,
+    offline_rviz_config = os.path.join(
+        nav_limo_rviz_share,
         'config',
-        'nav_mapping.rviz',
+        'offline_nav_map.rviz',
+    )
+    online_rviz_config = os.path.join(
+        nav_limo_rviz_share,
+        'config',
+        'online_nav_map.rviz',
     )
 
     filtering_roi = {
@@ -34,30 +40,54 @@ def generate_launch_description():
     limo_mapping = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                custom_start_share,
+                nav_limo_rviz_share,
                 'launch',
                 'limo_mapping.launch.py',
             )
         )
     )
-    limo_visualization = IncludeLaunchDescription(
+    offline_visualization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                custom_start_share,
+                nav_limo_rviz_share,
                 'launch',
                 'limo_viz_slam.launch.py',
             )
         ),
         launch_arguments={
-            'rviz_config': nav_rviz_config,
+            'rviz_config': offline_rviz_config,
         }.items(),
+        condition=IfCondition(offline_mode),
+    )
+    online_visualization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                nav_limo_rviz_share,
+                'launch',
+                'limo_viz_slam.launch.py',
+            )
+        ),
+        launch_arguments={
+            'rviz_config': online_rviz_config,
+        }.items(),
+        condition=UnlessCondition(offline_mode),
     )
 
-    metric_bev = Node(
+    offline_metric_bev = Node(
         package='nav_map_package',
-        executable='metric_bev',
-        name='metric_bev',
+        executable='offline_metric_bev',
+        name='offline_metric_bev',
         output='screen',
+        condition=IfCondition(offline_mode),
+        parameters=[{'enable_telemetry': False}],
+    )
+
+    online_metric_bev = Node(
+        package='nav_map_package',
+        executable='online_metric_bev',
+        name='online_metric_bev',
+        output='screen',
+        condition=UnlessCondition(offline_mode),
         parameters=[{'enable_telemetry': False}],
     )
 
@@ -66,6 +96,7 @@ def generate_launch_description():
         executable='cv_2_ptcld',
         name='cv_2_ptcld',
         output='screen',
+        condition=UnlessCondition(offline_mode),
         parameters=[{
             'cost_threshold': ParameterValue(
                 cost_threshold,
@@ -74,11 +105,20 @@ def generate_launch_description():
         }],
     )
 
+    laser_cv_fusion = Node(
+        package='nav_map_package',
+        executable='laser_cv_fusion',
+        name='laser_cv_fusion',
+        output='screen',
+        condition=UnlessCondition(offline_mode),
+    )
+
     filtering_turquoise = Node(
         package='nav_map_package',
         executable='filtering',
         name='filtering_turquoise',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{'color': 'TURQUOISE', **filtering_roi}],
     )
     filtering_white = Node(
@@ -86,6 +126,7 @@ def generate_launch_description():
         executable='filtering',
         name='filtering_white',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{'color': 'WHITE', **filtering_roi}],
     )
     filtering_magenta = Node(
@@ -93,6 +134,7 @@ def generate_launch_description():
         executable='filtering',
         name='filtering_magenta',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{'color': 'MAGENTA', **filtering_roi}],
     )
 
@@ -101,27 +143,51 @@ def generate_launch_description():
         executable='cv_map_display',
         name='cv_map_display',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{'enable_telemetry': False}],
     )
 
-    nav_map = Node(
+    offline_nav_map = Node(
         package='nav_map_package',
         executable='nav_map',
-        name='nav_map',
+        name='offline_nav_map',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{
             'global_frame': 'map',
             'static_map_topic': '/map',
-            'offline_mode': ParameterValue(offline_mode, value_type=bool),
+            'offline_mode': True,
             'offline_cv_grid_topic': (
-                '/limo/nav_map_package/cv_map_display/'
+                '/limo/nav_map_package/offline/cv_map_display/'
                 'cv_map_occupancy_grid'
             ),
+            'scan_topic': '/scan',
+            'output_topic': (
+                '/limo/nav_map_package/offline/nav_map/combined_grid'
+            ),
+            'publish_rate_hz': 10.0,
+            'lidar_cost': 100,
+        }],
+    )
+
+    online_nav_map = Node(
+        package='nav_map_package',
+        executable='nav_map',
+        name='online_nav_map',
+        output='screen',
+        condition=UnlessCondition(offline_mode),
+        parameters=[{
+            'global_frame': 'map',
+            'static_map_topic': '/map',
+            'offline_mode': False,
             'online_cv_grid_topic': (
-                '/limo/nav_map_package/metric_bev/online/cost_grid_combined'
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_combined'
             ),
             'scan_topic': '/scan',
-            'output_topic': '/limo/nav_map_package/nav_map/combined_grid',
+            'output_topic': (
+                '/limo/nav_map_package/online/nav_map/combined_grid'
+            ),
             'publish_rate_hz': 10.0,
             'lidar_cost': 100,
         }],
@@ -132,6 +198,7 @@ def generate_launch_description():
         executable='map_saver_server',
         name='map_saver',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{
             'use_sim_time': True,
             'save_map_timeout': 30.0,
@@ -145,6 +212,7 @@ def generate_launch_description():
         executable='lifecycle_manager',
         name='lifecycle_manager_nav_map_saver',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{
             'use_sim_time': True,
             'autostart': True,
@@ -156,9 +224,14 @@ def generate_launch_description():
         executable='map_saver',
         name='nav_map_saver',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{
-            'map_topic': '/limo/nav_map_package/nav_map/combined_grid',
-            'request_service': '/limo/nav_map_package/map_saver/save_map',
+            'map_topic': (
+                '/limo/nav_map_package/offline/nav_map/combined_grid'
+            ),
+            'request_service': (
+                '/limo/nav_map_package/offline/map_saver/save_map'
+            ),
             'nav2_service': '/map_saver/save_map',
             'map_name': 'limo_map',
             'map_mode': 'scale',
@@ -170,19 +243,25 @@ def generate_launch_description():
         executable='map_save_gui',
         name='map_save_gui',
         output='screen',
+        condition=IfCondition(offline_mode),
         parameters=[{
-            'save_service': '/limo/nav_map_package/map_saver/save_map',
+            'save_service': (
+                '/limo/nav_map_package/offline/map_saver/save_map'
+            ),
         }],
     )
 
     mapping_nodes = [
-        metric_bev,
+        offline_metric_bev,
+        online_metric_bev,
         cv_2_ptcld,
+        laser_cv_fusion,
         filtering_turquoise,
         filtering_white,
         filtering_magenta,
         cv_map_display,
-        nav_map,
+        offline_nav_map,
+        online_nav_map,
         nav2_map_saver,
         map_saver_lifecycle,
         saver_node,
@@ -195,11 +274,19 @@ def generate_launch_description():
             on_completion=mapping_nodes,
         )
     )
-    start_visualization = RegisterEventHandler(
+    start_offline_visualization = RegisterEventHandler(
         OnProcessStart(
             target_action=map_save_gui,
-            on_start=[limo_visualization],
-        )
+            on_start=[offline_visualization],
+        ),
+        condition=IfCondition(offline_mode),
+    )
+    start_online_visualization = RegisterEventHandler(
+        OnProcessStart(
+            target_action=online_nav_map,
+            on_start=[online_visualization],
+        ),
+        condition=UnlessCondition(offline_mode),
     )
 
     return LaunchDescription([
@@ -217,6 +304,7 @@ def generate_launch_description():
             description='Publish only cells with a cost above this value.',
         ),
         start_mapping_nodes,
-        start_visualization,
+        start_offline_visualization,
+        start_online_visualization,
         limo_mapping,
     ])

@@ -25,7 +25,6 @@
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
-  <exec_depend>custom_start</exec_depend>
   <exec_depend>nav_limo_rviz</exec_depend>
 
   <!-- Python dependencies -->
