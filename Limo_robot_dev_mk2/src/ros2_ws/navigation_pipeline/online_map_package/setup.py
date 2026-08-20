@@ -31,6 +31,7 @@ setup(
     entry_points={
         'console_scripts': [
             'online_metric_bev = online_map_package.online_metric_bev:main',
+            'cv_weights = online_map_package.cv_weights:main',
             'cv_2_ptcld = online_map_package.cv_2_ptcld:main',
             'laser_cv_fusion = online_map_package.laser_cv_fusion:main',
             'online_nav_map = online_map_package.online_nav_map:main',

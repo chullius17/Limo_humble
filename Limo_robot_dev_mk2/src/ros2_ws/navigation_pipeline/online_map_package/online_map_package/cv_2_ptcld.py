@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 import math
+import time
 
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from nav_msgs.msg import OccupancyGrid
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
@@ -14,8 +16,11 @@ from rclpy.qos import (
     QoSProfile,
     QoSReliabilityPolicy,
 )
+from rclpy.time import Time
 from sensor_msgs.msg import Image, PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Header
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 class CvToPointCloud(Node):
@@ -40,10 +45,16 @@ class CvToPointCloud(Node):
         self.declare_parameter('cost_threshold', 40.0)
         self.declare_parameter('point_z', 0.0)
         self.declare_parameter('publish_debug', True)
+        self.declare_parameter('output_frame', 'base_link')
+        self.declare_parameter('transform_timeout_sec', 0.05)
 
         input_topic = self.get_parameter('input_topic').value
         output_topic = self.get_parameter('output_topic').value
         debug_topic = self.get_parameter('debug_topic').value
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.last_tf_warning = 0.0
 
         input_qos = QoSProfile(
             history=QoSHistoryPolicy.KEEP_LAST,
@@ -89,8 +100,81 @@ class CvToPointCloud(Node):
         )
 
         self.get_logger().info(
-            f'Converting cells from {input_topic} to {output_topic}'
+            f'Converting cells from {input_topic} to {output_topic} in frame '
+            f'{self.get_parameter("output_frame").value}'
         )
+
+    def _lookup_transform(self, target_frame, source_frame, stamp):
+        if not source_frame:
+            raise TransformException(
+                'Input occupancy grid has an empty frame_id'
+            )
+        if source_frame == target_frame:
+            return None
+
+        timeout = Duration(
+            seconds=float(
+                self.get_parameter('transform_timeout_sec').value
+            )
+        )
+        try:
+            return self.tf_buffer.lookup_transform(
+                target_frame, source_frame, Time.from_msg(stamp), timeout
+            )
+        except TransformException:
+            # Sensor messages can be a few milliseconds ahead of the latest TF.
+            return self.tf_buffer.lookup_transform(
+                target_frame, source_frame, Time(), timeout
+            )
+
+    @staticmethod
+    def _transform_xyz(xyz, transform):
+        if transform is None or xyz.size == 0:
+            return xyz
+
+        translation = transform.transform.translation
+        quaternion = transform.transform.rotation
+        norm = math.sqrt(
+            quaternion.x * quaternion.x
+            + quaternion.y * quaternion.y
+            + quaternion.z * quaternion.z
+            + quaternion.w * quaternion.w
+        )
+        if norm == 0.0:
+            raise ValueError('TF contains a zero-norm quaternion')
+
+        qx = quaternion.x / norm
+        qy = quaternion.y / norm
+        qz = quaternion.z / norm
+        qw = quaternion.w / norm
+        rotation = np.array([
+            [
+                1.0 - 2.0 * (qy * qy + qz * qz),
+                2.0 * (qx * qy - qz * qw),
+                2.0 * (qx * qz + qy * qw),
+            ],
+            [
+                2.0 * (qx * qy + qz * qw),
+                1.0 - 2.0 * (qx * qx + qz * qz),
+                2.0 * (qy * qz - qx * qw),
+            ],
+            [
+                2.0 * (qx * qz - qy * qw),
+                2.0 * (qy * qz + qx * qw),
+                1.0 - 2.0 * (qx * qx + qy * qy),
+            ],
+        ], dtype=np.float64)
+        offset = np.array(
+            [translation.x, translation.y, translation.z],
+            dtype=np.float64,
+        )
+        return xyz @ rotation.T + offset
+
+    def _warn_transform(self, message):
+        now = time.monotonic()
+        if now - self.last_tf_warning >= 2.0:
+            self.get_logger().warning(message)
+            self.last_tf_warning = now
 
     def grid_callback(self, msg: OccupancyGrid):
         width = msg.info.width
@@ -141,16 +225,41 @@ class CvToPointCloud(Node):
         x = origin.position.x + cos_angle * local_x - sin_angle * local_y
         y = origin.position.y + sin_angle * local_x + cos_angle * local_y
 
+        output_frame = str(self.get_parameter('output_frame').value)
+        if not output_frame:
+            self._warn_transform('Cannot publish cloud: output_frame is empty')
+            return
+        try:
+            transform = self._lookup_transform(
+                output_frame, msg.header.frame_id, msg.header.stamp
+            )
+            xyz = self._transform_xyz(
+                np.column_stack((
+                    x,
+                    y,
+                    np.full(rows.size, point_z, dtype=np.float64),
+                )),
+                transform,
+            )
+        except (TransformException, ValueError) as error:
+            self._warn_transform(
+                f'Cannot transform {msg.header.frame_id} to '
+                f'{output_frame}: {error}'
+            )
+            return
+
         selected_costs = costs[rows, cols].astype(np.float32)
         points = np.column_stack((
-            x.astype(np.float32),
-            y.astype(np.float32),
-            np.full(rows.size, point_z, dtype=np.float32),
+            xyz.astype(np.float32),
             selected_costs,
         ))
 
+        cloud_header = Header()
+        cloud_header.stamp = msg.header.stamp
+        cloud_header.frame_id = output_frame
+
         cloud = point_cloud2.create_cloud(
-            msg.header,
+            cloud_header,
             self.fields,
             points.tolist(),
         )

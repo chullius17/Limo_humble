@@ -7,9 +7,11 @@ Panels:
         - /Global Options1
         - /TF1
         - /LaserScan1
-        - /Map1
+        - /Online Nav Map1
+        - /Static CV Map1
         - /MetricBEV Combined1
         - /Camera RGB1
+        - /CV Weights Debug1
       Splitter Ratio: 0.5
     Tree Height: 611
   - Class: rviz_common/Views
@@ -48,13 +50,24 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Enabled: true
-      Name: Map
+      Name: Online Nav Map
       Topic:
         Depth: 1
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /map
+        Value: /limo/nav_map_package/online/nav_map/combined_grid
+    - Alpha: 0.7
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Enabled: false
+      Name: Static CV Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /limo/nav_map_package/online/maps/cv_map
     - Alpha: 0.85
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
@@ -79,6 +92,20 @@ Visualization Manager:
       Min Value: 0.0
       Name: Camera RGB
       Normalize Range: true
+      Transport Hint: raw
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /limo/nav_map_package/online/cv_weights/debug
+      Max Value: 255.0
+      Median window: 5
+      Min Value: 0.0
+      Name: CV Weights Debug
+      Normalize Range: false
       Transport Hint: raw
   Enabled: true
   Global Options:

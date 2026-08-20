@@ -90,6 +90,25 @@ def generate_launch_description():
         }],
     )
 
+    cv_weights = Node(
+        package='online_map_package',
+        executable='cv_weights',
+        name='cv_weights',
+        output='screen',
+        parameters=[{
+            'input_topic': (
+                '/limo/nav_map_package/online/maps/cv_map'
+            ),
+            'debug_topic': (
+                '/limo/nav_map_package/online/cv_weights/debug'
+            ),
+            'pointcloud_topic': (
+                '/limo/nav_map_package/online/cv_2_ptcld/points'
+            ),
+            'particle_cloud_topic': '/particle_cloud',
+        }],
+    )
+
     cv_2_ptcld = Node(
         package='online_map_package',
         executable='cv_2_ptcld',
@@ -141,6 +160,7 @@ def generate_launch_description():
         *map_servers,
         map_lifecycle_manager,
         online_metric_bev,
+        cv_weights,
         cv_2_ptcld,
         laser_cv_fusion,
         nav_map,
