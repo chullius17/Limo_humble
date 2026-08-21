@@ -37,6 +37,22 @@ def generate_launch_description():
         launch_arguments={'start_map_server': 'false'}.items(),
     )
 
+    amcl = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                nav_limo_rviz_share,
+                'launch',
+                'amcl.launch.py',
+            )
+        ),
+        launch_arguments={
+            'use_sim_time': 'true',
+            'base_frame_id': 'base_link',
+            # limo_rviz currently provides a static map -> odom transform.
+            'tf_broadcast': 'false',
+        }.items(),
+    )
+
     map_specs = (
         ('combined_map_server', 'limo_map_combined.yaml', '/map'),
         (
@@ -106,6 +122,10 @@ def generate_launch_description():
                 '/limo/nav_map_package/online/cv_2_ptcld/points'
             ),
             'particle_cloud_topic': '/particle_cloud',
+            'output_particle_cloud_topic': (
+                '/limo/nav_map_package/online/cv_weights/particle_cloud'
+            ),
+            'voxel_leaf_size': 0.10,
         }],
     )
 
@@ -120,13 +140,6 @@ def generate_launch_description():
                 value_type=float,
             ),
         }],
-    )
-
-    laser_cv_fusion = Node(
-        package='online_map_package',
-        executable='laser_cv_fusion',
-        name='laser_cv_fusion',
-        output='screen',
     )
 
     nav_map = Node(
@@ -157,11 +170,11 @@ def generate_launch_description():
             description='Publish only cells with a cost above this value.',
         ),
         limo_rviz,
+        amcl,
         *map_servers,
         map_lifecycle_manager,
         online_metric_bev,
         cv_weights,
         cv_2_ptcld,
-        laser_cv_fusion,
         nav_map,
     ])

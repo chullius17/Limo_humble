@@ -97,9 +97,9 @@ Visualization Manager:
       Enabled: true
       Topic:
         Depth: 5
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         History Policy: Keep Last
-        Reliability Policy: Best Effort
+        Reliability Policy: Reliable
         Value: /limo/nav_map_package/online/cv_weights/debug
       Max Value: 255.0
       Median window: 5
