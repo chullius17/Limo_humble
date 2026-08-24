@@ -14,17 +14,14 @@ import array
 from std_msgs.msg import Header
 from typing import Tuple
 from geometry_msgs.msg import TransformStamped
-from tf2_ros import TransformException
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
-from tf2_ros import TransformBroadcaster
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 from collections import deque
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
 
 
 class OnlineMetricBEV(Node):
     """
-    Converts the turquoise, white and magenta channels into metric cost grids.
+    Publish the metric cost grid and its thresholded binary representation.
     """
 
     COLORS = ['TURQUOISE', 'WHITE', 'MAGENTA']
@@ -33,6 +30,7 @@ class OnlineMetricBEV(Node):
         'TURQUOISE': np.array([255, 255,   0], dtype=np.uint8),
         'WHITE': np.array([255, 255, 255], dtype=np.uint8),
         'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
+        'BLUE': np.array([255,   0,   0], dtype=np.uint8),
     }
 
     TOLERANCE = 30          # Pixel-value tolerance for color matching
@@ -41,6 +39,9 @@ class OnlineMetricBEV(Node):
         'TURQUOISE': {'peak_cost': 60.0, 'radius': 2},
         'WHITE': {'peak_cost': 30.0, 'radius': 5},
         'MAGENTA': {'peak_cost': 100.0, 'radius': 5},
+        # Blue pixels identify the observed street surface. Inflation makes
+        # the binary street region less sensitive to small segmentation gaps.
+        'BLUE': {'peak_cost': 100.0, 'radius': 5},
     }
 
     DECAY = 8.0
@@ -54,8 +55,6 @@ class OnlineMetricBEV(Node):
         self.publish_combined = True
         self.topic_namespace = 'online/metric_bev'
         self.frame_prefix = 'online_metric_bev_origin'
-
-        self.latest_bev_stamp = None
 
         # Configure QoS profile compatible with RViz Map display
         map_qos_profile = QoSProfile(
@@ -88,26 +87,29 @@ class OnlineMetricBEV(Node):
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.0092)
         self.declare_parameter('publish_debug', False)
+        self.declare_parameter('binary_threshold', 40.0)
 
         self.fixed_frame   = self.get_parameter('fixed_frame').value
         self.global_frame  = self.get_parameter('global_frame').value
         self.resolution    = self.get_parameter('resolution').value
         self.publish_debug = self.get_parameter('publish_debug').value
+        self.binary_threshold = float(
+            self.get_parameter('binary_threshold').value
+        )
+        if not 0.0 <= self.binary_threshold <= 100.0:
+            raise ValueError('binary_threshold must be between 0 and 100')
 
         # Pre-build 256-entry BGR Lookup Table for heatmap rendering (shared across colors)
         lut_inputs = np.arange(256, dtype=np.uint8).reshape(256, 1)
         jet_inputs = np.clip(lut_inputs.astype(np.float32) * (255.0 / 100.0), 0, 255).astype(np.uint8)
         jet_colors = cv2.applyColorMap(jet_inputs, cv2.COLORMAP_JET).reshape(256, 3)
-        jet_colors[0] = [0, 0, 0]  # Cost 0 = black background
         self.debug_lut = jet_colors
 
-        # TF2 Listener and Broadcaster setup
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.tf_broadcaster = TransformBroadcaster(self)
-
-        # Timer at 10Hz to publish TF frames continuously
-        self.tf_timer = self.create_timer(0.1, self.tf_callback)
+        # These child frames have a constant pose relative to base_link. A
+        # latched static transform is valid for every sensor timestamp and
+        # avoids RViz message-filter delays caused by a finite dynamic cache.
+        self.tf_broadcaster = StaticTransformBroadcaster(self)
+        self._publish_static_transforms()
 
         # Single subscription shared by all active colors
         self.bev_sub = self.create_subscription(
@@ -148,11 +150,41 @@ class OnlineMetricBEV(Node):
             self.color_state[color] = state
 
         self.combined_costmap_pub = None
+        self.obstacle_costmap_pub = None
+        self.street_costmap_pub = None
+        self.combined_debug_pub = None
+        self.obstacle_debug_pub = None
+        self.street_debug_pub = None
         if self.publish_combined:
             self.combined_costmap_pub = self.create_publisher(
                 OccupancyGrid,
                 f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_combined',
                 map_qos_profile,
+            )
+            self.obstacle_costmap_pub = self.create_publisher(
+                OccupancyGrid,
+                f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_obstacles',
+                map_qos_profile,
+            )
+            self.street_costmap_pub = self.create_publisher(
+                OccupancyGrid,
+                f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_street',
+                map_qos_profile,
+            )
+            self.combined_debug_pub = self.create_publisher(
+                Image,
+                f'/limo/nav_map_package/{self.topic_namespace}/debug_combined',
+                debug_image_qos,
+            )
+            self.obstacle_debug_pub = self.create_publisher(
+                Image,
+                f'/limo/nav_map_package/{self.topic_namespace}/debug_binary_obstacles',
+                debug_image_qos,
+            )
+            self.street_debug_pub = self.create_publisher(
+                Image,
+                f'/limo/nav_map_package/{self.topic_namespace}/debug_binary_street',
+                debug_image_qos,
             )
 
         # Debug parameter to enable/disable telemetry logging
@@ -188,29 +220,17 @@ class OnlineMetricBEV(Node):
         self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker_thread.start()
 
-    def tf_callback(self):
-        """
-        Publishes the static transform between base_footprint and cv_origin_[color].
-        Uses the exact timestamp header retrieved from base_footprint via TF2 buffer.
-        """
-        try:
-            tf_base = self.tf_buffer.lookup_transform(
-                self.global_frame,
-                self.fixed_frame,
-                rclpy.time.Time()
-            )
-            stamp = tf_base.header.stamp
-        except TransformException:
-            if self.latest_bev_stamp is not None:
-                stamp = self.latest_bev_stamp
-            else:
-                stamp = self.get_clock().now().to_msg()
-
+    def _publish_static_transforms(self):
+        """Publish constant base-to-BEV transforms once on ``/tf_static``."""
         output_suffixes = []
         if self.publish_individual:
             output_suffixes.extend(color.lower() for color in self.colors)
         if self.publish_combined:
             output_suffixes.append('combined')
+            output_suffixes.append('binary_obstacles')
+            output_suffixes.append('binary_street')
+        transforms = []
+        stamp = self.get_clock().now().to_msg()
         for suffix in output_suffixes:
             t = TransformStamped()
             t.header.stamp = stamp
@@ -223,7 +243,8 @@ class OnlineMetricBEV(Node):
             t.transform.rotation.y = 0.0
             t.transform.rotation.z = 0.0
             t.transform.rotation.w = 1.0
-            self.tf_broadcaster.sendTransform(t)
+            transforms.append(t)
+        self.tf_broadcaster.sendTransform(transforms)
 
     def _crop_to_roi(self, bgr: np.ndarray) -> Tuple[np.ndarray, int, int]:
         h = bgr.shape[0]
@@ -321,7 +342,6 @@ class OnlineMetricBEV(Node):
         return debug
 
     def bev_callback(self, msg: Image):
-        self.latest_bev_stamp = msg.header.stamp
         if self.bev_queue.full():
             try:
                 self.bev_queue.get_nowait()
@@ -423,6 +443,73 @@ class OnlineMetricBEV(Node):
                     'combined',
                 )
             )
+
+            # Values above the threshold are foreground (100). Zero cells
+            # remain white in the published grid; the AMCL positive-SAD model
+            # deliberately treats only foreground cells as semantic evidence.
+            obstacle_binary = np.where(
+                combined_cost > self.binary_threshold,
+                100,
+                0,
+            ).astype(np.uint8)
+            self.obstacle_costmap_pub.publish(
+                self._costmap_to_occupancy_grid(
+                    obstacle_binary,
+                    msg.header,
+                    'binary_obstacles',
+                )
+            )
+
+            # Street evidence remains independent and comes only from BLUE.
+            # In both binary grids, ROS displays 100 as black and 0 as white.
+            street_cost = self._image_to_costmap(roi_bgr, 'BLUE')
+            street_binary = np.where(
+                street_cost > self.binary_threshold,
+                100,
+                0,
+            ).astype(np.uint8)
+            self.street_costmap_pub.publish(
+                self._costmap_to_occupancy_grid(
+                    street_binary,
+                    msg.header,
+                    'binary_street',
+                )
+            )
+
+            # Publish both diagnostics continuously so they remain observable
+            # and recordable even when RViz connects after the pipeline starts.
+            combined_debug_msg = self.bridge.cv2_to_imgmsg(
+                self._render_debug(combined_cost),
+                encoding='bgr8',
+            )
+            combined_debug_msg.header = msg.header
+            self.combined_debug_pub.publish(combined_debug_msg)
+
+            # Binary debug images use the same black-occupied, white-free
+            # convention as their corresponding OccupancyGrid outputs.
+            obstacle_debug = np.where(
+                obstacle_binary > 0,
+                0,
+                255,
+            ).astype(np.uint8)
+            obstacle_debug_msg = self.bridge.cv2_to_imgmsg(
+                obstacle_debug,
+                encoding='mono8',
+            )
+            obstacle_debug_msg.header = msg.header
+            self.obstacle_debug_pub.publish(obstacle_debug_msg)
+
+            street_debug = np.where(
+                street_binary > 0,
+                0,
+                255,
+            ).astype(np.uint8)
+            street_debug_msg = self.bridge.cv2_to_imgmsg(
+                street_debug,
+                encoding='mono8',
+            )
+            street_debug_msg.header = msg.header
+            self.street_debug_pub.publish(street_debug_msg)
 
         t['total'] = (time.perf_counter() - start_total) * 1000
         self.log_diagnostics(t, t_color)

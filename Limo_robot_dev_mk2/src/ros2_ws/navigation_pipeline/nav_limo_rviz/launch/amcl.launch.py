@@ -17,10 +17,25 @@ def generate_launch_description():
     tf_broadcast = LaunchConfiguration('tf_broadcast')
     cv_enabled = LaunchConfiguration('cv_enabled')
     cv_map_topic = LaunchConfiguration('cv_map_topic')
-    cv_cloud_topic = LaunchConfiguration('cv_cloud_topic')
+    cv_obstacle_grid_topic = LaunchConfiguration('cv_obstacle_grid_topic')
+    cv_street_map_topic = LaunchConfiguration('cv_street_map_topic')
+    cv_street_grid_topic = LaunchConfiguration('cv_street_grid_topic')
     cv_sync_tolerance = LaunchConfiguration('cv_sync_tolerance')
     laser_weight_factor = LaunchConfiguration('laser_weight_factor')
     cv_weight_factor = LaunchConfiguration('cv_weight_factor')
+    cv_obstacle_weight_factor = LaunchConfiguration(
+        'cv_obstacle_weight_factor'
+    )
+    cv_street_weight_factor = LaunchConfiguration('cv_street_weight_factor')
+    cv_sad_gain = LaunchConfiguration('cv_sad_gain')
+    cv_sad_cell_size = LaunchConfiguration('cv_sad_cell_size')
+    cv_sad_min_positive_mass = LaunchConfiguration(
+        'cv_sad_min_positive_mass'
+    )
+    alpha1 = LaunchConfiguration('alpha1')
+    alpha2 = LaunchConfiguration('alpha2')
+    alpha3 = LaunchConfiguration('alpha3')
+    alpha4 = LaunchConfiguration('alpha4')
 
     amcl = Node(
         package='nav2_amcl',
@@ -46,7 +61,9 @@ def generate_launch_description():
                 value_type=bool,
             ),
             'cv_map_topic': cv_map_topic,
-            'cv_cloud_topic': cv_cloud_topic,
+            'cv_obstacle_grid_topic': cv_obstacle_grid_topic,
+            'cv_street_map_topic': cv_street_map_topic,
+            'cv_street_grid_topic': cv_street_grid_topic,
             'cv_sync_tolerance': ParameterValue(
                 cv_sync_tolerance,
                 value_type=float,
@@ -59,14 +76,30 @@ def generate_launch_description():
                 cv_weight_factor,
                 value_type=float,
             ),
-            'cv_z_hit': 0.5,
-            'cv_z_rand': 0.5,
-            'cv_sigma_hit': 0.2,
-            'cv_max_occ_dist': 2.0,
-            'cv_sensor_max_range': 10.0,
-            'cv_voxel_leaf_size': 0.05,
-            'cv_max_points': 600,
-            'cv_occupied_threshold': 50,
+            'cv_obstacle_weight_factor': ParameterValue(
+                cv_obstacle_weight_factor,
+                value_type=float,
+            ),
+            'cv_street_weight_factor': ParameterValue(
+                cv_street_weight_factor,
+                value_type=float,
+            ),
+            'cv_sad_gain': ParameterValue(cv_sad_gain, value_type=float),
+            'cv_sad_cell_size': ParameterValue(
+                cv_sad_cell_size,
+                value_type=float,
+            ),
+            'cv_sad_min_positive_mass': ParameterValue(
+                cv_sad_min_positive_mass,
+                value_type=float,
+            ),
+            # Ackermann motion is approximated by AMCL's non-holonomic
+            # DifferentialMotionModel. alpha5 is intentionally omitted because
+            # it is only consumed by the omnidirectional model.
+            'alpha1': ParameterValue(alpha1, value_type=float),
+            'alpha2': ParameterValue(alpha2, value_type=float),
+            'alpha3': ParameterValue(alpha3, value_type=float),
+            'alpha4': ParameterValue(alpha4, value_type=float),
         }],
     )
 
@@ -126,7 +159,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'cv_enabled',
             default_value='true',
-            description='Fuse synchronized CV obstacle likelihoods.',
+            description='Fuse the synchronized CV grid SAD likelihood.',
         ),
         DeclareLaunchArgument(
             'cv_map_topic',
@@ -136,11 +169,27 @@ def generate_launch_description():
             description='Static CV occupancy map topic.',
         ),
         DeclareLaunchArgument(
-            'cv_cloud_topic',
+            'cv_obstacle_grid_topic',
             default_value=(
-                '/limo/nav_map_package/online/cv_2_ptcld/points'
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_binary_obstacles'
             ),
-            description='Robot-relative CV obstacle cloud topic.',
+            description='Robot-local obstacle OccupancyGrid SAD template.',
+        ),
+        DeclareLaunchArgument(
+            'cv_street_map_topic',
+            default_value=(
+                '/limo/nav_map_package/online/maps/street_map'
+            ),
+            description='Static street occupancy map topic.',
+        ),
+        DeclareLaunchArgument(
+            'cv_street_grid_topic',
+            default_value=(
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_binary_street'
+            ),
+            description='Robot-local street OccupancyGrid SAD template.',
         ),
         DeclareLaunchArgument(
             'cv_sync_tolerance',
@@ -155,7 +204,58 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'cv_weight_factor',
             default_value='0.25',
-            description='Exponent applied to the raw CV likelihood.',
+            description='Exponent applied to the CV SAD likelihood.',
+        ),
+        DeclareLaunchArgument(
+            'cv_obstacle_weight_factor',
+            default_value='1.0',
+            description=(
+                'Relative obstacle evidence factor; zero disables obstacle SAD.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'cv_street_weight_factor',
+            default_value='1.0',
+            description=(
+                'Relative street evidence factor; zero disables street SAD.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'cv_sad_gain',
+            default_value='20.0',
+            description='Gain converting normalized SAD into likelihood.',
+        ),
+        DeclareLaunchArgument(
+            'cv_sad_cell_size',
+            default_value='0.05',
+            description='Regular SAD template sampling size in metres.',
+        ),
+        DeclareLaunchArgument(
+            'cv_sad_min_positive_mass',
+            default_value='5.0',
+            description=(
+                'Minimum foreground mass required for a CV class to vote.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'alpha1',
+            default_value='0.2',
+            description='Rotation noise caused by Ackermann rotation.',
+        ),
+        DeclareLaunchArgument(
+            'alpha2',
+            default_value='0.2',
+            description='Rotation/steering noise caused by translation.',
+        ),
+        DeclareLaunchArgument(
+            'alpha3',
+            default_value='0.2',
+            description='Translation noise caused by translation.',
+        ),
+        DeclareLaunchArgument(
+            'alpha4',
+            default_value='0.2',
+            description='Translation noise caused by Ackermann rotation.',
         ),
         amcl,
         lifecycle_manager,

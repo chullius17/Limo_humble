@@ -22,11 +22,12 @@ class NavMap(Node):
 
     The static SLAM map provides the geometry (size, resolution and origin) of
     every output. CV cells and lidar endpoints are transformed into that common
-    grid. Three maps are published:
+    grid. Four maps are published:
 
     * combined map: static SLAM map with CV and lidar obstacles overlaid;
     * laser map: current lidar endpoints only;
     * CV map: CV cells whose cost is above ``cv_cost_threshold`` only.
+    * street map: combined-map cells whose cost is between 0 and 10.
 
     The source-specific maps use zero (free) for cells not supplied by their
     source. They are snapshots of the latest received messages, not cumulative
@@ -60,11 +61,17 @@ class NavMap(Node):
             'cv_map_topic',
             '/limo/nav_map_package/online/nav_map/cv_map',
         )
+        self.declare_parameter(
+            'street_map_topic',
+            '/limo/nav_map_package/offline/nav_map/street_map',
+        )
         # lidar_cost is assigned to each valid scan endpoint. CV costs retain
         # their original 0--100 values when copied to an output map.
         self.declare_parameter('publish_rate_hz', 10.0)
         self.declare_parameter('lidar_cost', 100)
         self.declare_parameter('cv_cost_threshold', 40.0)
+        self.declare_parameter('street_cost_min', 0.0)
+        self.declare_parameter('street_cost_max', 10.0)
 
         # Read parameters once at startup. Runtime parameter changes are not
         # supported by this node.
@@ -75,10 +82,17 @@ class NavMap(Node):
         self.output_topic = self.get_parameter('output_topic').value
         self.laser_map_topic = self.get_parameter('laser_map_topic').value
         self.cv_map_topic = self.get_parameter('cv_map_topic').value
+        self.street_map_topic = self.get_parameter('street_map_topic').value
         publish_rate_hz = float(self.get_parameter('publish_rate_hz').value)
         self.lidar_cost = int(self.get_parameter('lidar_cost').value)
         self.cv_cost_threshold = float(
             self.get_parameter('cv_cost_threshold').value
+        )
+        self.street_cost_min = float(
+            self.get_parameter('street_cost_min').value
+        )
+        self.street_cost_max = float(
+            self.get_parameter('street_cost_max').value
         )
 
         # OccupancyGrid values must remain in the ROS-defined [-1, 100] range.
@@ -89,6 +103,10 @@ class NavMap(Node):
             raise ValueError('lidar_cost must be between 0 and 100')
         if not 0.0 <= self.cv_cost_threshold <= 100.0:
             raise ValueError('cv_cost_threshold must be between 0 and 100')
+        if not 0.0 <= self.street_cost_min <= self.street_cost_max <= 100.0:
+            raise ValueError(
+                'street cost range must satisfy 0 <= min <= max <= 100'
+            )
 
         # A transient-local map publisher retains its last sample. This lets a
         # late subscriber such as AMCL receive a map immediately on connection.
@@ -130,7 +148,7 @@ class NavMap(Node):
             self.scan_callback,
             qos_profile_sensor_data,
         )
-        # All three offline maps use identical map QoS and geometry.
+        # All four offline maps use identical map QoS and geometry.
         self.map_pub = self.create_publisher(
             OccupancyGrid,
             self.output_topic,
@@ -146,14 +164,20 @@ class NavMap(Node):
             self.cv_map_topic,
             map_qos,
         )
+        self.street_map_pub = self.create_publisher(
+            OccupancyGrid,
+            self.street_map_topic,
+            map_qos,
+        )
         self.create_timer(1.0 / publish_rate_hz, self.publish_combined_map)
 
         self.get_logger().info(
             f'Offline mapping: static={self.static_map_topic}, '
             f'cv={self.cv_grid_topic}, laser={self.scan_topic} -> '
             f'combined={self.output_topic}, laser_map={self.laser_map_topic}, '
-            f'cv_map={self.cv_map_topic} '
-            f'(CV cost > {self.cv_cost_threshold:g})'
+            f'cv_map={self.cv_map_topic}, street_map={self.street_map_topic} '
+            f'(CV cost > {self.cv_cost_threshold:g}; street cost in '
+            f'[{self.street_cost_min:g}, {self.street_cost_max:g}])'
         )
 
     def static_map_callback(self, msg: OccupancyGrid) -> None:
@@ -346,7 +370,7 @@ class NavMap(Node):
         return output
 
     def publish_combined_map(self) -> None:
-        """Build and publish combined, laser-only and thresholded-CV maps."""
+        """Build and publish combined and source-specific offline maps."""
         # No output geometry is known until the first static map arrives.
         if self.static_map is None:
             return
@@ -405,8 +429,21 @@ class NavMap(Node):
             100,
             0,
         ).astype(np.int16)
+
+        # Encode low-cost, known cells as occupied in a dedicated binary mask.
+        # The inversion is intentional: this makes street observations usable
+        # as positive endpoints in a second AMCL-style likelihood field.
+        street_map = np.where(
+            (combined >= self.street_cost_min)
+            & (combined <= self.street_cost_max),
+            100,
+            0,
+        ).astype(np.int16)
         self.laser_map_pub.publish(self._make_output_message(laser_map, stamp))
         self.cv_map_pub.publish(self._make_output_message(cv_map, stamp))
+        self.street_map_pub.publish(
+            self._make_output_message(street_map, stamp)
+        )
 
 
 def main(args=None):

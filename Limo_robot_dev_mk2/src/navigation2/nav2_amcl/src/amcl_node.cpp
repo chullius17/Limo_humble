@@ -38,7 +38,6 @@
 #include "nav2_amcl/pf/pf.hpp"
 #include "nav2_util/string_utils.hpp"
 #include "nav2_amcl/sensors/laser/laser.hpp"
-#include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "tf2/convert.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/LinearMath/Transform.h"
@@ -241,26 +240,42 @@ AmclNode::AmclNode(const rclcpp::NodeOptions & options)
   add_parameter(
     "cv_map_topic", rclcpp::ParameterValue(
       std::string("/limo/nav_map_package/online/maps/cv_map")),
-    "Static CV occupancy map used to build the likelihood field");
+    "Static CV occupancy map used as the SAD reference");
   add_parameter(
-    "cv_cloud_topic", rclcpp::ParameterValue(
-      std::string("/limo/nav_map_package/online/cv_2_ptcld/points")),
-    "Robot-relative CV obstacle point cloud");
+    "cv_obstacle_grid_topic", rclcpp::ParameterValue(
+      std::string(
+        "/limo/nav_map_package/online/metric_bev/cost_grid_binary_obstacles")),
+    "Robot-local obstacle OccupancyGrid used as the first SAD template");
+  add_parameter(
+    "cv_street_map_topic", rclcpp::ParameterValue(
+      std::string("/limo/nav_map_package/online/maps/street_map")),
+    "Static street occupancy map used as the second SAD reference");
+  add_parameter(
+    "cv_street_grid_topic", rclcpp::ParameterValue(
+      std::string("/limo/nav_map_package/online/metric_bev/cost_grid_binary_street")),
+    "Robot-local street OccupancyGrid used as the second SAD template");
   add_parameter(
     "cv_sync_tolerance", rclcpp::ParameterValue(0.1),
     "Maximum allowed time difference in seconds between laser and CV data");
   add_parameter("cv_buffer_size", rclcpp::ParameterValue(10));
   add_parameter("laser_weight_factor", rclcpp::ParameterValue(1.0));
   add_parameter("cv_weight_factor", rclcpp::ParameterValue(0.25));
+  add_parameter("cv_obstacle_weight_factor", rclcpp::ParameterValue(1.0));
+  add_parameter("cv_street_weight_factor", rclcpp::ParameterValue(1.0));
   add_parameter("minimum_likelihood", rclcpp::ParameterValue(1.0e-12));
+  add_parameter("cv_sad_gain", rclcpp::ParameterValue(20.0));
+  add_parameter("cv_sad_cell_size", rclcpp::ParameterValue(0.05));
+  add_parameter("cv_sad_min_positive_mass", rclcpp::ParameterValue(5.0));
   add_parameter("cv_z_hit", rclcpp::ParameterValue(0.5));
   add_parameter("cv_z_rand", rclcpp::ParameterValue(0.5));
   add_parameter("cv_sigma_hit", rclcpp::ParameterValue(0.2));
+  add_parameter("cv_distance_exponent", rclcpp::ParameterValue(3.0));
   add_parameter("cv_max_occ_dist", rclcpp::ParameterValue(2.0));
   add_parameter("cv_sensor_max_range", rclcpp::ParameterValue(10.0));
   add_parameter("cv_voxel_leaf_size", rclcpp::ParameterValue(0.05));
   add_parameter("cv_max_points", rclcpp::ParameterValue(600));
   add_parameter("cv_occupied_threshold", rclcpp::ParameterValue(50));
+  add_parameter("cv_semantic_mismatch_penalty", rclcpp::ParameterValue(1.0));
 }
 
 AmclNode::~AmclNode()
@@ -370,12 +385,16 @@ AmclNode::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   laser_scan_sub_.reset();
 
   // CV fusion inputs and cached data
-  cv_cloud_sub_.reset();
+  cv_obstacle_grid_sub_.reset();
   cv_map_sub_.reset();
+  cv_street_map_sub_.reset();
+  cv_street_grid_sub_.reset();
   {
     std::lock_guard<std::mutex> lock(cv_mutex_);
-    cv_cloud_buffer_.clear();
+    cv_obstacle_grid_buffer_.clear();
+    cv_street_grid_buffer_.clear();
     cv_likelihood_model_.reset();
+    cv_street_likelihood_model_.reset();
   }
 
   // Map
@@ -807,160 +826,330 @@ void AmclNode::cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
     msg->info.width, msg->info.height, msg->info.resolution);
 }
 
-void AmclNode::cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+void AmclNode::cvObstacleGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg)
 {
-  if (msg->header.frame_id.empty()) {
-    RCLCPP_WARN(get_logger(), "Ignoring CV cloud with an empty frame_id");
+  const auto expected_size = static_cast<std::size_t>(msg->info.width) * msg->info.height;
+  if (msg->header.frame_id.empty() || msg->info.width == 0 || msg->info.height == 0 ||
+    msg->info.resolution <= 0.0 || msg->data.size() != expected_size)
+  {
+    RCLCPP_WARN(get_logger(), "Ignoring malformed local CV obstacle grid");
     return;
   }
 
-  // Keep only a short history. The laser callback selects from this buffer
-  // instead of requiring exact publication-time synchronization.
   std::lock_guard<std::mutex> lock(cv_mutex_);
-  cv_cloud_buffer_.push_back(msg);
-  while (cv_cloud_buffer_.size() > static_cast<std::size_t>(cv_buffer_size_)) {
-    cv_cloud_buffer_.pop_front();
+  cv_obstacle_grid_buffer_.push_back(msg);
+  while (cv_obstacle_grid_buffer_.size() > static_cast<std::size_t>(cv_buffer_size_)) {
+    cv_obstacle_grid_buffer_.pop_front();
   }
 }
 
-sensor_msgs::msg::PointCloud2::ConstSharedPtr AmclNode::findClosestCvCloud(
-  const builtin_interfaces::msg::Time & stamp, double & time_error)
+void AmclNode::cvStreetGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg)
+{
+  const auto expected_size = static_cast<std::size_t>(msg->info.width) * msg->info.height;
+  if (msg->header.frame_id.empty() || msg->info.width == 0 || msg->info.height == 0 ||
+    msg->info.resolution <= 0.0 || msg->data.size() != expected_size)
+  {
+    RCLCPP_WARN(get_logger(), "Ignoring malformed local CV street grid");
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(cv_mutex_);
+  cv_street_grid_buffer_.push_back(msg);
+  while (cv_street_grid_buffer_.size() > static_cast<std::size_t>(cv_buffer_size_)) {
+    cv_street_grid_buffer_.pop_front();
+  }
+}
+
+nav_msgs::msg::OccupancyGrid::ConstSharedPtr AmclNode::findClosestCvGrid(
+  const builtin_interfaces::msg::Time & stamp, double & time_error, bool street)
 {
   std::lock_guard<std::mutex> lock(cv_mutex_);
-  if (cv_cloud_buffer_.empty()) {
+  const auto & buffer = street ? cv_street_grid_buffer_ : cv_obstacle_grid_buffer_;
+  if (buffer.empty()) {
+    time_error = std::numeric_limits<double>::infinity();
     return nullptr;
   }
 
-  // Particle updates are driven by LaserScan timestamps, so synchronization is
-  // performed against the scan rather than against wall-clock arrival time.
   const rclcpp::Time target_time(stamp);
-  sensor_msgs::msg::PointCloud2::ConstSharedPtr closest;
+  nav_msgs::msg::OccupancyGrid::ConstSharedPtr closest;
   int64_t smallest_error = std::numeric_limits<int64_t>::max();
-  for (const auto & cloud : cv_cloud_buffer_) {
+  for (const auto & grid : buffer) {
     const int64_t signed_error =
-      (rclcpp::Time(cloud->header.stamp) - target_time).nanoseconds();
+      (rclcpp::Time(grid->header.stamp) - target_time).nanoseconds();
     const int64_t error = signed_error >= 0 ? signed_error : -signed_error;
     if (error < smallest_error) {
       smallest_error = error;
-      closest = cloud;
+      closest = grid;
     }
   }
-
-  // Reject stale observations even when they are the closest buffered sample.
   time_error = static_cast<double>(smallest_error) * 1.0e-9;
-  if (time_error > cv_sync_tolerance_) {
-    return nullptr;
-  }
-  return closest;
+  return time_error <= cv_sync_tolerance_ ? closest : nullptr;
 }
 
-std::vector<CvPoint2D> AmclNode::transformCvCloudToLaserTime(
-  const sensor_msgs::msg::PointCloud2 & cloud,
+std::vector<CvTemplateCell2D> AmclNode::transformCvGridToLaserTime(
+  const nav_msgs::msg::OccupancyGrid & grid,
   const builtin_interfaces::msg::Time & laser_stamp)
 {
-  // This advanced TF lookup performs both frame conversion and ego-motion
-  // compensation between the CV and laser timestamps, using odom as fixed frame.
   geometry_msgs::msg::TransformStamped transform_msg;
   try {
     transform_msg = tf_buffer_->lookupTransform(
       base_frame_id_, tf2_ros::fromMsg(laser_stamp),
-      nav2_util::strip_leading_slash(cloud.header.frame_id),
-      tf2_ros::fromMsg(cloud.header.stamp), odom_frame_id_);
+      nav2_util::strip_leading_slash(grid.header.frame_id),
+      tf2_ros::fromMsg(grid.header.stamp), odom_frame_id_);
   } catch (const tf2::TransformException & error) {
     RCLCPP_WARN_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "Cannot synchronize CV cloud with laser time: %s", error.what());
+      "Cannot synchronize local CV grid with laser time: %s", error.what());
     return {};
   }
 
-  // Parse only x/y/z fields and apply the synchronized rigid transform once.
-  // The CV likelihood model discards z after rejecting non-finite points.
-  tf2::Transform transform;
-  tf2::fromMsg(transform_msg.transform, transform);
-  std::vector<CvPoint2D> points;
-  points.reserve(static_cast<std::size_t>(cloud.width) * cloud.height);
-  try {
-    sensor_msgs::PointCloud2ConstIterator<float> x_iterator(cloud, "x");
-    sensor_msgs::PointCloud2ConstIterator<float> y_iterator(cloud, "y");
-    sensor_msgs::PointCloud2ConstIterator<float> z_iterator(cloud, "z");
-    for (; x_iterator != x_iterator.end(); ++x_iterator, ++y_iterator, ++z_iterator) {
-      if (!std::isfinite(*x_iterator) || !std::isfinite(*y_iterator) ||
-        !std::isfinite(*z_iterator))
-      {
+  tf2::Transform grid_to_base;
+  tf2::fromMsg(transform_msg.transform, grid_to_base);
+  const auto & origin = grid.info.origin;
+  const double origin_yaw = tf2::getYaw(origin.orientation);
+  const double origin_cos = std::cos(origin_yaw);
+  const double origin_sin = std::sin(origin_yaw);
+  const double resolution = grid.info.resolution;
+  const int block_size = std::max(
+    1, static_cast<int>(std::lround(cv_sad_cell_size_ / resolution)));
+
+  std::vector<CvTemplateCell2D> cells;
+  for (int first_row = 0; first_row < static_cast<int>(grid.info.height);
+    first_row += block_size)
+  {
+    const int last_row = std::min(
+      first_row + block_size, static_cast<int>(grid.info.height));
+    for (int first_column = 0; first_column < static_cast<int>(grid.info.width);
+      first_column += block_size)
+    {
+      const int last_column = std::min(
+        first_column + block_size, static_cast<int>(grid.info.width));
+      std::size_t known_count = 0;
+      std::size_t occupied_count = 0;
+      for (int row = first_row; row < last_row; ++row) {
+        for (int column = first_column; column < last_column; ++column) {
+          const int8_t occupancy = grid.data[
+            static_cast<std::size_t>(row) * grid.info.width + column];
+          if (occupancy >= 0) {
+            ++known_count;
+            if (occupancy >= cv_occupied_threshold_) {
+              ++occupied_count;
+            }
+          }
+        }
+      }
+      if (known_count == 0) {
         continue;
       }
-      const tf2::Vector3 transformed = transform * tf2::Vector3(
-        static_cast<double>(*x_iterator),
-        static_cast<double>(*y_iterator),
-        static_cast<double>(*z_iterator));
-      points.push_back({transformed.x(), transformed.y()});
+
+      const double local_x =
+        0.5 * static_cast<double>(first_column + last_column) * resolution;
+      const double local_y =
+        0.5 * static_cast<double>(first_row + last_row) * resolution;
+      const double source_x = origin.position.x +
+        origin_cos * local_x - origin_sin * local_y;
+      const double source_y = origin.position.y +
+        origin_sin * local_x + origin_cos * local_y;
+      const tf2::Vector3 base_point = grid_to_base * tf2::Vector3(source_x, source_y, 0.0);
+      cells.push_back(
+        {base_point.x(), base_point.y(),
+          static_cast<double>(occupied_count) / static_cast<double>(known_count)});
     }
-  } catch (const std::runtime_error & error) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(), *get_clock(), 2000,
-      "Cannot read x/y/z fields from CV cloud: %s", error.what());
-    return {};
   }
-  return points;
+
+  return cells;
+}
+
+void AmclNode::cvStreetMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  // Street and obstacle likelihood fields share the particle/global frame but
+  // remain independent maps so their raw scores can be added after scoring.
+  if (!nav2_util::validateMsg(*msg)) {
+    RCLCPP_ERROR(get_logger(), "Received CV street map is malformed. Rejecting.");
+    return;
+  }
+  if (nav2_util::strip_leading_slash(msg->header.frame_id) != global_frame_id_) {
+    RCLCPP_ERROR(
+      get_logger(), "CV street map frame '%s' does not match global frame '%s'",
+      msg->header.frame_id.c_str(), global_frame_id_.c_str());
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(cv_mutex_);
+  if (cv_street_likelihood_model_ == nullptr ||
+    !cv_street_likelihood_model_->setMap(*msg))
+  {
+    RCLCPP_ERROR(get_logger(), "Could not build the CV street likelihood field");
+    return;
+  }
+  RCLCPP_INFO(
+    get_logger(), "Received CV street likelihood map: %u x %u @ %.3f m/pix",
+    msg->info.width, msg->info.height, msg->info.resolution);
 }
 
 bool AmclNode::applyCvFusion(
   pf_sample_set_t * set,
   const builtin_interfaces::msg::Time & laser_stamp)
 {
-  // Missing, stale, or untransformable CV data is a soft failure: returning
-  // false leaves the already-computed laser weights unchanged.
-  double time_error = 0.0;
-  const auto cloud = findClosestCvCloud(laser_stamp, time_error);
-  if (cloud == nullptr) {
+  // Enabled semantic observations must be close to the LaserScan timestamp.
+  // Zero class factors are true switches: their grids and maps are not needed.
+  const bool use_obstacles = cv_obstacle_weight_factor_ > 0.0;
+  const bool use_street = cv_street_weight_factor_ > 0.0;
+  if (!use_obstacles && !use_street) {
+    return false;
+  }
+  double obstacle_time_error = 0.0;
+  double street_time_error = 0.0;
+  nav_msgs::msg::OccupancyGrid::ConstSharedPtr obstacle_grid;
+  nav_msgs::msg::OccupancyGrid::ConstSharedPtr street_grid;
+  if (use_obstacles) {
+    obstacle_grid = findClosestCvGrid(laser_stamp, obstacle_time_error, false);
+  }
+  if (use_street) {
+    street_grid = findClosestCvGrid(laser_stamp, street_time_error, true);
+  }
+  if ((use_obstacles && obstacle_grid == nullptr) ||
+    (use_street && street_grid == nullptr))
+  {
     RCLCPP_WARN_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "No CV cloud within %.3f s of the laser scan", cv_sync_tolerance_);
+      "Waiting for synchronized CV grids: tolerance=%.3f s obstacle_dt=%.4f s "
+      "street_dt=%.4f s",
+      cv_sync_tolerance_, obstacle_time_error, street_time_error);
+    return false;
+  }
+  const auto obstacle_cells = use_obstacles ?
+    transformCvGridToLaserTime(*obstacle_grid, laser_stamp) :
+    std::vector<CvTemplateCell2D>{};
+  const auto street_cells = use_street ?
+    transformCvGridToLaserTime(*street_grid, laser_stamp) :
+    std::vector<CvTemplateCell2D>{};
+  if ((use_obstacles && obstacle_cells.empty()) ||
+    (use_street && street_cells.empty()))
+  {
     return false;
   }
 
-  const auto raw_points = transformCvCloudToLaserTime(*cloud, laser_stamp);
-  if (raw_points.empty()) {
-    return false;
-  }
-
-  // Map replacement, voxelization, and scoring share the same model instance,
-  // so they are protected from the CV map callback by cv_mutex_.
-  std::vector<CvPoint2D> points;
-  std::vector<double> cv_likelihoods;
+  CvLikelihoodModel::SadScoreResult obstacle_score;
+  CvLikelihoodModel::SadScoreResult street_score;
   {
     std::lock_guard<std::mutex> lock(cv_mutex_);
-    if (cv_likelihood_model_ == nullptr || !cv_likelihood_model_->ready()) {
+    if ((use_obstacles &&
+      (cv_likelihood_model_ == nullptr || !cv_likelihood_model_->ready())) ||
+      (use_street &&
+      (cv_street_likelihood_model_ == nullptr || !cv_street_likelihood_model_->ready())))
+    {
       RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 2000, "Waiting for CV likelihood map");
+        get_logger(), *get_clock(), 2000,
+        "Waiting for enabled static CV SAD maps");
       return false;
     }
-    points = cv_likelihood_model_->voxelize(raw_points);
-    cv_likelihoods = cv_likelihood_model_->score(set, points);
+    if (use_obstacles) {
+      obstacle_score = cv_likelihood_model_->scoreSad(
+        set, obstacle_cells, cv_sad_gain_);
+    } else {
+      obstacle_score.likelihoods.resize(
+        static_cast<std::size_t>(set->sample_count), 1.0);
+      obstacle_score.normalized_sad.resize(
+        static_cast<std::size_t>(set->sample_count), 0.0);
+    }
+    if (use_street) {
+      street_score = cv_street_likelihood_model_->scoreSad(
+        set, street_cells, cv_sad_gain_);
+    } else {
+      street_score.likelihoods.resize(
+        static_cast<std::size_t>(set->sample_count), 1.0);
+      street_score.normalized_sad.resize(
+        static_cast<std::size_t>(set->sample_count), 0.0);
+    }
   }
-  if (cv_likelihoods.size() != static_cast<std::size_t>(set->sample_count)) {
+  const auto sample_count = static_cast<std::size_t>(set->sample_count);
+  if (obstacle_score.normalized_sad.size() != sample_count ||
+    street_score.normalized_sad.size() != sample_count)
+  {
     return false;
   }
 
-  // Fuse the normalized laser posterior with the raw CV likelihood:
-  // log(w_i) = alpha * log(w_laser_i) + beta * log(L_cv_i).
-  // minimum_likelihood_ prevents log(0) without changing meaningful values.
-  std::vector<double> log_weights(static_cast<std::size_t>(set->sample_count));
+  // An all-white or nearly empty class contains no reliable positive semantic
+  // evidence. Gate each enabled channel independently before normalization.
+  const bool obstacle_active = use_obstacles &&
+    obstacle_score.positive_mass >= cv_sad_min_positive_mass_;
+  const bool street_active = use_street &&
+    street_score.positive_mass >= cv_sad_min_positive_mass_;
+  const double obstacle_factor =
+    obstacle_active ? cv_obstacle_weight_factor_ : 0.0;
+  const double street_factor = street_active ? cv_street_weight_factor_ : 0.0;
+  const double semantic_factor_sum = obstacle_factor + street_factor;
+  if (semantic_factor_sum <= 0.0) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Skipping CV SAD: foreground mass below %.1f cells "
+      "(obstacles=%.1f street=%.1f)",
+      cv_sad_min_positive_mass_, obstacle_score.positive_mass,
+      street_score.positive_mass);
+    return false;
+  }
+  const double obstacle_mix = obstacle_factor / semantic_factor_sum;
+  const double street_mix = street_factor / semantic_factor_sum;
+
+  // The exponential conversion is performed directly in log space, followed
+  // by one normalization immediately before particle resampling.
+  std::vector<double> log_weights(sample_count);
+  std::vector<double> combined_sad_values(sample_count);
   double maximum_log_weight = -std::numeric_limits<double>::infinity();
-  double minimum_cv_likelihood = std::numeric_limits<double>::infinity();
-  double maximum_cv_likelihood = 0.0;
+  double obstacle_sad_sum = 0.0;
+  double street_sad_sum = 0.0;
+  double combined_sad_sum = 0.0;
+  double combined_sad_minimum = std::numeric_limits<double>::infinity();
+  double combined_sad_maximum = 0.0;
   for (int index = 0; index < set->sample_count; ++index) {
     const double laser_weight = std::max(set->samples[index].weight, minimum_likelihood_);
-    const double cv_likelihood = std::max(
-      cv_likelihoods[static_cast<std::size_t>(index)], minimum_likelihood_);
+    const auto output_index = static_cast<std::size_t>(index);
+    const double obstacle_sad = obstacle_score.normalized_sad[output_index];
+    const double street_sad = street_score.normalized_sad[output_index];
+    const double combined_sad =
+      obstacle_mix * obstacle_sad + street_mix * street_sad;
+    const double cv_log_likelihood = -cv_sad_gain_ * combined_sad;
     const double log_weight =
       laser_weight_factor_ * std::log(laser_weight) +
-      cv_weight_factor_ * std::log(cv_likelihood);
-    log_weights[static_cast<std::size_t>(index)] = log_weight;
+      cv_weight_factor_ * cv_log_likelihood;
+    log_weights[output_index] = log_weight;
+    combined_sad_values[output_index] = combined_sad;
     maximum_log_weight = std::max(maximum_log_weight, log_weight);
-    minimum_cv_likelihood = std::min(minimum_cv_likelihood, cv_likelihood);
-    maximum_cv_likelihood = std::max(maximum_cv_likelihood, cv_likelihood);
+    obstacle_sad_sum += obstacle_sad;
+    street_sad_sum += street_sad;
+    combined_sad_sum += combined_sad;
+    combined_sad_minimum = std::min(combined_sad_minimum, combined_sad);
+    combined_sad_maximum = std::max(combined_sad_maximum, combined_sad);
   }
+
+  // Report the centre and extremes of every semantic objective separately.
+  // A strong localization objective should place the obstacle, street and
+  // combined minima close to the same particle pose.
+  const auto median = [](std::vector<double> values) {
+      std::sort(values.begin(), values.end());
+      const std::size_t middle = values.size() / 2;
+      if (values.size() % 2 == 1) {
+        return values[middle];
+      }
+      return 0.5 * (values[middle - 1] + values[middle]);
+    };
+  const auto obstacle_best = std::min_element(
+    obstacle_score.normalized_sad.begin(), obstacle_score.normalized_sad.end());
+  const auto street_best = std::min_element(
+    street_score.normalized_sad.begin(), street_score.normalized_sad.end());
+  const auto combined_best = std::min_element(
+    combined_sad_values.begin(), combined_sad_values.end());
+  const auto obstacle_best_index = static_cast<std::size_t>(std::distance(
+      obstacle_score.normalized_sad.begin(), obstacle_best));
+  const auto street_best_index = static_cast<std::size_t>(std::distance(
+      street_score.normalized_sad.begin(), street_best));
+  const auto combined_best_index = static_cast<std::size_t>(std::distance(
+      combined_sad_values.begin(), combined_best));
+  const auto obstacle_minmax = std::minmax_element(
+    obstacle_score.normalized_sad.begin(), obstacle_score.normalized_sad.end());
+  const auto street_minmax = std::minmax_element(
+    street_score.normalized_sad.begin(), street_score.normalized_sad.end());
 
   // Stable log-sum-exp normalization. Subtracting the maximum log weight keeps
   // exponentials finite and does not change any ratio between particles.
@@ -984,12 +1173,44 @@ bool AmclNode::applyCvFusion(
     set->samples[index].weight /= total_weight;
   }
 
-  // Throttled diagnostics expose synchronization quality and score spread
-  // without flooding the terminal at sensor frequency.
   RCLCPP_INFO_THROTTLE(
     get_logger(), *get_clock(), 2000,
-    "Fused CV likelihood: dt=%.4f s, points=%zu, score=[%.6g, %.6g]",
-    time_error, points.size(), minimum_cv_likelihood, maximum_cv_likelihood);
+    "Fused dual CV positive SAD: dt=[%.4f, %.4f] cells=[%zu, %zu] "
+    "class_mass=[obstacles=(%.1f, %.1f) street=(%.1f, %.1f)] "
+    "active=[%d, %d] min_positive=%.1f factors=[%.3f, %.3f] mix=[%.3f, %.3f] "
+    "sad_mean=[obstacles=%.6f street=%.6f combined=%.6f] "
+    "combined_range=[%.6f, %.6f] gain=%.3f cv_factor=%.3f",
+    obstacle_time_error, street_time_error, obstacle_cells.size(), street_cells.size(),
+    obstacle_score.positive_mass, obstacle_score.negative_mass,
+    street_score.positive_mass, street_score.negative_mass,
+    obstacle_active, street_active, cv_sad_min_positive_mass_,
+    cv_obstacle_weight_factor_, cv_street_weight_factor_,
+    obstacle_mix, street_mix,
+    obstacle_sad_sum / set->sample_count, street_sad_sum / set->sample_count,
+    combined_sad_sum / set->sample_count, combined_sad_minimum, combined_sad_maximum,
+    cv_sad_gain_, cv_weight_factor_);
+  RCLCPP_INFO_THROTTLE(
+    get_logger(), *get_clock(), 2000,
+    "Dual CV positive-SAD distributions: obstacles=[min=%.6f median=%.6f max=%.6f] "
+    "street=[min=%.6f median=%.6f max=%.6f] "
+    "combined=[min=%.6f median=%.6f max=%.6f]",
+    *obstacle_minmax.first, median(obstacle_score.normalized_sad), *obstacle_minmax.second,
+    *street_minmax.first, median(street_score.normalized_sad), *street_minmax.second,
+    *combined_best, median(combined_sad_values), combined_sad_maximum);
+  RCLCPP_INFO_THROTTLE(
+    get_logger(), *get_clock(), 2000,
+    "Dual CV positive-SAD best poses: obstacles=(%.3f, %.3f, %.3f; sad=%.6f) "
+    "street=(%.3f, %.3f, %.3f; sad=%.6f) "
+    "combined=(%.3f, %.3f, %.3f; sad=%.6f)",
+    set->samples[obstacle_best_index].pose.v[0],
+    set->samples[obstacle_best_index].pose.v[1],
+    set->samples[obstacle_best_index].pose.v[2], *obstacle_best,
+    set->samples[street_best_index].pose.v[0],
+    set->samples[street_best_index].pose.v[1],
+    set->samples[street_best_index].pose.v[2], *street_best,
+    set->samples[combined_best_index].pose.v[0],
+    set->samples[combined_best_index].pose.v[1],
+    set->samples[combined_best_index].pose.v[2], *combined_best);
   return true;
 }
 
@@ -1358,20 +1579,29 @@ AmclNode::initParameters()
   // model geometry parameters currently requires reconfiguring the node.
   get_parameter("cv_enabled", cv_enabled_);
   get_parameter("cv_map_topic", cv_map_topic_);
-  get_parameter("cv_cloud_topic", cv_cloud_topic_);
+  get_parameter("cv_obstacle_grid_topic", cv_obstacle_grid_topic_);
+  get_parameter("cv_street_map_topic", cv_street_map_topic_);
+  get_parameter("cv_street_grid_topic", cv_street_grid_topic_);
   get_parameter("cv_sync_tolerance", cv_sync_tolerance_);
   get_parameter("cv_buffer_size", cv_buffer_size_);
   get_parameter("laser_weight_factor", laser_weight_factor_);
   get_parameter("cv_weight_factor", cv_weight_factor_);
+  get_parameter("cv_obstacle_weight_factor", cv_obstacle_weight_factor_);
+  get_parameter("cv_street_weight_factor", cv_street_weight_factor_);
   get_parameter("minimum_likelihood", minimum_likelihood_);
+  get_parameter("cv_sad_gain", cv_sad_gain_);
+  get_parameter("cv_sad_cell_size", cv_sad_cell_size_);
+  get_parameter("cv_sad_min_positive_mass", cv_sad_min_positive_mass_);
   get_parameter("cv_z_hit", cv_z_hit_);
   get_parameter("cv_z_rand", cv_z_rand_);
   get_parameter("cv_sigma_hit", cv_sigma_hit_);
+  get_parameter("cv_distance_exponent", cv_distance_exponent_);
   get_parameter("cv_max_occ_dist", cv_max_occ_dist_);
   get_parameter("cv_sensor_max_range", cv_sensor_max_range_);
   get_parameter("cv_voxel_leaf_size", cv_voxel_leaf_size_);
   get_parameter("cv_max_points", cv_max_points_);
   get_parameter("cv_occupied_threshold", cv_occupied_threshold_);
+  get_parameter("cv_semantic_mismatch_penalty", cv_semantic_mismatch_penalty_);
 
   save_pose_period_ = tf2::durationFromSec(1.0 / save_pose_rate);
   transform_tolerance_ = tf2::durationFromSec(tmp_tol);
@@ -1427,30 +1657,51 @@ AmclNode::initParameters()
     RCLCPP_WARN(get_logger(), "cv_buffer_size must be positive; using 10");
     cv_buffer_size_ = 10;
   }
-  if (laser_weight_factor_ < 0.0 || cv_weight_factor_ < 0.0) {
-    RCLCPP_WARN(get_logger(), "Sensor weight factors must be non-negative; using 1.0 and 0.25");
+  if (laser_weight_factor_ < 0.0 || cv_weight_factor_ < 0.0 ||
+    cv_obstacle_weight_factor_ < 0.0 ||
+    cv_street_weight_factor_ < 0.0)
+  {
+    RCLCPP_WARN(
+      get_logger(),
+      "Sensor weight factors must be non-negative; using 1.0, 0.25, 1.0, and 1.0");
     laser_weight_factor_ = 1.0;
     cv_weight_factor_ = 0.25;
+    cv_obstacle_weight_factor_ = 1.0;
+    cv_street_weight_factor_ = 1.0;
   }
   if (minimum_likelihood_ <= 0.0) {
     RCLCPP_WARN(get_logger(), "minimum_likelihood must be positive; using 1e-12");
     minimum_likelihood_ = 1.0e-12;
   }
+  if (cv_sad_gain_ < 0.0 || cv_sad_cell_size_ <= 0.0) {
+    RCLCPP_WARN(get_logger(), "Invalid CV SAD parameters; using 20.0 and 0.05 m");
+    cv_sad_gain_ = 20.0;
+    cv_sad_cell_size_ = 0.05;
+  }
+  if (cv_sad_min_positive_mass_ < 0.0) {
+    RCLCPP_WARN(
+      get_logger(), "cv_sad_min_positive_mass must be non-negative; using 5.0");
+    cv_sad_min_positive_mass_ = 5.0;
+  }
   if (
     cv_z_hit_ < 0.0 || cv_z_rand_ < 0.0 || cv_sigma_hit_ <= 0.0 ||
+    cv_distance_exponent_ <= 0.0 ||
     cv_max_occ_dist_ <= 0.0 || cv_sensor_max_range_ <= 0.0 ||
     cv_voxel_leaf_size_ <= 0.0 || cv_max_points_ < 1 ||
-    cv_occupied_threshold_ < 0 || cv_occupied_threshold_ > 100)
+    cv_occupied_threshold_ < 0 || cv_occupied_threshold_ > 100 ||
+    cv_semantic_mismatch_penalty_ < 0.0)
   {
     RCLCPP_WARN(get_logger(), "Invalid CV model parameters; restoring safe defaults");
     cv_z_hit_ = 0.5;
     cv_z_rand_ = 0.5;
     cv_sigma_hit_ = 0.2;
+    cv_distance_exponent_ = 3.0;
     cv_max_occ_dist_ = 2.0;
     cv_sensor_max_range_ = 10.0;
     cv_voxel_leaf_size_ = 0.05;
     cv_max_points_ = 600;
     cv_occupied_threshold_ = 50;
+    cv_semantic_mismatch_penalty_ = 1.0;
   }
 
   if (always_reset_initial_pose_) {
@@ -1859,29 +2110,44 @@ AmclNode::initPubSub()
   RCLCPP_INFO(get_logger(), "Subscribed to map topic.");
 
   if (cv_enabled_) {
-    // Construct the model before creating transient-local map and sensor-data
-    // cloud subscriptions, so latched input can be processed immediately.
+    // Construct the static SAD reference before transient-local subscriptions,
+    // so latched maps and the latest local template are accepted immediately.
     CvLikelihoodModel::Parameters cv_parameters;
     cv_parameters.z_hit = cv_z_hit_;
     cv_parameters.z_rand = cv_z_rand_;
     cv_parameters.sigma_hit = cv_sigma_hit_;
+    cv_parameters.distance_exponent = cv_distance_exponent_;
     cv_parameters.max_occ_dist = cv_max_occ_dist_;
     cv_parameters.sensor_max_range = cv_sensor_max_range_;
     cv_parameters.voxel_leaf_size = cv_voxel_leaf_size_;
     cv_parameters.max_points = static_cast<std::size_t>(cv_max_points_);
     cv_parameters.occupied_threshold = cv_occupied_threshold_;
+    cv_parameters.semantic_mismatch_penalty = cv_semantic_mismatch_penalty_;
     cv_likelihood_model_ = std::make_unique<CvLikelihoodModel>(cv_parameters);
+    cv_street_likelihood_model_ = std::make_unique<CvLikelihoodModel>(cv_parameters);
 
     cv_map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
       cv_map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
       std::bind(&AmclNode::cvMapReceived, this, std::placeholders::_1));
-    cv_cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-      cv_cloud_topic_, rclcpp::SensorDataQoS(),
-      std::bind(&AmclNode::cvCloudReceived, this, std::placeholders::_1));
+    cv_street_map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      cv_street_map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
+      std::bind(&AmclNode::cvStreetMapReceived, this, std::placeholders::_1));
+    cv_obstacle_grid_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      cv_obstacle_grid_topic_,
+      rclcpp::QoS(rclcpp::KeepLast(cv_buffer_size_)).transient_local().reliable(),
+      std::bind(&AmclNode::cvObstacleGridReceived, this, std::placeholders::_1));
+    cv_street_grid_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      cv_street_grid_topic_,
+      rclcpp::QoS(rclcpp::KeepLast(cv_buffer_size_)).transient_local().reliable(),
+      std::bind(&AmclNode::cvStreetGridReceived, this, std::placeholders::_1));
 
     RCLCPP_INFO(
-      get_logger(), "CV fusion enabled: map=%s cloud=%s laser_factor=%.3f cv_factor=%.3f",
-      cv_map_topic_.c_str(), cv_cloud_topic_.c_str(), laser_weight_factor_, cv_weight_factor_);
+      get_logger(),
+      "Dual CV grid-SAD fusion enabled: obstacle=[%s, %s] street=[%s, %s] "
+      "laser_factor=%.3f cv_factor=%.3f sad_gain=%.3f cell_size=%.3f",
+      cv_map_topic_.c_str(), cv_obstacle_grid_topic_.c_str(),
+      cv_street_map_topic_.c_str(), cv_street_grid_topic_.c_str(),
+      laser_weight_factor_, cv_weight_factor_, cv_sad_gain_, cv_sad_cell_size_);
   }
 }
 

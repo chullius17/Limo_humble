@@ -21,13 +21,37 @@ def find_project_root(start: Path):
 def generate_launch_description():
     laser_weight_factor_default = '0.0'
     cv_weight_factor_default = '1.0'
+    cv_obstacle_weight_factor_default = '1.0'
+    cv_street_weight_factor_default = '1.0'
+    cv_sad_gain_default = '20.0'
+    cv_sad_cell_size_default = '0.05'
+    cv_sad_min_positive_mass_default = '5.0'
     cv_sync_tolerance_default = '0.20'
+    alpha1_default = '0.2'
+    alpha2_default = '0.2'
+    alpha3_default = '0.2'
+    alpha4_default = '0.2'
 
     nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
     cost_threshold = LaunchConfiguration('cost_threshold')
     laser_weight_factor = LaunchConfiguration('laser_weight_factor')
     cv_weight_factor = LaunchConfiguration('cv_weight_factor')
+    cv_obstacle_weight_factor = LaunchConfiguration(
+        'cv_obstacle_weight_factor'
+    )
+    cv_street_weight_factor = LaunchConfiguration(
+        'cv_street_weight_factor'
+    )
+    cv_sad_gain = LaunchConfiguration('cv_sad_gain')
+    cv_sad_cell_size = LaunchConfiguration('cv_sad_cell_size')
+    cv_sad_min_positive_mass = LaunchConfiguration(
+        'cv_sad_min_positive_mass'
+    )
     cv_sync_tolerance = LaunchConfiguration('cv_sync_tolerance')
+    alpha1 = LaunchConfiguration('alpha1')
+    alpha2 = LaunchConfiguration('alpha2')
+    alpha3 = LaunchConfiguration('alpha3')
+    alpha4 = LaunchConfiguration('alpha4')
     project_root = find_project_root(Path(__file__).resolve())
     if project_root is None:
         raise RuntimeError('Cannot locate the LIMO project root')
@@ -63,16 +87,36 @@ def generate_launch_description():
             'map_topic': (
                 '/limo/nav_map_package/online/maps/laser_map'
             ),
-            # The CV model scores the robot-relative CV cloud only against
-            # the static CV occupancy map.
+            # The CV model evaluates obstacle and street evidence against
+            # their respective static occupancy maps.
             'cv_map_topic': (
                 '/limo/nav_map_package/online/maps/cv_map'
+            ),
+            'cv_obstacle_grid_topic': (
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_binary_obstacles'
+            ),
+            'cv_street_map_topic': (
+                '/limo/nav_map_package/online/maps/street_map'
+            ),
+            'cv_street_grid_topic': (
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_binary_street'
             ),
             # AMCL is the only map -> odom publisher in the online pipeline.
             'tf_broadcast': 'true',
             'laser_weight_factor': laser_weight_factor,
             'cv_weight_factor': cv_weight_factor,
+            'cv_obstacle_weight_factor': cv_obstacle_weight_factor,
+            'cv_street_weight_factor': cv_street_weight_factor,
+            'cv_sad_gain': cv_sad_gain,
+            'cv_sad_cell_size': cv_sad_cell_size,
+            'cv_sad_min_positive_mass': cv_sad_min_positive_mass,
             'cv_sync_tolerance': cv_sync_tolerance,
+            'alpha1': alpha1,
+            'alpha2': alpha2,
+            'alpha3': alpha3,
+            'alpha4': alpha4,
         }.items(),
     )
 
@@ -87,6 +131,11 @@ def generate_launch_description():
             'cv_map_server',
             'limo_map_cv.yaml',
             '/limo/nav_map_package/online/maps/cv_map',
+        ),
+        (
+            'street_map_server',
+            'limo_map_street.yaml',
+            '/limo/nav_map_package/online/maps/street_map',
         ),
     )
     map_servers = [
@@ -126,6 +175,10 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'enable_telemetry': False,
+            'binary_threshold': ParameterValue(
+                cost_threshold,
+                value_type=float,
+            ),
         }],
     )
 
@@ -138,11 +191,24 @@ def generate_launch_description():
             'input_topic': (
                 '/limo/nav_map_package/online/maps/cv_map'
             ),
-            'debug_topic': (
-                '/limo/nav_map_package/online/cv_amcl_debug/distance_field'
+            'obstacle_grid_topic': (
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_binary_obstacles'
             ),
-            'pointcloud_topic': (
-                '/limo/nav_map_package/online/cv_2_ptcld/points'
+            'street_grid_topic': (
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_binary_street'
+            ),
+            'obstacle_grid_debug_topic': (
+                '/limo/nav_map_package/online/cv_amcl_debug/'
+                'discretized_obstacles'
+            ),
+            'street_grid_debug_topic': (
+                '/limo/nav_map_package/online/cv_amcl_debug/'
+                'discretized_street'
+            ),
+            'street_map_topic': (
+                '/limo/nav_map_package/online/maps/street_map'
             ),
             'particle_cloud_topic': '/particle_cloud',
             'output_particle_cloud_topic': (
@@ -150,18 +216,29 @@ def generate_launch_description():
                 'raw_particle_cloud'
             ),
             'voxel_leaf_size': 0.05,
-            'max_points': 600,
-        }],
-    )
-
-    cv_2_ptcld = Node(
-        package='online_map_package',
-        executable='cv_2_ptcld',
-        name='cv_2_ptcld',
-        output='screen',
-        parameters=[{
-            'cost_threshold': ParameterValue(
-                cost_threshold,
+            # Debug scoring is deliberately lighter than AMCL's 600+600-point
+            # production path so visualization cannot starve sensor callbacks.
+            'max_points': 200,
+            'score_rate_hz': 1.0,
+            'cv_weight_factor': ParameterValue(
+                cv_weight_factor,
+                value_type=float,
+            ),
+            'cv_obstacle_weight_factor': ParameterValue(
+                cv_obstacle_weight_factor,
+                value_type=float,
+            ),
+            'cv_street_weight_factor': ParameterValue(
+                cv_street_weight_factor,
+                value_type=float,
+            ),
+            'sad_gain': ParameterValue(cv_sad_gain, value_type=float),
+            'sad_cell_size': ParameterValue(
+                cv_sad_cell_size,
+                value_type=float,
+            ),
+            'sad_min_positive_mass': ParameterValue(
+                cv_sad_min_positive_mass,
                 value_type=float,
             ),
         }],
@@ -192,7 +269,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'cost_threshold',
             default_value='40.0',
-            description='Publish only cells with a cost above this value.',
+            description=(
+                'Threshold used by obstacle and street binary CV grids.'
+            ),
         ),
         DeclareLaunchArgument(
             'laser_weight_factor',
@@ -202,12 +281,63 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'cv_weight_factor',
             default_value=cv_weight_factor_default,
-            description='Exponent applied to the raw CV likelihood.',
+            description='Exponent applied to the CV SAD likelihood.',
+        ),
+        DeclareLaunchArgument(
+            'cv_obstacle_weight_factor',
+            default_value=cv_obstacle_weight_factor_default,
+            description=(
+                'Relative obstacle evidence factor; zero disables obstacle SAD.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'cv_street_weight_factor',
+            default_value=cv_street_weight_factor_default,
+            description=(
+                'Relative street evidence factor; zero disables street SAD.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'cv_sad_gain',
+            default_value=cv_sad_gain_default,
+            description='Gain converting normalized SAD into likelihood.',
+        ),
+        DeclareLaunchArgument(
+            'cv_sad_cell_size',
+            default_value=cv_sad_cell_size_default,
+            description='Regular SAD template sampling size in metres.',
+        ),
+        DeclareLaunchArgument(
+            'cv_sad_min_positive_mass',
+            default_value=cv_sad_min_positive_mass_default,
+            description=(
+                'Minimum foreground mass required for a CV class to vote.'
+            ),
         ),
         DeclareLaunchArgument(
             'cv_sync_tolerance',
             default_value=cv_sync_tolerance_default,
             description='Maximum laser-to-CV timestamp error in seconds.',
+        ),
+        DeclareLaunchArgument(
+            'alpha1',
+            default_value=alpha1_default,
+            description='Rotation noise caused by Ackermann rotation.',
+        ),
+        DeclareLaunchArgument(
+            'alpha2',
+            default_value=alpha2_default,
+            description='Rotation/steering noise caused by translation.',
+        ),
+        DeclareLaunchArgument(
+            'alpha3',
+            default_value=alpha3_default,
+            description='Translation noise caused by translation.',
+        ),
+        DeclareLaunchArgument(
+            'alpha4',
+            default_value=alpha4_default,
+            description='Translation noise caused by Ackermann rotation.',
         ),
         limo_rviz,
         amcl,
@@ -215,6 +345,5 @@ def generate_launch_description():
         map_lifecycle_manager,
         online_metric_bev,
         cv_amcl_debug,
-        cv_2_ptcld,
         nav_map,
     ])

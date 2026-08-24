@@ -22,7 +22,7 @@ def find_project_root(start: Path):
 
 
 class MapSaver(Node):
-    """Expose one service that saves the combined, laser and CV maps."""
+    """Expose one service that saves all four offline map products."""
 
     def __init__(self):
         super().__init__('nav_map_saver')
@@ -44,14 +44,20 @@ class MapSaver(Node):
             'cv_map_topic',
             '/limo/nav_map_package/offline/nav_map/cv_map',
         )
+        self.declare_parameter(
+            'street_map_topic',
+            '/limo/nav_map_package/offline/nav_map/street_map',
+        )
         self.declare_parameter('save_directory', '')
         self.declare_parameter('combined_map_name', 'limo_map_combined')
         self.declare_parameter('laser_map_name', 'limo_map_laser')
         self.declare_parameter('cv_map_name', 'limo_map_cv')
+        self.declare_parameter('street_map_name', 'limo_map_street')
         self.declare_parameter('image_format', 'pgm')
         self.declare_parameter('combined_map_mode', 'scale')
         self.declare_parameter('laser_map_mode', 'trinary')
         self.declare_parameter('cv_map_mode', 'trinary')
+        self.declare_parameter('street_map_mode', 'trinary')
         self.declare_parameter('free_thresh', 0.25)
         self.declare_parameter('occupied_thresh', 0.65)
         self.declare_parameter('nav2_service_timeout_sec', 10.0)
@@ -158,6 +164,12 @@ class MapSaver(Node):
                     'laser_map_mode',
                 ),
                 ('CV', 'cv_map_topic', 'cv_map_name', 'cv_map_mode'),
+                (
+                    'street',
+                    'street_map_topic',
+                    'street_map_name',
+                    'street_map_mode',
+                ),
             )
             saved = []
             failed = []
@@ -172,11 +184,11 @@ class MapSaver(Node):
 
             response.success = not failed
             if response.success:
-                response.message = 'Saved all three maps: ' + ', '.join(saved)
+                response.message = 'Saved all four maps: ' + ', '.join(saved)
                 self.publish_status('SUCCESS', response.message)
             else:
                 response.message = (
-                    f"Saved {len(saved)}/3 maps; failed: {', '.join(failed)}"
+                    f"Saved {len(saved)}/4 maps; failed: {', '.join(failed)}"
                 )
                 self.publish_status('ERROR', response.message)
             return response

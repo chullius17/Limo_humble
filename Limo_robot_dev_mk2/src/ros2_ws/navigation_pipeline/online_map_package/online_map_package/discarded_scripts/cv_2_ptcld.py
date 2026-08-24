@@ -2,6 +2,7 @@
 
 import math
 import time
+from functools import partial
 
 import numpy as np
 import rclpy
@@ -24,7 +25,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 
 class CvToPointCloud(Node):
-    """Convert high-cost cells from the combined metric BEV to PointCloud2."""
+    """Convert obstacle and street metric BEV grids to separate clouds."""
 
     def __init__(self):
         super().__init__('cv_2_ptcld')
@@ -42,6 +43,18 @@ class CvToPointCloud(Node):
             'debug_topic',
             '/limo/nav_map_package/online/cv_2_ptcld/debug',
         )
+        self.declare_parameter(
+            'street_input_topic',
+            '/limo/nav_map_package/online/metric_bev/cost_grid_blue',
+        )
+        self.declare_parameter(
+            'street_output_topic',
+            '/limo/nav_map_package/online/cv_2_ptcld/street_points',
+        )
+        self.declare_parameter(
+            'street_debug_topic',
+            '/limo/nav_map_package/online/cv_2_ptcld/street_debug',
+        )
         self.declare_parameter('cost_threshold', 40.0)
         self.declare_parameter('point_z', 0.0)
         self.declare_parameter('publish_debug', True)
@@ -51,6 +64,9 @@ class CvToPointCloud(Node):
         input_topic = self.get_parameter('input_topic').value
         output_topic = self.get_parameter('output_topic').value
         debug_topic = self.get_parameter('debug_topic').value
+        street_input_topic = self.get_parameter('street_input_topic').value
+        street_output_topic = self.get_parameter('street_output_topic').value
+        street_debug_topic = self.get_parameter('street_debug_topic').value
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -92,15 +108,46 @@ class CvToPointCloud(Node):
             debug_topic,
             debug_qos,
         )
+        self.street_points_pub = self.create_publisher(
+            PointCloud2,
+            street_output_topic,
+            cloud_qos,
+        )
+        self.street_debug_pub = self.create_publisher(
+            Image,
+            street_debug_topic,
+            debug_qos,
+        )
         self.grid_sub = self.create_subscription(
             OccupancyGrid,
             input_topic,
-            self.grid_callback,
+            partial(
+                self.grid_callback,
+                points_pub=self.points_pub,
+                debug_pub=self.debug_pub,
+                source_name='obstacle',
+            ),
+            input_qos,
+        )
+        self.street_grid_sub = self.create_subscription(
+            OccupancyGrid,
+            street_input_topic,
+            partial(
+                self.grid_callback,
+                points_pub=self.street_points_pub,
+                debug_pub=self.street_debug_pub,
+                source_name='street',
+            ),
             input_qos,
         )
 
         self.get_logger().info(
             f'Converting cells from {input_topic} to {output_topic} in frame '
+            f'{self.get_parameter("output_frame").value}'
+        )
+        self.get_logger().info(
+            f'Converting street cells from {street_input_topic} to '
+            f'{street_output_topic} in frame '
             f'{self.get_parameter("output_frame").value}'
         )
 
@@ -176,13 +223,20 @@ class CvToPointCloud(Node):
             self.get_logger().warning(message)
             self.last_tf_warning = now
 
-    def grid_callback(self, msg: OccupancyGrid):
+    def grid_callback(
+        self,
+        msg: OccupancyGrid,
+        points_pub,
+        debug_pub,
+        source_name: str,
+    ):
+        """Convert one labeled cost grid into its corresponding point cloud."""
         width = msg.info.width
         height = msg.info.height
         expected_size = width * height
         if width == 0 or height == 0 or len(msg.data) != expected_size:
             self.get_logger().warning(
-                'Ignoring malformed occupancy grid: '
+                f'Ignoring malformed {source_name} occupancy grid: '
                 f'{width}x{height}, {len(msg.data)} cells'
             )
             return
@@ -194,7 +248,7 @@ class CvToPointCloud(Node):
 
         if (
             self.get_parameter('publish_debug').value
-            and self.debug_pub.get_subscription_count() > 0
+            and debug_pub.get_subscription_count() > 0
         ):
             debug_image = np.zeros((height, width), dtype=np.uint8)
             debug_image[rows, cols] = 255
@@ -204,7 +258,7 @@ class CvToPointCloud(Node):
                 encoding='mono8',
             )
             debug_msg.header = msg.header
-            self.debug_pub.publish(debug_msg)
+            debug_pub.publish(debug_msg)
 
         resolution = msg.info.resolution
         local_x = (cols.astype(np.float64) + 0.5) * resolution
@@ -263,7 +317,7 @@ class CvToPointCloud(Node):
             self.fields,
             points.tolist(),
         )
-        self.points_pub.publish(cloud)
+        points_pub.publish(cloud)
 
 
 def main(args=None):

@@ -88,6 +88,11 @@ def generate_launch_description():
                 '/limo/nav_map_package/offline/nav_map/laser_map'
             ),
             'cv_map_topic': '/limo/nav_map_package/offline/nav_map/cv_map',
+            'street_map_topic': (
+                '/limo/nav_map_package/offline/nav_map/street_map'
+            ),
+            'street_cost_min': 0.0,
+            'street_cost_max': 20.0,
             'cv_cost_threshold': ParameterValue(
                 cost_threshold,
                 value_type=float,
@@ -135,6 +140,9 @@ def generate_launch_description():
             'cv_map_topic': (
                 '/limo/nav_map_package/offline/nav_map/cv_map'
             ),
+            'street_map_topic': (
+                '/limo/nav_map_package/offline/nav_map/street_map'
+            ),
             'request_service': (
                 '/limo/nav_map_package/offline/map_saver/save_map'
             ),
@@ -142,9 +150,11 @@ def generate_launch_description():
             'combined_map_name': 'limo_map_combined',
             'laser_map_name': 'limo_map_laser',
             'cv_map_name': 'limo_map_cv',
+            'street_map_name': 'limo_map_street',
             'combined_map_mode': 'scale',
             'laser_map_mode': 'trinary',
             'cv_map_mode': 'trinary',
+            'street_map_mode': 'trinary',
         }],
     )
     map_save_gui = Node(

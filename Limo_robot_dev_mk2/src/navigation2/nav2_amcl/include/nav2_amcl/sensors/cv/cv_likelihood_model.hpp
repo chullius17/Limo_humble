@@ -37,14 +37,22 @@ struct CvPoint2D
   double y;
 };
 
+/** @brief One sampled local OccupancyGrid cell expressed in the robot frame. */
+struct CvTemplateCell2D
+{
+  double x;
+  double y;
+  double occupancy;
+};
+
 /**
  * @class CvLikelihoodModel
- * @brief Evaluate particle poses against a CV-derived obstacle likelihood field.
+ * @brief Evaluate particle poses using soft semantic template matching.
  *
- * The model mirrors AMCL's laser likelihood-field approach. A static CV
- * OccupancyGrid is converted into a metric distance-to-nearest-obstacle field.
- * For each particle, robot-relative CV points are projected into the map and
- * their individual likelihoods are accumulated using AMCL's p += pz^3 rule.
+ * Each semantic OccupancyGrid is converted into a metric distance field. For
+ * every particle, observations are rewarded when they approach their expected
+ * semantic class and penalized when they approach the opposite class. The
+ * geometric mean makes the result independent of the number of sampled points.
  */
 class CvLikelihoodModel
 {
@@ -58,6 +66,8 @@ public:
     double z_rand{0.5};
     /// Standard deviation, in metres, of the obstacle-hit Gaussian.
     double sigma_hit{0.2};
+    /// Exponent of the normalized distance; 2 reproduces a Gaussian field.
+    double distance_exponent{3.0};
     /// Distance-field saturation value and penalty for off-map points.
     double max_occ_dist{2.0};
     /// CV sensing range used to normalize the random component.
@@ -68,6 +78,29 @@ public:
     std::size_t max_points{300};
     /// OccupancyGrid value at which a cell is considered an obstacle.
     int occupied_threshold{50};
+    /// Relative penalty applied to observations matching the opposite class.
+    double semantic_mismatch_penalty{1.0};
+  };
+
+  /** @brief Per-particle output and diagnostics of semantic template matching. */
+  struct ScoreResult
+  {
+    /// Positive, unnormalized likelihood consumed by AMCL log-space fusion.
+    std::vector<double> likelihoods;
+    /// Mean soft agreement with the expected semantic map, in [0, 1].
+    std::vector<double> mean_match_strengths;
+    /// Mean soft agreement with the opposite semantic map, in [0, 1].
+    std::vector<double> mean_mismatch_strengths;
+  };
+
+  /** @brief Per-particle positive-class mismatch and its likelihood. */
+  struct SadScoreResult
+  {
+    std::vector<double> likelihoods;
+    std::vector<double> normalized_sad;
+    /// Foreground and background masses after fractional grid downsampling.
+    double positive_mass{0.0};
+    double negative_mass{0.0};
   };
 
   explicit CvLikelihoodModel(const Parameters & parameters);
@@ -94,17 +127,38 @@ public:
   std::vector<CvPoint2D> voxelize(const std::vector<CvPoint2D> & points) const;
 
   /**
-   * @brief Compute one raw, unnormalized CV likelihood for every particle.
+   * @brief Compute one raw semantic likelihood for every particle.
    *
    * Particle poses are expected in the CV map frame and points in the robot
-   * base frame represented by those poses. The returned vector preserves the
-   * particle array order so it can be fused index by index before resampling.
+   * base frame represented by those poses. The expected and opposite semantic
+   * maps may have different origins or resolutions, but must share a frame.
+   * Returned arrays preserve particle order for fusion before resampling.
    */
-  std::vector<double> score(
+  ScoreResult score(
     const pf_sample_set_t * set,
-    const std::vector<CvPoint2D> & points) const;
+    const std::vector<CvPoint2D> & points,
+    const CvLikelihoodModel & opposite_class_model) const;
+
+  /**
+   * @brief Compare positive local evidence with its matching static CV map.
+   *
+   * Only false-positive semantic mismatches vote: a local obstacle or street
+   * cell is penalized when it lands outside the corresponding static class.
+   * White local cells carry no evidence. Fractional occupancy produced by
+   * downsampling acts as confidence and supplies the normalization mass.
+   */
+  SadScoreResult scoreSad(
+    const pf_sample_set_t * set,
+    const std::vector<CvTemplateCell2D> & cells,
+    double gain) const;
 
 private:
+  /** @brief Sample the capped distance field at one world-frame coordinate. */
+  double distanceAt(double world_x, double world_y) const;
+
+  /** @brief Convert metric distance into a nonlinear soft-match strength. */
+  double distanceStrength(double distance) const;
+
   /// Validated model parameters supplied by AmclNode during configuration.
   Parameters parameters_;
   /// AMCL map structure whose cells store distance to the closest CV obstacle.

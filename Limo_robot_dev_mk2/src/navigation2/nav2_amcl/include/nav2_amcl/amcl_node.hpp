@@ -42,7 +42,6 @@
 #include "nav2_msgs/srv/set_initial_pose.hpp"
 #include "nav_msgs/srv/set_map.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
-#include "sensor_msgs/msg/point_cloud2.hpp"
 #include "std_srvs/srv/empty.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
@@ -205,28 +204,22 @@ protected:
   // CV likelihood input and fusion
   /** @brief Receive the static CV map and rebuild the CV distance field. */
   void cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-  /** @brief Add a timestamped CV obstacle cloud to the bounded input buffer. */
-  void cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
-  /**
-   * @brief Find the buffered CV cloud closest to a laser timestamp.
-   * @param stamp Timestamp of the LaserScan that triggered the filter update.
-   * @param time_error Absolute timestamp difference in seconds.
-   * @return Closest cloud, or nullptr when it exceeds cv_sync_tolerance_.
-   */
-  sensor_msgs::msg::PointCloud2::ConstSharedPtr findClosestCvCloud(
-    const builtin_interfaces::msg::Time & stamp, double & time_error);
-  /**
-   * @brief Motion-compensate a CV cloud into base_frame_id_ at laser time.
-   *
-   * The advanced TF lookup uses odom_frame_id_ as the fixed frame, allowing a
-   * point observed in base_link(t_cv) to be expressed in base_link(t_laser).
-   */
-  std::vector<CvPoint2D> transformCvCloudToLaserTime(
-    const sensor_msgs::msg::PointCloud2 & cloud,
+  /** @brief Buffer one robot-local obstacle occupancy template. */
+  void cvObstacleGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg);
+  /** @brief Buffer one robot-local street occupancy template. */
+  void cvStreetGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg);
+  /** @brief Receive the static street map and rebuild its distance field. */
+  void cvStreetMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+  /** @brief Find the buffered local CV grid closest to a laser timestamp. */
+  nav_msgs::msg::OccupancyGrid::ConstSharedPtr findClosestCvGrid(
+    const builtin_interfaces::msg::Time & stamp, double & time_error, bool street);
+  /** @brief Downsample and motion-compensate a local grid to laser time. */
+  std::vector<CvTemplateCell2D> transformCvGridToLaserTime(
+    const nav_msgs::msg::OccupancyGrid & grid,
     const builtin_interfaces::msg::Time & laser_stamp);
   /**
    * @brief Fuse laser weights and raw CV likelihoods in logarithmic space.
-   * @return true when a synchronized cloud was successfully applied.
+   * @return true when a synchronized grid was successfully applied.
    */
   bool applyCvFusion(
     pf_sample_set_t * set,
@@ -234,11 +227,15 @@ protected:
 
   /// CV inputs exist only when cv_enabled_ is true during configuration.
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_map_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::ConstSharedPtr cv_cloud_sub_;
-  /// Owns the CV distance field, VoxelGrid, and per-particle scoring code.
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_obstacle_grid_sub_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_street_map_sub_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_street_grid_sub_;
+  /// Own the obstacle/street fields, VoxelGrids, and particle scoring code.
   std::unique_ptr<CvLikelihoodModel> cv_likelihood_model_;
+  std::unique_ptr<CvLikelihoodModel> cv_street_likelihood_model_;
   /// Small time-ordered history used for nearest-timestamp synchronization.
-  std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> cv_cloud_buffer_;
+  std::deque<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> cv_obstacle_grid_buffer_;
+  std::deque<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> cv_street_grid_buffer_;
   /// Protects the buffer and CV model from the dedicated laser executor thread.
   std::mutex cv_mutex_;
 
@@ -441,26 +438,39 @@ protected:
   // disabled by default in the generic AMCL node and enabled by the LIMO launch.
   bool cv_enabled_{false};
   std::string cv_map_topic_;
-  std::string cv_cloud_topic_;
+  std::string cv_obstacle_grid_topic_;
+  std::string cv_street_map_topic_;
+  std::string cv_street_grid_topic_;
   /// Maximum absolute timestamp error accepted between CV and laser data.
   double cv_sync_tolerance_;
-  /// Maximum number of PointCloud2 messages retained for matching.
+  /// Maximum number of local OccupancyGrid messages retained for matching.
   int cv_buffer_size_;
   /// Exponents applied to normalized laser weights and raw CV likelihoods.
   double laser_weight_factor_;
   double cv_weight_factor_;
+  double cv_obstacle_weight_factor_;
+  double cv_street_weight_factor_;
   /// Positive floor that makes logarithms safe for zero or denormal values.
   double minimum_likelihood_;
+
+  // Grid-SAD model used by the online CV fusion path.
+  double cv_sad_gain_;
+  double cv_sad_cell_size_;
+  /// Minimum foreground mass required for a semantic SAD channel to vote.
+  double cv_sad_min_positive_mass_;
 
   // Parameters of the CV likelihood-field measurement model.
   double cv_z_hit_;
   double cv_z_rand_;
   double cv_sigma_hit_;
+  double cv_distance_exponent_;
   double cv_max_occ_dist_;
   double cv_sensor_max_range_;
   double cv_voxel_leaf_size_;
   int cv_max_points_;
   int cv_occupied_threshold_;
+  /// Relative penalty for obstacle/street semantic contradictions.
+  double cv_semantic_mismatch_penalty_;
 };
 
 }  // namespace nav2_amcl
