@@ -30,6 +30,9 @@ def generate_launch_description():
 
     use_sim_time = {'use_sim_time': True}
     start_map_server = LaunchConfiguration('start_map_server')
+    publish_static_map_to_odom = LaunchConfiguration(
+        'publish_static_map_to_odom'
+    )
     rviz_config = PathJoinSubstitution([
         FindPackageShare('nav_limo_rviz'),
         'config',
@@ -49,7 +52,8 @@ def generate_launch_description():
                    'map', 
                    'odom'],
         output='screen',
-        parameters=[use_sim_time]
+        parameters=[use_sim_time],
+        condition=IfCondition(publish_static_map_to_odom),
     )
 
     # =========================
@@ -128,6 +132,14 @@ def generate_launch_description():
             'start_map_server',
             default_value='true',
             description='Start the default single Nav2 map server.',
+        ),
+        DeclareLaunchArgument(
+            'publish_static_map_to_odom',
+            default_value='true',
+            description=(
+                'Publish a static map-to-odom transform. Disable this when '
+                'AMCL broadcasts the transform.'
+            ),
         ),
         tf_launch,
         map_launch,

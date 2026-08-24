@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(nav2_amcl)
 
 find_package(ament_cmake REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
@@ -42,6 +43,8 @@ set(library_name ${executable_name}_core)
 
 add_library(${library_name} SHARED
   src/amcl_node.cpp
+  # CV likelihood field and VoxelGrid implementation used by AmclNode.
+  src/sensors/cv_likelihood_model.cpp
 )
 
 target_include_directories(${library_name} PRIVATE src/include)
@@ -51,6 +54,7 @@ if(HAVE_DRAND48)
 endif()
 
 set(dependencies
+  builtin_interfaces
   rclcpp
   rclcpp_lifecycle
   rclcpp_components

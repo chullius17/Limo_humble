@@ -23,7 +23,11 @@
 #include "nav2_amcl/amcl_node.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +38,7 @@
 #include "nav2_amcl/pf/pf.hpp"
 #include "nav2_util/string_utils.hpp"
 #include "nav2_amcl/sensors/laser/laser.hpp"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "tf2/convert.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/LinearMath/Transform.h"
@@ -64,6 +69,8 @@ AmclNode::AmclNode(const rclcpp::NodeOptions & options)
 {
   RCLCPP_INFO(get_logger(), "Creating");
 
+  // Optional CV likelihood-field fusion. It remains disabled in generic Nav2
+  // and is explicitly enabled by the LIMO AMCL launch file.
   add_parameter(
     "alpha1", rclcpp::ParameterValue(0.2),
     "This is the alpha1 parameter", "These are additional constraints for alpha1");
@@ -227,6 +234,33 @@ AmclNode::AmclNode(const rclcpp::NodeOptions & options)
   add_parameter(
     "first_map_only", rclcpp::ParameterValue(false),
     "Set this to true, when you want to load a new map published from the map_server");
+
+  add_parameter(
+    "cv_enabled", rclcpp::ParameterValue(false),
+    "Enable CV likelihood fusion before particle resampling");
+  add_parameter(
+    "cv_map_topic", rclcpp::ParameterValue(
+      std::string("/limo/nav_map_package/online/maps/cv_map")),
+    "Static CV occupancy map used to build the likelihood field");
+  add_parameter(
+    "cv_cloud_topic", rclcpp::ParameterValue(
+      std::string("/limo/nav_map_package/online/cv_2_ptcld/points")),
+    "Robot-relative CV obstacle point cloud");
+  add_parameter(
+    "cv_sync_tolerance", rclcpp::ParameterValue(0.1),
+    "Maximum allowed time difference in seconds between laser and CV data");
+  add_parameter("cv_buffer_size", rclcpp::ParameterValue(10));
+  add_parameter("laser_weight_factor", rclcpp::ParameterValue(1.0));
+  add_parameter("cv_weight_factor", rclcpp::ParameterValue(0.25));
+  add_parameter("minimum_likelihood", rclcpp::ParameterValue(1.0e-12));
+  add_parameter("cv_z_hit", rclcpp::ParameterValue(0.5));
+  add_parameter("cv_z_rand", rclcpp::ParameterValue(0.5));
+  add_parameter("cv_sigma_hit", rclcpp::ParameterValue(0.2));
+  add_parameter("cv_max_occ_dist", rclcpp::ParameterValue(2.0));
+  add_parameter("cv_sensor_max_range", rclcpp::ParameterValue(10.0));
+  add_parameter("cv_voxel_leaf_size", rclcpp::ParameterValue(0.05));
+  add_parameter("cv_max_points", rclcpp::ParameterValue(600));
+  add_parameter("cv_occupied_threshold", rclcpp::ParameterValue(50));
 }
 
 AmclNode::~AmclNode()
@@ -334,6 +368,15 @@ AmclNode::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   tf_listener_.reset();  //  listener may access lase_scan_filter_, so it should be reset earlier
   laser_scan_filter_.reset();
   laser_scan_sub_.reset();
+
+  // CV fusion inputs and cached data
+  cv_cloud_sub_.reset();
+  cv_map_sub_.reset();
+  {
+    std::lock_guard<std::mutex> lock(cv_mutex_);
+    cv_cloud_buffer_.clear();
+    cv_likelihood_model_.reset();
+  }
 
   // Map
   map_sub_.reset();  //  map_sub_ may access map_, so it should be reset earlier
@@ -687,13 +730,20 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
   if (lasers_update_[laser_index]) {
     updateFilter(laser_index, laser_scan, pose);
 
+    // The laser update above has evaluated and normalized this sample set.
+    // Fuse the synchronized CV likelihoods before any particles are resampled.
+    pf_sample_set_t * set = pf_->sets + pf_->current_set;
+    if (cv_enabled_) {
+      applyCvFusion(set, laser_scan->header.stamp);
+    }
+
     // Resample the particles
     if (!(++resample_count_ % resample_interval_)) {
       pf_update_resample(pf_, reinterpret_cast<void *>(map_));
       resampled = true;
     }
 
-    pf_sample_set_t * set = pf_->sets + pf_->current_set;
+    set = pf_->sets + pf_->current_set;
     RCLCPP_DEBUG(get_logger(), "Num samples: %d\n", set->sample_count);
 
     if (!force_update_) {
@@ -728,6 +778,219 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
       sendMapToOdomTransform(transform_expiration);
     }
   }
+}
+
+void AmclNode::cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+{
+  // The CV field and AMCL particles must use the same global coordinate frame;
+  // accepting another frame would produce plausible but geometrically invalid scores.
+  if (!nav2_util::validateMsg(*msg)) {
+    RCLCPP_ERROR(get_logger(), "Received CV map is malformed. Rejecting.");
+    return;
+  }
+  if (nav2_util::strip_leading_slash(msg->header.frame_id) != global_frame_id_) {
+    RCLCPP_ERROR(
+      get_logger(), "CV map frame '%s' does not match global frame '%s'",
+      msg->header.frame_id.c_str(), global_frame_id_.c_str());
+    return;
+  }
+
+  // The laser callback may score particles on a dedicated executor thread.
+  // Rebuilding the map is therefore serialized with score().
+  std::lock_guard<std::mutex> lock(cv_mutex_);
+  if (cv_likelihood_model_ == nullptr || !cv_likelihood_model_->setMap(*msg)) {
+    RCLCPP_ERROR(get_logger(), "Could not build the CV likelihood field");
+    return;
+  }
+  RCLCPP_INFO(
+    get_logger(), "Received CV likelihood map: %u x %u @ %.3f m/pix",
+    msg->info.width, msg->info.height, msg->info.resolution);
+}
+
+void AmclNode::cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
+{
+  if (msg->header.frame_id.empty()) {
+    RCLCPP_WARN(get_logger(), "Ignoring CV cloud with an empty frame_id");
+    return;
+  }
+
+  // Keep only a short history. The laser callback selects from this buffer
+  // instead of requiring exact publication-time synchronization.
+  std::lock_guard<std::mutex> lock(cv_mutex_);
+  cv_cloud_buffer_.push_back(msg);
+  while (cv_cloud_buffer_.size() > static_cast<std::size_t>(cv_buffer_size_)) {
+    cv_cloud_buffer_.pop_front();
+  }
+}
+
+sensor_msgs::msg::PointCloud2::ConstSharedPtr AmclNode::findClosestCvCloud(
+  const builtin_interfaces::msg::Time & stamp, double & time_error)
+{
+  std::lock_guard<std::mutex> lock(cv_mutex_);
+  if (cv_cloud_buffer_.empty()) {
+    return nullptr;
+  }
+
+  // Particle updates are driven by LaserScan timestamps, so synchronization is
+  // performed against the scan rather than against wall-clock arrival time.
+  const rclcpp::Time target_time(stamp);
+  sensor_msgs::msg::PointCloud2::ConstSharedPtr closest;
+  int64_t smallest_error = std::numeric_limits<int64_t>::max();
+  for (const auto & cloud : cv_cloud_buffer_) {
+    const int64_t signed_error =
+      (rclcpp::Time(cloud->header.stamp) - target_time).nanoseconds();
+    const int64_t error = signed_error >= 0 ? signed_error : -signed_error;
+    if (error < smallest_error) {
+      smallest_error = error;
+      closest = cloud;
+    }
+  }
+
+  // Reject stale observations even when they are the closest buffered sample.
+  time_error = static_cast<double>(smallest_error) * 1.0e-9;
+  if (time_error > cv_sync_tolerance_) {
+    return nullptr;
+  }
+  return closest;
+}
+
+std::vector<CvPoint2D> AmclNode::transformCvCloudToLaserTime(
+  const sensor_msgs::msg::PointCloud2 & cloud,
+  const builtin_interfaces::msg::Time & laser_stamp)
+{
+  // This advanced TF lookup performs both frame conversion and ego-motion
+  // compensation between the CV and laser timestamps, using odom as fixed frame.
+  geometry_msgs::msg::TransformStamped transform_msg;
+  try {
+    transform_msg = tf_buffer_->lookupTransform(
+      base_frame_id_, tf2_ros::fromMsg(laser_stamp),
+      nav2_util::strip_leading_slash(cloud.header.frame_id),
+      tf2_ros::fromMsg(cloud.header.stamp), odom_frame_id_);
+  } catch (const tf2::TransformException & error) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Cannot synchronize CV cloud with laser time: %s", error.what());
+    return {};
+  }
+
+  // Parse only x/y/z fields and apply the synchronized rigid transform once.
+  // The CV likelihood model discards z after rejecting non-finite points.
+  tf2::Transform transform;
+  tf2::fromMsg(transform_msg.transform, transform);
+  std::vector<CvPoint2D> points;
+  points.reserve(static_cast<std::size_t>(cloud.width) * cloud.height);
+  try {
+    sensor_msgs::PointCloud2ConstIterator<float> x_iterator(cloud, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> y_iterator(cloud, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> z_iterator(cloud, "z");
+    for (; x_iterator != x_iterator.end(); ++x_iterator, ++y_iterator, ++z_iterator) {
+      if (!std::isfinite(*x_iterator) || !std::isfinite(*y_iterator) ||
+        !std::isfinite(*z_iterator))
+      {
+        continue;
+      }
+      const tf2::Vector3 transformed = transform * tf2::Vector3(
+        static_cast<double>(*x_iterator),
+        static_cast<double>(*y_iterator),
+        static_cast<double>(*z_iterator));
+      points.push_back({transformed.x(), transformed.y()});
+    }
+  } catch (const std::runtime_error & error) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Cannot read x/y/z fields from CV cloud: %s", error.what());
+    return {};
+  }
+  return points;
+}
+
+bool AmclNode::applyCvFusion(
+  pf_sample_set_t * set,
+  const builtin_interfaces::msg::Time & laser_stamp)
+{
+  // Missing, stale, or untransformable CV data is a soft failure: returning
+  // false leaves the already-computed laser weights unchanged.
+  double time_error = 0.0;
+  const auto cloud = findClosestCvCloud(laser_stamp, time_error);
+  if (cloud == nullptr) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "No CV cloud within %.3f s of the laser scan", cv_sync_tolerance_);
+    return false;
+  }
+
+  const auto raw_points = transformCvCloudToLaserTime(*cloud, laser_stamp);
+  if (raw_points.empty()) {
+    return false;
+  }
+
+  // Map replacement, voxelization, and scoring share the same model instance,
+  // so they are protected from the CV map callback by cv_mutex_.
+  std::vector<CvPoint2D> points;
+  std::vector<double> cv_likelihoods;
+  {
+    std::lock_guard<std::mutex> lock(cv_mutex_);
+    if (cv_likelihood_model_ == nullptr || !cv_likelihood_model_->ready()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000, "Waiting for CV likelihood map");
+      return false;
+    }
+    points = cv_likelihood_model_->voxelize(raw_points);
+    cv_likelihoods = cv_likelihood_model_->score(set, points);
+  }
+  if (cv_likelihoods.size() != static_cast<std::size_t>(set->sample_count)) {
+    return false;
+  }
+
+  // Fuse the normalized laser posterior with the raw CV likelihood:
+  // log(w_i) = alpha * log(w_laser_i) + beta * log(L_cv_i).
+  // minimum_likelihood_ prevents log(0) without changing meaningful values.
+  std::vector<double> log_weights(static_cast<std::size_t>(set->sample_count));
+  double maximum_log_weight = -std::numeric_limits<double>::infinity();
+  double minimum_cv_likelihood = std::numeric_limits<double>::infinity();
+  double maximum_cv_likelihood = 0.0;
+  for (int index = 0; index < set->sample_count; ++index) {
+    const double laser_weight = std::max(set->samples[index].weight, minimum_likelihood_);
+    const double cv_likelihood = std::max(
+      cv_likelihoods[static_cast<std::size_t>(index)], minimum_likelihood_);
+    const double log_weight =
+      laser_weight_factor_ * std::log(laser_weight) +
+      cv_weight_factor_ * std::log(cv_likelihood);
+    log_weights[static_cast<std::size_t>(index)] = log_weight;
+    maximum_log_weight = std::max(maximum_log_weight, log_weight);
+    minimum_cv_likelihood = std::min(minimum_cv_likelihood, cv_likelihood);
+    maximum_cv_likelihood = std::max(maximum_cv_likelihood, cv_likelihood);
+  }
+
+  // Stable log-sum-exp normalization. Subtracting the maximum log weight keeps
+  // exponentials finite and does not change any ratio between particles.
+  double total_weight = 0.0;
+  for (int index = 0; index < set->sample_count; ++index) {
+    const double weight = std::exp(
+      log_weights[static_cast<std::size_t>(index)] - maximum_log_weight);
+    set->samples[index].weight = weight;
+    total_weight += weight;
+  }
+  // A uniform fallback keeps the particle filter valid if unexpected numeric
+  // input makes the fused distribution impossible to normalize.
+  if (!std::isfinite(total_weight) || total_weight <= 0.0) {
+    const double uniform_weight = 1.0 / static_cast<double>(set->sample_count);
+    for (int index = 0; index < set->sample_count; ++index) {
+      set->samples[index].weight = uniform_weight;
+    }
+    return false;
+  }
+  for (int index = 0; index < set->sample_count; ++index) {
+    set->samples[index].weight /= total_weight;
+  }
+
+  // Throttled diagnostics expose synchronization quality and score spread
+  // without flooding the terminal at sensor frequency.
+  RCLCPP_INFO_THROTTLE(
+    get_logger(), *get_clock(), 2000,
+    "Fused CV likelihood: dt=%.4f s, points=%zu, score=[%.6g, %.6g]",
+    time_error, points.size(), minimum_cv_likelihood, maximum_cv_likelihood);
+  return true;
 }
 
 bool AmclNode::addNewScanner(
@@ -1091,6 +1354,25 @@ AmclNode::initParameters()
   get_parameter("scan_topic", scan_topic_);
   get_parameter("map_topic", map_topic_);
 
+  // CV parameters are read once during lifecycle configuration. Changing
+  // model geometry parameters currently requires reconfiguring the node.
+  get_parameter("cv_enabled", cv_enabled_);
+  get_parameter("cv_map_topic", cv_map_topic_);
+  get_parameter("cv_cloud_topic", cv_cloud_topic_);
+  get_parameter("cv_sync_tolerance", cv_sync_tolerance_);
+  get_parameter("cv_buffer_size", cv_buffer_size_);
+  get_parameter("laser_weight_factor", laser_weight_factor_);
+  get_parameter("cv_weight_factor", cv_weight_factor_);
+  get_parameter("minimum_likelihood", minimum_likelihood_);
+  get_parameter("cv_z_hit", cv_z_hit_);
+  get_parameter("cv_z_rand", cv_z_rand_);
+  get_parameter("cv_sigma_hit", cv_sigma_hit_);
+  get_parameter("cv_max_occ_dist", cv_max_occ_dist_);
+  get_parameter("cv_sensor_max_range", cv_sensor_max_range_);
+  get_parameter("cv_voxel_leaf_size", cv_voxel_leaf_size_);
+  get_parameter("cv_max_points", cv_max_points_);
+  get_parameter("cv_occupied_threshold", cv_occupied_threshold_);
+
   save_pose_period_ = tf2::durationFromSec(1.0 / save_pose_rate);
   transform_tolerance_ = tf2::durationFromSec(tmp_tol);
 
@@ -1133,6 +1415,42 @@ AmclNode::initParameters()
       get_logger(), "You've set resample_interval to be zero or negative,"
       " this isn't allowed so it will be set to default value to 1.");
     resample_interval_ = 1;
+  }
+
+  // Invalid CV settings never prevent AMCL from configuring. Safe defaults
+  // preserve laser localization and allow CV fusion to recover after restart.
+  if (cv_sync_tolerance_ < 0.0) {
+    RCLCPP_WARN(get_logger(), "cv_sync_tolerance must be non-negative; using 0.1 s");
+    cv_sync_tolerance_ = 0.1;
+  }
+  if (cv_buffer_size_ < 1) {
+    RCLCPP_WARN(get_logger(), "cv_buffer_size must be positive; using 10");
+    cv_buffer_size_ = 10;
+  }
+  if (laser_weight_factor_ < 0.0 || cv_weight_factor_ < 0.0) {
+    RCLCPP_WARN(get_logger(), "Sensor weight factors must be non-negative; using 1.0 and 0.25");
+    laser_weight_factor_ = 1.0;
+    cv_weight_factor_ = 0.25;
+  }
+  if (minimum_likelihood_ <= 0.0) {
+    RCLCPP_WARN(get_logger(), "minimum_likelihood must be positive; using 1e-12");
+    minimum_likelihood_ = 1.0e-12;
+  }
+  if (
+    cv_z_hit_ < 0.0 || cv_z_rand_ < 0.0 || cv_sigma_hit_ <= 0.0 ||
+    cv_max_occ_dist_ <= 0.0 || cv_sensor_max_range_ <= 0.0 ||
+    cv_voxel_leaf_size_ <= 0.0 || cv_max_points_ < 1 ||
+    cv_occupied_threshold_ < 0 || cv_occupied_threshold_ > 100)
+  {
+    RCLCPP_WARN(get_logger(), "Invalid CV model parameters; restoring safe defaults");
+    cv_z_hit_ = 0.5;
+    cv_z_rand_ = 0.5;
+    cv_sigma_hit_ = 0.2;
+    cv_max_occ_dist_ = 2.0;
+    cv_sensor_max_range_ = 10.0;
+    cv_voxel_leaf_size_ = 0.05;
+    cv_max_points_ = 600;
+    cv_occupied_threshold_ = 50;
   }
 
   if (always_reset_initial_pose_) {
@@ -1539,6 +1857,32 @@ AmclNode::initPubSub()
     std::bind(&AmclNode::mapReceived, this, std::placeholders::_1));
 
   RCLCPP_INFO(get_logger(), "Subscribed to map topic.");
+
+  if (cv_enabled_) {
+    // Construct the model before creating transient-local map and sensor-data
+    // cloud subscriptions, so latched input can be processed immediately.
+    CvLikelihoodModel::Parameters cv_parameters;
+    cv_parameters.z_hit = cv_z_hit_;
+    cv_parameters.z_rand = cv_z_rand_;
+    cv_parameters.sigma_hit = cv_sigma_hit_;
+    cv_parameters.max_occ_dist = cv_max_occ_dist_;
+    cv_parameters.sensor_max_range = cv_sensor_max_range_;
+    cv_parameters.voxel_leaf_size = cv_voxel_leaf_size_;
+    cv_parameters.max_points = static_cast<std::size_t>(cv_max_points_);
+    cv_parameters.occupied_threshold = cv_occupied_threshold_;
+    cv_likelihood_model_ = std::make_unique<CvLikelihoodModel>(cv_parameters);
+
+    cv_map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      cv_map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
+      std::bind(&AmclNode::cvMapReceived, this, std::placeholders::_1));
+    cv_cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+      cv_cloud_topic_, rclcpp::SensorDataQoS(),
+      std::bind(&AmclNode::cvCloudReceived, this, std::placeholders::_1));
+
+    RCLCPP_INFO(
+      get_logger(), "CV fusion enabled: map=%s cloud=%s laser_factor=%.3f cv_factor=%.3f",
+      cv_map_topic_.c_str(), cv_cloud_topic_.c_str(), laser_weight_factor_, cv_weight_factor_);
+  }
 }
 
 void

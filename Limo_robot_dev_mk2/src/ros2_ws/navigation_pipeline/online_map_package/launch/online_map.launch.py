@@ -19,8 +19,15 @@ def find_project_root(start: Path):
 
 
 def generate_launch_description():
+    laser_weight_factor_default = '0.0'
+    cv_weight_factor_default = '1.0'
+    cv_sync_tolerance_default = '0.20'
+
     nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
     cost_threshold = LaunchConfiguration('cost_threshold')
+    laser_weight_factor = LaunchConfiguration('laser_weight_factor')
+    cv_weight_factor = LaunchConfiguration('cv_weight_factor')
+    cv_sync_tolerance = LaunchConfiguration('cv_sync_tolerance')
     project_root = find_project_root(Path(__file__).resolve())
     if project_root is None:
         raise RuntimeError('Cannot locate the LIMO project root')
@@ -34,7 +41,10 @@ def generate_launch_description():
                 'limo_rviz.launch.py',
             )
         ),
-        launch_arguments={'start_map_server': 'false'}.items(),
+        launch_arguments={
+            'start_map_server': 'false',
+            'publish_static_map_to_odom': 'false',
+        }.items(),
     )
 
     amcl = IncludeLaunchDescription(
@@ -48,8 +58,21 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': 'true',
             'base_frame_id': 'base_link',
-            # limo_rviz currently provides a static map -> odom transform.
-            'tf_broadcast': 'false',
+            # Keep the two AMCL sensor models independent: the laser model
+            # scores /scan only against the static laser occupancy map.
+            'map_topic': (
+                '/limo/nav_map_package/online/maps/laser_map'
+            ),
+            # The CV model scores the robot-relative CV cloud only against
+            # the static CV occupancy map.
+            'cv_map_topic': (
+                '/limo/nav_map_package/online/maps/cv_map'
+            ),
+            # AMCL is the only map -> odom publisher in the online pipeline.
+            'tf_broadcast': 'true',
+            'laser_weight_factor': laser_weight_factor,
+            'cv_weight_factor': cv_weight_factor,
+            'cv_sync_tolerance': cv_sync_tolerance,
         }.items(),
     )
 
@@ -106,26 +129,28 @@ def generate_launch_description():
         }],
     )
 
-    cv_weights = Node(
+    cv_amcl_debug = Node(
         package='online_map_package',
-        executable='cv_weights',
-        name='cv_weights',
+        executable='cv_amcl_debug',
+        name='cv_amcl_debug',
         output='screen',
         parameters=[{
             'input_topic': (
                 '/limo/nav_map_package/online/maps/cv_map'
             ),
             'debug_topic': (
-                '/limo/nav_map_package/online/cv_weights/debug'
+                '/limo/nav_map_package/online/cv_amcl_debug/distance_field'
             ),
             'pointcloud_topic': (
                 '/limo/nav_map_package/online/cv_2_ptcld/points'
             ),
             'particle_cloud_topic': '/particle_cloud',
             'output_particle_cloud_topic': (
-                '/limo/nav_map_package/online/cv_weights/particle_cloud'
+                '/limo/nav_map_package/online/cv_amcl_debug/'
+                'raw_particle_cloud'
             ),
-            'voxel_leaf_size': 0.10,
+            'voxel_leaf_size': 0.05,
+            'max_points': 600,
         }],
     )
 
@@ -169,12 +194,27 @@ def generate_launch_description():
             default_value='40.0',
             description='Publish only cells with a cost above this value.',
         ),
+        DeclareLaunchArgument(
+            'laser_weight_factor',
+            default_value=laser_weight_factor_default,
+            description='Exponent applied to the normalized laser weight.',
+        ),
+        DeclareLaunchArgument(
+            'cv_weight_factor',
+            default_value=cv_weight_factor_default,
+            description='Exponent applied to the raw CV likelihood.',
+        ),
+        DeclareLaunchArgument(
+            'cv_sync_tolerance',
+            default_value=cv_sync_tolerance_default,
+            description='Maximum laser-to-CV timestamp error in seconds.',
+        ),
         limo_rviz,
         amcl,
         *map_servers,
         map_lifecycle_manager,
         online_metric_bev,
-        cv_weights,
+        cv_amcl_debug,
         cv_2_ptcld,
         nav_map,
     ])

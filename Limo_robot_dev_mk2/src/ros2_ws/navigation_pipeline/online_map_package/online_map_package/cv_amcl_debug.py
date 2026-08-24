@@ -23,17 +23,18 @@ from sensor_msgs.msg import Image, PointCloud2
 from sensor_msgs_py import point_cloud2
 
 
-class CvWeights(Node):
-    """Evaluate AMCL particle poses using obstacles detected by CV.
+class CvAmclDebug(Node):
+    """Diagnose CV likelihoods independently from AMCL's C++ fusion.
 
     The node builds a metric likelihood field from a static CV occupancy map.
     For every AMCL pose, it projects the current robot-frame CV point cloud
     into the map, samples the likelihood field, and publishes a new
-    ParticleCloud containing normalized CV-only weights.
+    ParticleCloud containing raw, unnormalized CV-only likelihoods. Its output
+    is intended for inspection and is not consumed by AMCL.
     """
 
     def __init__(self):
-        super().__init__('cv_weights')
+        super().__init__('cv_amcl_debug')
         self.bridge = CvBridge()
 
         # Input and output topic names.
@@ -43,7 +44,7 @@ class CvWeights(Node):
         )
         self.declare_parameter(
             'debug_topic',
-            '/limo/nav_map_package/online/cv_weights/debug',
+            '/limo/nav_map_package/online/cv_amcl_debug/distance_field',
         )
         self.declare_parameter(
             'pointcloud_topic',
@@ -52,7 +53,7 @@ class CvWeights(Node):
         self.declare_parameter('particle_cloud_topic', '/particle_cloud')
         self.declare_parameter(
             'output_particle_cloud_topic',
-            '/limo/nav_map_package/online/cv_weights/particle_cloud',
+            '/limo/nav_map_package/online/cv_amcl_debug/raw_particle_cloud',
         )
         # Map cells at or above this value are treated as obstacles.
         self.declare_parameter('occupied_threshold', 50)
@@ -68,8 +69,8 @@ class CvWeights(Node):
         self.declare_parameter('sigma_hit', 0.2)
         self.declare_parameter('max_occ_dist', 2.0)
         self.declare_parameter('sensor_max_range', 10.0)
-        self.declare_parameter('max_points', 300)
-        self.declare_parameter('voxel_leaf_size', 0.10)
+        self.declare_parameter('max_points', 600)
+        self.declare_parameter('voxel_leaf_size', 0.05)
         self.declare_parameter('diagnostic_log_period_sec', 1.0)
 
         input_topic = str(self.get_parameter('input_topic').value)
@@ -271,7 +272,7 @@ class CvWeights(Node):
         return centroids
 
     def publish_cv_scores(self, msg: ParticleCloud) -> None:
-        """Publish particle poses with normalized CV-only likelihoods."""
+        """Publish particle poses with raw CV-only likelihoods."""
         # The computation needs a static likelihood field and a current CV
         # observation. Returning here is expected during node startup.
         if self.distance_map_m is None or self.map_info is None:
@@ -416,27 +417,25 @@ class CvWeights(Node):
             # each observation contributes the cube of its likelihood.
             scores[index] = 1.0 + np.sum(point_likelihoods ** 3)
 
-        # Convert independent positive CV scores into a probability
-        # distribution. The input AMCL weights are deliberately not combined.
-        total = float(np.sum(scores))
-        if not np.isfinite(total) or total <= 0.0:
-            scores.fill(1.0 / len(scores))
-        else:
-            scores /= total
-
         # Preserve headers and poses, replacing only the particle weights.
+        # Scores intentionally remain raw: they are neither normalized across
+        # particles nor multiplied by the input AMCL weights. This lets AMCL
+        # combine log(CV likelihood) with its laser likelihood before the
+        # filter performs the final normalization and resampling steps.
         output = copy.deepcopy(msg)
         for particle, score in zip(output.particles, scores):
             particle.weight = float(score)
-        self.log_particle_differences(msg, output)
+        self.log_particle_differences(msg, output, scores, point_count)
         self.particle_cloud_pub.publish(output)
 
     def log_particle_differences(
         self,
         input_cloud: ParticleCloud,
         output_cloud: ParticleCloud,
+        cv_scores: np.ndarray,
+        point_count: int,
     ) -> None:
-        """Log pairwise pose and weight differences for score debugging."""
+        """Log pose integrity and the discriminative power of CV scores."""
         period = float(
             self.get_parameter('diagnostic_log_period_sec').value
         )
@@ -509,9 +508,40 @@ class CvWeights(Node):
         position_differences = np.asarray(position_differences)
         orientation_differences = np.asarray(orientation_differences)
         weight_differences = np.asarray(weight_differences)
+
+        # Normalize the raw CV-only scores only for diagnostics. The published
+        # ParticleCloud intentionally retains the raw likelihoods so AMCL can
+        # apply cv_weight_factor during log-domain fusion.
+        score_min = float(np.min(cv_scores))
+        score_max = float(np.max(cv_scores))
+        score_p10, score_median, score_p90 = np.percentile(
+            cv_scores,
+            [10.0, 50.0, 90.0],
+        )
+        score_ratio = score_max / score_min if score_min > 0.0 else math.inf
+        score_total = float(np.sum(cv_scores))
+        if score_total > 0.0 and math.isfinite(score_total):
+            normalized_scores = cv_scores / score_total
+            squared_sum = float(np.sum(normalized_scores ** 2))
+            effective_sample_size = (
+                1.0 / squared_sum if squared_sum > 0.0 else 0.0
+            )
+        else:
+            effective_sample_size = 0.0
+        ess_fraction = effective_sample_size / len(cv_scores)
+
         self.get_logger().info(
-            'CV particle differences: '
-            f'count={len(input_cloud.particles)}, '
+            'CV particle diagnostics: '
+            f'particles={len(input_cloud.particles)}, '
+            f'points={point_count}, '
+            f'score_min={score_min:.6g}, '
+            f'score_p10={score_p10:.6g}, '
+            f'score_median={score_median:.6g}, '
+            f'score_p90={score_p90:.6g}, '
+            f'score_max={score_max:.6g}, '
+            f'score_ratio={score_ratio:.6g}, '
+            f'ess={effective_sample_size:.1f}, '
+            f'ess_fraction={ess_fraction:.3f}, '
             f'pose_position_mean={np.mean(position_differences):.6g} m, '
             f'pose_position_max={np.max(position_differences):.6g} m, '
             f'pose_angle_mean={np.nanmean(orientation_differences):.6g} rad, '
@@ -576,7 +606,7 @@ class CvWeights(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CvWeights()
+    node = CvAmclDebug()
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):

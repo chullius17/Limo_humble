@@ -22,6 +22,8 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <build_depend>nav2_common</build_depend>
+  <!-- Used explicitly by the CV synchronization method signatures. -->
+  <depend>builtin_interfaces</depend>
   <depend>rclcpp</depend>
   <depend>tf2_geometry_msgs</depend>
   <depend>geometry_msgs</depend>

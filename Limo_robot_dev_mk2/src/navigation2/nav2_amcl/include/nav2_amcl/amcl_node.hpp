@@ -22,22 +22,27 @@
 #define NAV2_AMCL__AMCL_NODE_HPP_
 
 #include <atomic>
+#include <deque>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "builtin_interfaces/msg/time.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "message_filters/subscriber.h"
 #include "nav2_util/lifecycle_node.hpp"
 #include "nav2_amcl/motion_model/motion_model.hpp"
+#include "nav2_amcl/sensors/cv/cv_likelihood_model.hpp"
 #include "nav2_amcl/sensors/laser/laser.hpp"
 #include "nav2_msgs/msg/particle.hpp"
 #include "nav2_msgs/msg/particle_cloud.hpp"
 #include "nav2_msgs/srv/set_initial_pose.hpp"
 #include "nav_msgs/srv/set_map.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 #include "std_srvs/srv/empty.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
@@ -196,6 +201,46 @@ protected:
    * @brief Handle when a laser scan is received
    */
   void laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan);
+
+  // CV likelihood input and fusion
+  /** @brief Receive the static CV map and rebuild the CV distance field. */
+  void cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+  /** @brief Add a timestamped CV obstacle cloud to the bounded input buffer. */
+  void cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
+  /**
+   * @brief Find the buffered CV cloud closest to a laser timestamp.
+   * @param stamp Timestamp of the LaserScan that triggered the filter update.
+   * @param time_error Absolute timestamp difference in seconds.
+   * @return Closest cloud, or nullptr when it exceeds cv_sync_tolerance_.
+   */
+  sensor_msgs::msg::PointCloud2::ConstSharedPtr findClosestCvCloud(
+    const builtin_interfaces::msg::Time & stamp, double & time_error);
+  /**
+   * @brief Motion-compensate a CV cloud into base_frame_id_ at laser time.
+   *
+   * The advanced TF lookup uses odom_frame_id_ as the fixed frame, allowing a
+   * point observed in base_link(t_cv) to be expressed in base_link(t_laser).
+   */
+  std::vector<CvPoint2D> transformCvCloudToLaserTime(
+    const sensor_msgs::msg::PointCloud2 & cloud,
+    const builtin_interfaces::msg::Time & laser_stamp);
+  /**
+   * @brief Fuse laser weights and raw CV likelihoods in logarithmic space.
+   * @return true when a synchronized cloud was successfully applied.
+   */
+  bool applyCvFusion(
+    pf_sample_set_t * set,
+    const builtin_interfaces::msg::Time & laser_stamp);
+
+  /// CV inputs exist only when cv_enabled_ is true during configuration.
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_map_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::ConstSharedPtr cv_cloud_sub_;
+  /// Owns the CV distance field, VoxelGrid, and per-particle scoring code.
+  std::unique_ptr<CvLikelihoodModel> cv_likelihood_model_;
+  /// Small time-ordered history used for nearest-timestamp synchronization.
+  std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> cv_cloud_buffer_;
+  /// Protects the buffer and CV model from the dedicated laser executor thread.
+  std::mutex cv_mutex_;
 
   // Services and service callbacks
   /*
@@ -391,6 +436,31 @@ protected:
   double z_rand_;
   std::string scan_topic_{"scan"};
   std::string map_topic_{"map"};
+
+  // CV synchronization and log-space sensor-fusion parameters. CV support is
+  // disabled by default in the generic AMCL node and enabled by the LIMO launch.
+  bool cv_enabled_{false};
+  std::string cv_map_topic_;
+  std::string cv_cloud_topic_;
+  /// Maximum absolute timestamp error accepted between CV and laser data.
+  double cv_sync_tolerance_;
+  /// Maximum number of PointCloud2 messages retained for matching.
+  int cv_buffer_size_;
+  /// Exponents applied to normalized laser weights and raw CV likelihoods.
+  double laser_weight_factor_;
+  double cv_weight_factor_;
+  /// Positive floor that makes logarithms safe for zero or denormal values.
+  double minimum_likelihood_;
+
+  // Parameters of the CV likelihood-field measurement model.
+  double cv_z_hit_;
+  double cv_z_rand_;
+  double cv_sigma_hit_;
+  double cv_max_occ_dist_;
+  double cv_sensor_max_range_;
+  double cv_voxel_leaf_size_;
+  int cv_max_points_;
+  int cv_occupied_threshold_;
 };
 
 }  // namespace nav2_amcl
