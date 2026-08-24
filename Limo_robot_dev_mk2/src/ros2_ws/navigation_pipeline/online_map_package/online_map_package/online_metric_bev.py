@@ -51,8 +51,6 @@ class OnlineMetricBEV(Node):
     def __init__(self):
         super().__init__('online_metric_bev')
         self.bridge = CvBridge()
-        self.publish_individual = False
-        self.publish_combined = True
         self.topic_namespace = 'online/metric_bev'
         self.frame_prefix = 'online_metric_bev_origin'
 
@@ -86,7 +84,7 @@ class OnlineMetricBEV(Node):
         self.declare_parameter('fixed_frame', 'base_link')
         self.declare_parameter('global_frame', 'odom')
         self.declare_parameter('resolution', 0.0092)
-        self.declare_parameter('publish_debug', False)
+        self.declare_parameter('publish_debug', True)
         self.declare_parameter('binary_threshold', 40.0)
 
         self.fixed_frame   = self.get_parameter('fixed_frame').value
@@ -99,11 +97,18 @@ class OnlineMetricBEV(Node):
         if not 0.0 <= self.binary_threshold <= 100.0:
             raise ValueError('binary_threshold must be between 0 and 100')
 
-        # Pre-build 256-entry BGR Lookup Table for heatmap rendering (shared across colors)
-        lut_inputs = np.arange(256, dtype=np.uint8).reshape(256, 1)
-        jet_inputs = np.clip(lut_inputs.astype(np.float32) * (255.0 / 100.0), 0, 255).astype(np.uint8)
-        jet_colors = cv2.applyColorMap(jet_inputs, cv2.COLORMAP_JET).reshape(256, 3)
-        self.debug_lut = jet_colors
+        if self.publish_debug:
+            # Pre-build the heatmap lookup table only for debug output.
+            lut_inputs = np.arange(256, dtype=np.uint8).reshape(256, 1)
+            jet_inputs = np.clip(
+                lut_inputs.astype(np.float32) * (255.0 / 100.0),
+                0,
+                255,
+            ).astype(np.uint8)
+            self.debug_lut = cv2.applyColorMap(
+                jet_inputs,
+                cv2.COLORMAP_JET,
+            ).reshape(256, 3)
 
         # These child frames have a constant pose relative to base_link. A
         # latched static transform is valid for every sensor timestamp and
@@ -119,57 +124,12 @@ class OnlineMetricBEV(Node):
             10
         )
 
-        # Global ROI debug publishers
+        # Debug image publishers
         if self.publish_debug:
             self.roi_debug_pub = self.create_publisher(
                 Image,
                 f'/limo/nav_map_package/{self.topic_namespace}/roi_debug',
                 debug_image_qos,
-            )
-
-        # Per-color publisher bundle.
-        self.color_state = {}
-        for color in self.colors:
-            suffixes = [color.lower()]
-            state = {'outputs': {}}
-            for suffix in suffixes if self.publish_individual else []:
-                output = {'topic_suffix': suffix}
-                output['costmap_pub'] = self.create_publisher(
-                    OccupancyGrid,
-                    f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_{suffix}',
-                    map_qos_profile,
-                )
-                if self.publish_debug:
-                    output['debug_pub'] = self.create_publisher(
-                        Image,
-                        f'/limo/nav_map_package/{self.topic_namespace}/debug_{suffix}',
-                        10,
-                    )
-                state['outputs'][suffix] = output
-
-            self.color_state[color] = state
-
-        self.combined_costmap_pub = None
-        self.obstacle_costmap_pub = None
-        self.street_costmap_pub = None
-        self.combined_debug_pub = None
-        self.obstacle_debug_pub = None
-        self.street_debug_pub = None
-        if self.publish_combined:
-            self.combined_costmap_pub = self.create_publisher(
-                OccupancyGrid,
-                f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_combined',
-                map_qos_profile,
-            )
-            self.obstacle_costmap_pub = self.create_publisher(
-                OccupancyGrid,
-                f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_obstacles',
-                map_qos_profile,
-            )
-            self.street_costmap_pub = self.create_publisher(
-                OccupancyGrid,
-                f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_street',
-                map_qos_profile,
             )
             self.combined_debug_pub = self.create_publisher(
                 Image,
@@ -186,6 +146,22 @@ class OnlineMetricBEV(Node):
                 f'/limo/nav_map_package/{self.topic_namespace}/debug_binary_street',
                 debug_image_qos,
             )
+
+        self.combined_costmap_pub = self.create_publisher(
+            OccupancyGrid,
+            f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_combined',
+            map_qos_profile,
+        )
+        self.obstacle_costmap_pub = self.create_publisher(
+            OccupancyGrid,
+            f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_obstacles',
+            map_qos_profile,
+        )
+        self.street_costmap_pub = self.create_publisher(
+            OccupancyGrid,
+            f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_street',
+            map_qos_profile,
+        )
 
         # Debug parameter to enable/disable telemetry logging
         self.declare_parameter('enable_telemetry', True)
@@ -204,16 +180,13 @@ class OnlineMetricBEV(Node):
         }
         self.telemetry_stats_color = {
             color: {
-                'mask_inflate':      deque(maxlen=self.window_size),
-                'occupancy_publish': deque(maxlen=self.window_size),
-                'debug_render':      deque(maxlen=self.window_size),
+                'mask_inflate': deque(maxlen=self.window_size),
             }
             for color in self.colors
         }
 
         self.get_logger().info(
-            f'online_metric_bev initialized for channels {self.colors}; '
-            f'individual={self.publish_individual}, combined={self.publish_combined}'
+            f'online_metric_bev initialized for combined channels {self.colors}'
         )
 
         self.bev_queue = queue.Queue(maxsize=1)
@@ -222,13 +195,7 @@ class OnlineMetricBEV(Node):
 
     def _publish_static_transforms(self):
         """Publish constant base-to-BEV transforms once on ``/tf_static``."""
-        output_suffixes = []
-        if self.publish_individual:
-            output_suffixes.extend(color.lower() for color in self.colors)
-        if self.publish_combined:
-            output_suffixes.append('combined')
-            output_suffixes.append('binary_obstacles')
-            output_suffixes.append('binary_street')
+        output_suffixes = ['combined', 'binary_obstacles', 'binary_street']
         transforms = []
         stamp = self.get_clock().now().to_msg()
         for suffix in output_suffixes:
@@ -362,7 +329,7 @@ class OnlineMetricBEV(Node):
 
     def _process_frame(self, msg: Image):
         t = {'conversion': 0.0, 'roi_crop': 0.0, 'roi_debug': 0.0, 'total': 0.0}
-        t_color = {color: {'mask_inflate': 0.0, 'occupancy_publish': 0.0, 'debug_render': 0.0}
+        t_color = {color: {'mask_inflate': 0.0}
                    for color in self.colors}
         start_total = time.perf_counter()
 
@@ -394,90 +361,58 @@ class OnlineMetricBEV(Node):
         # --- Per-color processing ---
         cost_layers = []
         for color in self.colors:
-            state = self.color_state[color]
-
             t_start = time.perf_counter()
             cost_img_cropped = self._image_to_costmap(roi_bgr, color)
             cost_layers.append(cost_img_cropped)
             t_color[color]['mask_inflate'] = (time.perf_counter() - t_start) * 1000
 
-            if self.publish_individual:
-                t_start = time.perf_counter()
-                output_layers = {color.lower(): cost_img_cropped}
-                for suffix, cost_layer in output_layers.items():
-                    state['outputs'][suffix]['costmap_pub'].publish(
-                        self._costmap_to_occupancy_grid(
-                            cost_layer,
-                            msg.header,
-                            suffix,
-                        )
-                    )
-                t_color[color]['occupancy_publish'] = (
-                    time.perf_counter() - t_start
-                ) * 1000
-
-            if self.publish_individual and self.publish_debug:
-                debug_outputs = [
-                    (suffix, cost_layer)
-                    for suffix, cost_layer in output_layers.items()
-                    if state['outputs'][suffix]['debug_pub'].get_subscription_count() > 0
-                ]
-                if debug_outputs:
-                    t_start = time.perf_counter()
-                    for suffix, cost_layer in debug_outputs:
-                        debug_bgr = self._render_debug(cost_layer)
-                        debug_msg = self.bridge.cv2_to_imgmsg(debug_bgr, encoding='bgr8')
-                        debug_msg.header = msg.header
-                        state['outputs'][suffix]['debug_pub'].publish(debug_msg)
-                    t_color[color]['debug_render'] = (time.perf_counter() - t_start) * 1000
-
         # The semantic costs match CVMapDisplay: turquoise=60, white=30 and
         # magenta=100. Taking the cell-wise maximum preserves the dominant
         # class wherever inflated layers overlap.
-        if self.publish_combined:
-            combined_cost = np.maximum.reduce(cost_layers)
-            self.combined_costmap_pub.publish(
-                self._costmap_to_occupancy_grid(
-                    combined_cost,
-                    msg.header,
-                    'combined',
-                )
+        combined_cost = np.maximum.reduce(cost_layers)
+        self.combined_costmap_pub.publish(
+            self._costmap_to_occupancy_grid(
+                combined_cost,
+                msg.header,
+                'combined',
             )
+        )
 
-            # Values above the threshold are foreground (100). Zero cells
-            # remain white in the published grid; the AMCL positive-SAD model
-            # deliberately treats only foreground cells as semantic evidence.
-            obstacle_binary = np.where(
-                combined_cost > self.binary_threshold,
-                100,
-                0,
-            ).astype(np.uint8)
-            self.obstacle_costmap_pub.publish(
-                self._costmap_to_occupancy_grid(
-                    obstacle_binary,
-                    msg.header,
-                    'binary_obstacles',
-                )
+        # Values above the threshold are foreground (100). Zero cells
+        # remain white in the published grid; the AMCL positive-SAD model
+        # deliberately treats only foreground cells as semantic evidence.
+        obstacle_binary = np.where(
+            combined_cost > self.binary_threshold,
+            100,
+            0,
+        ).astype(np.uint8)
+        self.obstacle_costmap_pub.publish(
+            self._costmap_to_occupancy_grid(
+                obstacle_binary,
+                msg.header,
+                'binary_obstacles',
             )
+        )
 
-            # Street evidence remains independent and comes only from BLUE.
-            # In both binary grids, ROS displays 100 as black and 0 as white.
-            street_cost = self._image_to_costmap(roi_bgr, 'BLUE')
-            street_binary = np.where(
-                street_cost > self.binary_threshold,
-                100,
-                0,
-            ).astype(np.uint8)
-            self.street_costmap_pub.publish(
-                self._costmap_to_occupancy_grid(
-                    street_binary,
-                    msg.header,
-                    'binary_street',
-                )
+        # Street evidence remains independent and comes only from BLUE.
+        # In both binary grids, ROS displays 100 as black and 0 as white.
+        street_cost = self._image_to_costmap(roi_bgr, 'BLUE')
+        street_binary = np.where(
+            street_cost > self.binary_threshold,
+            100,
+            0,
+        ).astype(np.uint8)
+        self.street_costmap_pub.publish(
+            self._costmap_to_occupancy_grid(
+                street_binary,
+                msg.header,
+                'binary_street',
             )
+        )
 
-            # Publish both diagnostics continuously so they remain observable
-            # and recordable even when RViz connects after the pipeline starts.
+        if self.publish_debug:
+            # Publish diagnostics continuously so they remain observable and
+            # recordable even when RViz connects after the pipeline starts.
             combined_debug_msg = self.bridge.cv2_to_imgmsg(
                 self._render_debug(combined_cost),
                 encoding='bgr8',
@@ -549,8 +484,6 @@ class OnlineMetricBEV(Node):
                 }
                 lines.append(f"  ---------------- {color} ----------------")
                 lines.append(f"  [Mask + Inflate]       Current: {t_color[color]['mask_inflate']:.2f} ms | Avg ({self.window_size}f): {avg_c['mask_inflate']:.2f} ms")
-                lines.append(f"  [Occupancy Publish]    Current: {t_color[color]['occupancy_publish']:.2f} ms | Avg ({self.window_size}f): {avg_c['occupancy_publish']:.2f} ms")
-                lines.append(f"  [Debug Render]         Current: {t_color[color]['debug_render']:.2f} ms | Avg ({self.window_size}f): {avg_c['debug_render']:.2f} ms")
             lines.append("=========================================================================")
 
             self.get_logger().info("\n".join(lines))

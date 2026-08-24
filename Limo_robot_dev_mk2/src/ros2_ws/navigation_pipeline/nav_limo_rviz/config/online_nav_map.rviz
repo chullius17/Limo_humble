@@ -13,8 +13,8 @@ Panels:
         - /Static CV Map1
         - /MetricBEV Combined1
         - /Camera RGB1
-        - /CV Obstacles Discretized1
-        - /CV Street Discretized1
+        - /CV Obstacles Subsampled1
+        - /CV Street Subsampled1
       Splitter Ratio: 0.5
     Tree Height: 611
   - Class: rviz_common/Views
@@ -129,11 +129,11 @@ Visualization Manager:
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /limo/nav_map_package/online/cv_amcl_debug/discretized_obstacles
+        Value: /limo/nav_map_package/online/cv_amcl_debug/subsampled_obstacles
       Max Value: 255.0
       Median window: 5
       Min Value: 0.0
-      Name: CV Obstacles Discretized
+      Name: CV Obstacles Subsampled
       Normalize Range: false
       Transport Hint: raw
     - Class: rviz_default_plugins/Image
@@ -143,11 +143,11 @@ Visualization Manager:
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /limo/nav_map_package/online/cv_amcl_debug/discretized_street
+        Value: /limo/nav_map_package/online/cv_amcl_debug/subsampled_street
       Max Value: 255.0
       Median window: 5
       Min Value: 0.0
-      Name: CV Street Discretized
+      Name: CV Street Subsampled
       Normalize Range: false
       Transport Hint: raw
   Enabled: true

@@ -188,9 +188,6 @@ def generate_launch_description():
         name='cv_amcl_debug',
         output='screen',
         parameters=[{
-            'input_topic': (
-                '/limo/nav_map_package/online/maps/cv_map'
-            ),
             'obstacle_grid_topic': (
                 '/limo/nav_map_package/online/metric_bev/'
                 'cost_grid_binary_obstacles'
@@ -199,46 +196,16 @@ def generate_launch_description():
                 '/limo/nav_map_package/online/metric_bev/'
                 'cost_grid_binary_street'
             ),
-            'obstacle_grid_debug_topic': (
+            'obstacle_grid_subsampled_topic': (
                 '/limo/nav_map_package/online/cv_amcl_debug/'
-                'discretized_obstacles'
+                'subsampled_obstacles'
             ),
-            'street_grid_debug_topic': (
+            'street_grid_subsampled_topic': (
                 '/limo/nav_map_package/online/cv_amcl_debug/'
-                'discretized_street'
+                'subsampled_street'
             ),
-            'street_map_topic': (
-                '/limo/nav_map_package/online/maps/street_map'
-            ),
-            'particle_cloud_topic': '/particle_cloud',
-            'output_particle_cloud_topic': (
-                '/limo/nav_map_package/online/cv_amcl_debug/'
-                'raw_particle_cloud'
-            ),
-            'voxel_leaf_size': 0.05,
-            # Debug scoring is deliberately lighter than AMCL's 600+600-point
-            # production path so visualization cannot starve sensor callbacks.
-            'max_points': 200,
-            'score_rate_hz': 1.0,
-            'cv_weight_factor': ParameterValue(
-                cv_weight_factor,
-                value_type=float,
-            ),
-            'cv_obstacle_weight_factor': ParameterValue(
-                cv_obstacle_weight_factor,
-                value_type=float,
-            ),
-            'cv_street_weight_factor': ParameterValue(
-                cv_street_weight_factor,
-                value_type=float,
-            ),
-            'sad_gain': ParameterValue(cv_sad_gain, value_type=float),
             'sad_cell_size': ParameterValue(
                 cv_sad_cell_size,
-                value_type=float,
-            ),
-            'sad_min_positive_mass': ParameterValue(
-                cv_sad_min_positive_mass,
                 value_type=float,
             ),
         }],
