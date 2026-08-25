@@ -18,6 +18,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     rviz_share = get_package_share_directory('nav_limo_rviz')
+    cv_share = get_package_share_directory('nav_cv_package')
     cost_threshold = LaunchConfiguration('cost_threshold')
     filtering_roi = {
         'roi_x_min_m': 0.0,
@@ -29,6 +30,11 @@ def generate_launch_description():
     limo_mapping = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(rviz_share, 'launch', 'limo_mapping.launch.py')
+        )
+    )
+    cv_pipeline = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(cv_share, 'launch', 'cv.launch.py')
         )
     )
     visualization = IncludeLaunchDescription(
@@ -200,5 +206,6 @@ def generate_launch_description():
         ),
         start_mapping_nodes,
         start_visualization,
+        cv_pipeline,
         limo_mapping,
     ])

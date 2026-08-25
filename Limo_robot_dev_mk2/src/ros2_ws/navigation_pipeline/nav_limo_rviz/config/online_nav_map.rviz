@@ -10,6 +10,7 @@ Panels:
         - /AMCL Particle Cloud1
         - /Localization Map1
         - /Online Nav Map1
+        - /Planned Path1
         - /Static CV Map1
         - /Local CV Costmap1
         - /Camera RGB1
@@ -86,6 +87,34 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /limo/nav_map_package/online/nav_map/combined_grid
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 0; 255; 0
+      Enabled: true
+      Head Diameter: 0.02
+      Head Length: 0.02
+      Length: 0.3
+      Line Style: Billboards
+      Line Width: 0.03
+      Name: Planned Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.005
+      Shaft Length: 0.02
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /plan
+      Value: true
     - Alpha: 0.7
       Class: rviz_default_plugins/Map
       Color Scheme: map
@@ -162,6 +191,13 @@ Visualization Manager:
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
   Transformation:
     Current:
       Class: rviz_default_plugins/TF

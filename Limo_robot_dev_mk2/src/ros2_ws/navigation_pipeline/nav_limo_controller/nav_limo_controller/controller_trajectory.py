@@ -62,7 +62,8 @@ class FollowSequencePlanServer(Node):
         self.declare_parameter('goal_pause_sec',          2.0)
         self.declare_parameter('control_rate',           20.0)    # Hz
 
-        self.declare_parameter('max_linear_vel',          0.20)   # m/s
+        # Hard upper bound applied to linear.x in every published cmd_vel.
+        self.declare_parameter('max_linear_vel',          0.50)   # m/s
         self.declare_parameter('max_angular_vel',         1.20)   # rad/s
         self.declare_parameter('integral_windup_limit',   1.0)
 

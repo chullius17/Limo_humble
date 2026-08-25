@@ -36,6 +36,7 @@ def generate_launch_description():
     alpha4_default = '0.2'
 
     nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
+    nav_cv_share = get_package_share_directory('nav_cv_package')
     cost_threshold = LaunchConfiguration('cost_threshold')
     laser_weight_factor = LaunchConfiguration('laser_weight_factor')
     cv_weight_factor = LaunchConfiguration('cv_weight_factor')
@@ -79,6 +80,12 @@ def generate_launch_description():
             'start_map_server': 'false',
             'publish_static_map_to_odom': 'false',
         }.items(),
+    )
+
+    cv_pipeline = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(nav_cv_share, 'launch', 'cv.launch.py')
+        )
     )
 
     amcl = IncludeLaunchDescription(
@@ -393,6 +400,7 @@ def generate_launch_description():
             description='Translation noise caused by Ackermann rotation.',
         ),
         limo_rviz,
+        cv_pipeline,
         amcl,
         *map_servers,
         map_lifecycle_manager,

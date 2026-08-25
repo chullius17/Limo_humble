@@ -1,0 +1,140 @@
+# SMAC Hybrid-A* profile for ROS 2 Humble.
+#
+# Profile assumptions:
+# - LIMO operating in Ackermann mode;
+# - costmap resolution of 0.05 m/cell;
+# - forward-only controller with a maximum speed of 0.50 m/s;
+# - execution alongside the CV pipeline on a Jetson Nano.
+#
+# use_sim_time is a false placeholder rewritten by the launch file for either
+# simulation or the real robot.
+
+planner_server:
+  ros__parameters:
+    use_sim_time: false
+
+    # Nav2 uses this frequency to report slow planning; it does not make the
+    # Behavior Tree replan at 1 Hz by itself. Since the LIMO moves slowly, there
+    # is no benefit in expecting 20 global plans per second.
+    expected_planner_frequency: 1.0
+
+    planner_plugins: ["GridBased"]
+
+    GridBased:
+      # The Humble nav2_smac_planner package exports this legacy pluginlib name.
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+
+      # Keep the map at 5 cm: at 10 cm, the small LIMO footprint and narrow
+      # passages would be represented by too few cells.
+      downsample_costmap: false
+      downsampling_factor: 1
+
+      # The controller considers the goal reached within 0.15 m. Using the same
+      # tolerance avoids spending search effort on accuracy that the path
+      # follower would not require.
+      tolerance: 0.15
+
+      # The combined map explicitly distinguishes known and unknown cells. For
+      # safety, the planner must not traverse areas that were never mapped.
+      allow_unknown: false
+
+      # The time limit is the main protection for the Jetson Nano, while the
+      # iteration limit also prevents pathological searches. Two seconds are
+      # acceptable for global planning on a robot moving at up to 0.50 m/s.
+      max_iterations: 200000
+      max_on_approach_iterations: 500
+      max_planning_time: 2.0
+
+      # The current controller enforces v >= 0 and cannot reverse. DUBIN produces
+      # forward-only paths that are kinematically consistent with the Ackermann
+      # LIMO.
+      motion_model_for_search: "DUBIN"
+
+      # 64 headings correspond to 5.625 degrees per bin: sufficient accuracy for
+      # a 5 cm grid, with fewer states than the default 72-bin configuration.
+      angle_quantization_bins: 64
+
+      # Analytic expansion accelerates the final approach. Its maximum length is
+      # five times the minimum turning radius, preventing a major degradation in
+      # Hybrid-A* search performance.
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 2.5
+
+      # The real LIMO has a 0.20 m wheelbase, a 0.172 m track width, and about
+      # 28 degrees of maximum inner steering angle, yielding a center turning
+      # radius of about 0.46 m. The Gazebo model requires about 0.50 m, so using
+      # 0.50 m is valid for both and prevents physically infeasible paths.
+      minimum_turning_radius: 0.50
+
+      # reverse_penalty has no effect with DUBIN, but is kept at a valid and
+      # portable value. The other penalties favor straight paths away from high
+      # costs without forcing excessive detours.
+      reverse_penalty: 2.0
+      change_penalty: 0.0
+      non_straight_penalty: 1.15
+      cost_penalty: 2.0
+
+      # A 5 m window is sufficient for the LIMO operating area and reduces the
+      # lookup-table memory footprint compared with the generic 20 m value.
+      lookup_table_size: 5.0
+
+      # The CV and lidar layers make the map dynamic. Do not cache the obstacle
+      # heuristic across replanning requests, because its costs could become stale.
+      cache_obstacle_heuristic: false
+
+      # The integrated smoother removes residual corners. A 1e-4 tolerance and
+      # 500 iterations avoid the unnecessary cost of 1e-10/1000 on the Nano.
+      smooth_path: true
+      smoother:
+        max_iterations: 500
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-4
+
+# SMAC plans against this Costmap2D instance. The online node already merges
+# the static map, CV observations, and lidar endpoints, so another obstacle
+# plugin here would duplicate sensor processing.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 2.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      transform_tolerance: 0.3
+
+      # Keep the source-map geometry and resolution. The map topic itself is
+      # remapped by trajectory.launch.py for Foxy/Humble portability.
+      rolling_window: false
+      resolution: 0.05
+      track_unknown_space: true
+      always_send_full_costmap: false
+
+      # These are StaticLayer-wide parameters in Humble. Keeping trinary mode
+      # disabled preserves the intermediate semantic costs from OccupancyGrid.
+      trinary_costmap: false
+      lethal_cost_threshold: 100
+      unknown_cost_value: 255
+      use_maximum: false
+
+      # The physical body is approximately 0.32 x 0.20 m. This footprint adds
+      # a small margin around the chassis while retaining its rectangular shape
+      # for orientation-aware Hybrid-A* collision checking.
+      footprint: "[[-0.18, -0.12], [-0.18, 0.12], [0.18, 0.12], [0.18, -0.12]]"
+      footprint_padding: 0.01
+
+      plugins: ["static_layer", "inflation_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_topic: "/limo/nav_map_package/online/nav_map/combined_grid"
+        map_subscribe_transient_local: true
+        subscribe_to_updates: false
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        # Provide clearance around obstacles while remaining suitable for the
+        # LIMO's small footprint and narrow indoor passages.
+        inflation_radius: 0.25
+        cost_scaling_factor: 5.0
