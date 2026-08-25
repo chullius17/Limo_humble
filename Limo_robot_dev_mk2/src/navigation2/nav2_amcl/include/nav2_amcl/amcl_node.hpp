@@ -201,14 +201,14 @@ protected:
    */
   void laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan);
 
-  // CV likelihood input and fusion
-  /** @brief Receive the static CV map and rebuild the CV distance field. */
+  // CV semantic-map input and SAD fusion
+  /** @brief Receive the static obstacle semantic map. */
   void cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   /** @brief Buffer one robot-local obstacle occupancy template. */
   void cvObstacleGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg);
   /** @brief Buffer one robot-local street occupancy template. */
   void cvStreetGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg);
-  /** @brief Receive the static street map and rebuild its distance field. */
+  /** @brief Receive the static street semantic map. */
   void cvStreetMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   /** @brief Find the buffered local CV grid closest to a laser timestamp. */
   nav_msgs::msg::OccupancyGrid::ConstSharedPtr findClosestCvGrid(
@@ -218,7 +218,7 @@ protected:
     const nav_msgs::msg::OccupancyGrid & grid,
     const builtin_interfaces::msg::Time & laser_stamp);
   /**
-   * @brief Fuse laser weights and raw CV likelihoods in logarithmic space.
+   * @brief Fuse laser weights and normalized CV SAD in logarithmic space.
    * @return true when a synchronized grid was successfully applied.
    */
   bool applyCvFusion(
@@ -230,7 +230,7 @@ protected:
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_obstacle_grid_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_street_map_sub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_street_grid_sub_;
-  /// Own the obstacle/street fields, VoxelGrids, and particle scoring code.
+  /// Own the obstacle and street semantic maps and their SAD scoring code.
   std::unique_ptr<CvLikelihoodModel> cv_likelihood_model_;
   std::unique_ptr<CvLikelihoodModel> cv_street_likelihood_model_;
   /// Small time-ordered history used for nearest-timestamp synchronization.
@@ -445,7 +445,7 @@ protected:
   double cv_sync_tolerance_;
   /// Maximum number of local OccupancyGrid messages retained for matching.
   int cv_buffer_size_;
-  /// Exponents applied to normalized laser weights and raw CV likelihoods.
+  /// Factors applied to normalized laser weights and CV SAD likelihoods.
   double laser_weight_factor_;
   double cv_weight_factor_;
   double cv_obstacle_weight_factor_;
@@ -456,21 +456,15 @@ protected:
   // Grid-SAD model used by the online CV fusion path.
   double cv_sad_gain_;
   double cv_sad_cell_size_;
+  /// Minimum positive fraction retained in a downsampled local CV cell.
+  double cv_sad_min_cell_occupancy_;
   /// Minimum foreground mass required for a semantic SAD channel to vote.
   double cv_sad_min_positive_mass_;
 
-  // Parameters of the CV likelihood-field measurement model.
-  double cv_z_hit_;
-  double cv_z_rand_;
-  double cv_sigma_hit_;
-  double cv_distance_exponent_;
-  double cv_max_occ_dist_;
-  double cv_sensor_max_range_;
-  double cv_voxel_leaf_size_;
-  int cv_max_points_;
+  // Occupancy threshold shared by local and static semantic grids.
   int cv_occupied_threshold_;
-  /// Relative penalty for obstacle/street semantic contradictions.
-  double cv_semantic_mismatch_penalty_;
+  /// Publish throttled particle, laser and CV workload counters.
+  bool workload_logging_enabled_{true};
 };
 
 }  // namespace nav2_amcl

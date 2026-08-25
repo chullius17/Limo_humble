@@ -25,7 +25,10 @@ def generate_launch_description():
     cv_street_weight_factor_default = '1.0'
     cv_sad_gain_default = '20.0'
     cv_sad_cell_size_default = '0.05'
+    cv_sad_min_cell_occupancy_default = '0.1'
     cv_sad_min_positive_mass_default = '5.0'
+    max_particles_default = '800'
+    workload_logging_enabled_default = 'true'
     cv_sync_tolerance_default = '0.20'
     alpha1_default = '0.2'
     alpha2_default = '0.2'
@@ -44,8 +47,15 @@ def generate_launch_description():
     )
     cv_sad_gain = LaunchConfiguration('cv_sad_gain')
     cv_sad_cell_size = LaunchConfiguration('cv_sad_cell_size')
+    cv_sad_min_cell_occupancy = LaunchConfiguration(
+        'cv_sad_min_cell_occupancy'
+    )
     cv_sad_min_positive_mass = LaunchConfiguration(
         'cv_sad_min_positive_mass'
+    )
+    max_particles = LaunchConfiguration('max_particles')
+    workload_logging_enabled = LaunchConfiguration(
+        'workload_logging_enabled'
     )
     cv_sync_tolerance = LaunchConfiguration('cv_sync_tolerance')
     alpha1 = LaunchConfiguration('alpha1')
@@ -111,7 +121,10 @@ def generate_launch_description():
             'cv_street_weight_factor': cv_street_weight_factor,
             'cv_sad_gain': cv_sad_gain,
             'cv_sad_cell_size': cv_sad_cell_size,
+            'cv_sad_min_cell_occupancy': cv_sad_min_cell_occupancy,
             'cv_sad_min_positive_mass': cv_sad_min_positive_mass,
+            'max_particles': max_particles,
+            'workload_logging_enabled': workload_logging_enabled,
             'cv_sync_tolerance': cv_sync_tolerance,
             'alpha1': alpha1,
             'alpha2': alpha2,
@@ -275,11 +288,30 @@ def generate_launch_description():
             description='Regular SAD template sampling size in metres.',
         ),
         DeclareLaunchArgument(
+            'cv_sad_min_cell_occupancy',
+            default_value=cv_sad_min_cell_occupancy_default,
+            description=(
+                'Minimum occupied fraction retained in a local SAD cell.'
+            ),
+        ),
+        DeclareLaunchArgument(
             'cv_sad_min_positive_mass',
             default_value=cv_sad_min_positive_mass_default,
             description=(
                 'Minimum foreground mass required for a CV class to vote.'
             ),
+        ),
+        DeclareLaunchArgument(
+            'max_particles',
+            default_value=max_particles_default,
+            description=(
+                'Maximum AMCL particle count, limited for Jetson Nano.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'workload_logging_enabled',
+            default_value=workload_logging_enabled_default,
+            description='Publish throttled AMCL and CV workload counters.',
         ),
         DeclareLaunchArgument(
             'cv_sync_tolerance',

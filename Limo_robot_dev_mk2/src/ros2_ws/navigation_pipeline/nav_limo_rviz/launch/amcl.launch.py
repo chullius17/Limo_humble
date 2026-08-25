@@ -29,8 +29,15 @@ def generate_launch_description():
     cv_street_weight_factor = LaunchConfiguration('cv_street_weight_factor')
     cv_sad_gain = LaunchConfiguration('cv_sad_gain')
     cv_sad_cell_size = LaunchConfiguration('cv_sad_cell_size')
+    cv_sad_min_cell_occupancy = LaunchConfiguration(
+        'cv_sad_min_cell_occupancy'
+    )
     cv_sad_min_positive_mass = LaunchConfiguration(
         'cv_sad_min_positive_mass'
+    )
+    max_particles = LaunchConfiguration('max_particles')
+    workload_logging_enabled = LaunchConfiguration(
+        'workload_logging_enabled'
     )
     alpha1 = LaunchConfiguration('alpha1')
     alpha2 = LaunchConfiguration('alpha2')
@@ -89,9 +96,21 @@ def generate_launch_description():
                 cv_sad_cell_size,
                 value_type=float,
             ),
+            'cv_sad_min_cell_occupancy': ParameterValue(
+                cv_sad_min_cell_occupancy,
+                value_type=float,
+            ),
             'cv_sad_min_positive_mass': ParameterValue(
                 cv_sad_min_positive_mass,
                 value_type=float,
+            ),
+            'max_particles': ParameterValue(
+                max_particles,
+                value_type=int,
+            ),
+            'workload_logging_enabled': ParameterValue(
+                workload_logging_enabled,
+                value_type=bool,
             ),
             # Ackermann motion is approximated by AMCL's non-holonomic
             # DifferentialMotionModel. alpha5 is intentionally omitted because
@@ -231,11 +250,28 @@ def generate_launch_description():
             description='Regular SAD template sampling size in metres.',
         ),
         DeclareLaunchArgument(
+            'cv_sad_min_cell_occupancy',
+            default_value='0.1',
+            description=(
+                'Minimum occupied fraction retained in a local SAD cell.'
+            ),
+        ),
+        DeclareLaunchArgument(
             'cv_sad_min_positive_mass',
             default_value='5.0',
             description=(
                 'Minimum foreground mass required for a CV class to vote.'
             ),
+        ),
+        DeclareLaunchArgument(
+            'max_particles',
+            default_value='2000',
+            description='Maximum number of particles maintained by AMCL.',
+        ),
+        DeclareLaunchArgument(
+            'workload_logging_enabled',
+            default_value='true',
+            description='Publish throttled AMCL and CV workload counters.',
         ),
         DeclareLaunchArgument(
             'alpha1',

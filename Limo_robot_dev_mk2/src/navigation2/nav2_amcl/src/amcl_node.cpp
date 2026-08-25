@@ -68,7 +68,7 @@ AmclNode::AmclNode(const rclcpp::NodeOptions & options)
 {
   RCLCPP_INFO(get_logger(), "Creating");
 
-  // Optional CV likelihood-field fusion. It remains disabled in generic Nav2
+  // Optional CV semantic SAD fusion. It remains disabled in generic Nav2
   // and is explicitly enabled by the LIMO AMCL launch file.
   add_parameter(
     "alpha1", rclcpp::ParameterValue(0.2),
@@ -265,17 +265,10 @@ AmclNode::AmclNode(const rclcpp::NodeOptions & options)
   add_parameter("minimum_likelihood", rclcpp::ParameterValue(1.0e-12));
   add_parameter("cv_sad_gain", rclcpp::ParameterValue(20.0));
   add_parameter("cv_sad_cell_size", rclcpp::ParameterValue(0.05));
+  add_parameter("cv_sad_min_cell_occupancy", rclcpp::ParameterValue(0.1));
   add_parameter("cv_sad_min_positive_mass", rclcpp::ParameterValue(5.0));
-  add_parameter("cv_z_hit", rclcpp::ParameterValue(0.5));
-  add_parameter("cv_z_rand", rclcpp::ParameterValue(0.5));
-  add_parameter("cv_sigma_hit", rclcpp::ParameterValue(0.2));
-  add_parameter("cv_distance_exponent", rclcpp::ParameterValue(3.0));
-  add_parameter("cv_max_occ_dist", rclcpp::ParameterValue(2.0));
-  add_parameter("cv_sensor_max_range", rclcpp::ParameterValue(10.0));
-  add_parameter("cv_voxel_leaf_size", rclcpp::ParameterValue(0.05));
-  add_parameter("cv_max_points", rclcpp::ParameterValue(600));
   add_parameter("cv_occupied_threshold", rclcpp::ParameterValue(50));
-  add_parameter("cv_semantic_mismatch_penalty", rclcpp::ParameterValue(1.0));
+  add_parameter("workload_logging_enabled", rclcpp::ParameterValue(true));
 }
 
 AmclNode::~AmclNode()
@@ -750,8 +743,20 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
     updateFilter(laser_index, laser_scan, pose);
 
     // The laser update above has evaluated and normalized this sample set.
-    // Fuse the synchronized CV likelihoods before any particles are resampled.
+    // Fuse synchronized CV SAD evidence before any particles are resampled.
     pf_sample_set_t * set = pf_->sets + pf_->current_set;
+    if (workload_logging_enabled_) {
+      const std::size_t effective_laser_beams = std::min(
+        laser_scan->ranges.size(), static_cast<std::size_t>(max_beams_));
+      const std::uint64_t particle_beam_evaluations =
+        static_cast<std::uint64_t>(set->sample_count) * effective_laser_beams;
+      RCLCPP_INFO_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "AMCL workload: particles=%d configured=[%d,%d] scan_ranges=%zu "
+        "laser_beams_limit=%d particle_beam_evaluations=%llu cv_enabled=%d",
+        set->sample_count, min_particles_, max_particles_, laser_scan->ranges.size(),
+        max_beams_, static_cast<unsigned long long>(particle_beam_evaluations), cv_enabled_);
+    }
     if (cv_enabled_) {
       applyCvFusion(set, laser_scan->header.stamp);
     }
@@ -801,7 +806,7 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
 
 void AmclNode::cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
-  // The CV field and AMCL particles must use the same global coordinate frame;
+  // The CV map and AMCL particles must use the same global coordinate frame;
   // accepting another frame would produce plausible but geometrically invalid scores.
   if (!nav2_util::validateMsg(*msg)) {
     RCLCPP_ERROR(get_logger(), "Received CV map is malformed. Rejecting.");
@@ -815,14 +820,14 @@ void AmclNode::cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
   }
 
   // The laser callback may score particles on a dedicated executor thread.
-  // Rebuilding the map is therefore serialized with score().
+  // Replacing the map is therefore serialized with scoreSad().
   std::lock_guard<std::mutex> lock(cv_mutex_);
   if (cv_likelihood_model_ == nullptr || !cv_likelihood_model_->setMap(*msg)) {
-    RCLCPP_ERROR(get_logger(), "Could not build the CV likelihood field");
+    RCLCPP_ERROR(get_logger(), "Could not store the CV obstacle semantic map");
     return;
   }
   RCLCPP_INFO(
-    get_logger(), "Received CV likelihood map: %u x %u @ %.3f m/pix",
+    get_logger(), "Received CV obstacle semantic map: %u x %u @ %.3f m/pix",
     msg->info.width, msg->info.height, msg->info.resolution);
 }
 
@@ -941,6 +946,11 @@ std::vector<CvTemplateCell2D> AmclNode::transformCvGridToLaserTime(
       if (known_count == 0) {
         continue;
       }
+      const double occupancy =
+        static_cast<double>(occupied_count) / static_cast<double>(known_count);
+      if (occupancy <= cv_sad_min_cell_occupancy_) {
+        continue;
+      }
 
       const double local_x =
         0.5 * static_cast<double>(first_column + last_column) * resolution;
@@ -951,9 +961,7 @@ std::vector<CvTemplateCell2D> AmclNode::transformCvGridToLaserTime(
       const double source_y = origin.position.y +
         origin_sin * local_x + origin_cos * local_y;
       const tf2::Vector3 base_point = grid_to_base * tf2::Vector3(source_x, source_y, 0.0);
-      cells.push_back(
-        {base_point.x(), base_point.y(),
-          static_cast<double>(occupied_count) / static_cast<double>(known_count)});
+      cells.push_back({base_point.x(), base_point.y(), occupancy});
     }
   }
 
@@ -962,8 +970,8 @@ std::vector<CvTemplateCell2D> AmclNode::transformCvGridToLaserTime(
 
 void AmclNode::cvStreetMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
-  // Street and obstacle likelihood fields share the particle/global frame but
-  // remain independent maps so their raw scores can be added after scoring.
+  // Street and obstacle maps share the particle/global frame but remain
+  // independent so their normalized SAD scores can be combined after scoring.
   if (!nav2_util::validateMsg(*msg)) {
     RCLCPP_ERROR(get_logger(), "Received CV street map is malformed. Rejecting.");
     return;
@@ -979,11 +987,11 @@ void AmclNode::cvStreetMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg)
   if (cv_street_likelihood_model_ == nullptr ||
     !cv_street_likelihood_model_->setMap(*msg))
   {
-    RCLCPP_ERROR(get_logger(), "Could not build the CV street likelihood field");
+    RCLCPP_ERROR(get_logger(), "Could not store the CV street semantic map");
     return;
   }
   RCLCPP_INFO(
-    get_logger(), "Received CV street likelihood map: %u x %u @ %.3f m/pix",
+    get_logger(), "Received CV street semantic map: %u x %u @ %.3f m/pix",
     msg->info.width, msg->info.height, msg->info.resolution);
 }
 
@@ -1046,19 +1054,15 @@ bool AmclNode::applyCvFusion(
     }
     if (use_obstacles) {
       obstacle_score = cv_likelihood_model_->scoreSad(
-        set, obstacle_cells, cv_sad_gain_);
+        set, obstacle_cells);
     } else {
-      obstacle_score.likelihoods.resize(
-        static_cast<std::size_t>(set->sample_count), 1.0);
       obstacle_score.normalized_sad.resize(
         static_cast<std::size_t>(set->sample_count), 0.0);
     }
     if (use_street) {
       street_score = cv_street_likelihood_model_->scoreSad(
-        set, street_cells, cv_sad_gain_);
+        set, street_cells);
     } else {
-      street_score.likelihoods.resize(
-        static_cast<std::size_t>(set->sample_count), 1.0);
       street_score.normalized_sad.resize(
         static_cast<std::size_t>(set->sample_count), 0.0);
     }
@@ -1068,6 +1072,31 @@ bool AmclNode::applyCvFusion(
     street_score.normalized_sad.size() != sample_count)
   {
     return false;
+  }
+
+  if (workload_logging_enabled_) {
+    // Report objective workload counters for embedded-platform feasibility tests.
+    // Downsampling has already discarded non-positive and low-confidence cells,
+    // so every retained cell reaches the static-map lookup in scoreSad().
+    const std::uint64_t obstacle_raw_cells = use_obstacles ?
+      static_cast<std::uint64_t>(obstacle_grid->info.width) * obstacle_grid->info.height : 0U;
+    const std::uint64_t street_raw_cells = use_street ?
+      static_cast<std::uint64_t>(street_grid->info.width) * street_grid->info.height : 0U;
+    const std::uint64_t particle_cell_iterations =
+      static_cast<std::uint64_t>(sample_count) *
+      (obstacle_cells.size() + street_cells.size());
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "CV workload: particles=%zu configured=[%d,%d] "
+      "raw_grid_cells=[%llu,%llu] retained_cells=[%zu,%zu] "
+      "min_cell_occupancy=%.3f "
+      "particle_cell_iterations=%llu",
+      sample_count, min_particles_, max_particles_,
+      static_cast<unsigned long long>(obstacle_raw_cells),
+      static_cast<unsigned long long>(street_raw_cells),
+      obstacle_cells.size(), street_cells.size(),
+      cv_sad_min_cell_occupancy_,
+      static_cast<unsigned long long>(particle_cell_iterations));
   }
 
   // An all-white or nearly empty class contains no reliable positive semantic
@@ -1176,13 +1205,12 @@ bool AmclNode::applyCvFusion(
   RCLCPP_INFO_THROTTLE(
     get_logger(), *get_clock(), 2000,
     "Fused dual CV positive SAD: dt=[%.4f, %.4f] cells=[%zu, %zu] "
-    "class_mass=[obstacles=(%.1f, %.1f) street=(%.1f, %.1f)] "
+    "positive_mass=[obstacles=%.1f street=%.1f] "
     "active=[%d, %d] min_positive=%.1f factors=[%.3f, %.3f] mix=[%.3f, %.3f] "
     "sad_mean=[obstacles=%.6f street=%.6f combined=%.6f] "
     "combined_range=[%.6f, %.6f] gain=%.3f cv_factor=%.3f",
     obstacle_time_error, street_time_error, obstacle_cells.size(), street_cells.size(),
-    obstacle_score.positive_mass, obstacle_score.negative_mass,
-    street_score.positive_mass, street_score.negative_mass,
+    obstacle_score.positive_mass, street_score.positive_mass,
     obstacle_active, street_active, cv_sad_min_positive_mass_,
     cv_obstacle_weight_factor_, cv_street_weight_factor_,
     obstacle_mix, street_mix,
@@ -1591,17 +1619,10 @@ AmclNode::initParameters()
   get_parameter("minimum_likelihood", minimum_likelihood_);
   get_parameter("cv_sad_gain", cv_sad_gain_);
   get_parameter("cv_sad_cell_size", cv_sad_cell_size_);
+  get_parameter("cv_sad_min_cell_occupancy", cv_sad_min_cell_occupancy_);
   get_parameter("cv_sad_min_positive_mass", cv_sad_min_positive_mass_);
-  get_parameter("cv_z_hit", cv_z_hit_);
-  get_parameter("cv_z_rand", cv_z_rand_);
-  get_parameter("cv_sigma_hit", cv_sigma_hit_);
-  get_parameter("cv_distance_exponent", cv_distance_exponent_);
-  get_parameter("cv_max_occ_dist", cv_max_occ_dist_);
-  get_parameter("cv_sensor_max_range", cv_sensor_max_range_);
-  get_parameter("cv_voxel_leaf_size", cv_voxel_leaf_size_);
-  get_parameter("cv_max_points", cv_max_points_);
   get_parameter("cv_occupied_threshold", cv_occupied_threshold_);
-  get_parameter("cv_semantic_mismatch_penalty", cv_semantic_mismatch_penalty_);
+  get_parameter("workload_logging_enabled", workload_logging_enabled_);
 
   save_pose_period_ = tf2::durationFromSec(1.0 / save_pose_rate);
   transform_tolerance_ = tf2::durationFromSec(tmp_tol);
@@ -1678,30 +1699,19 @@ AmclNode::initParameters()
     cv_sad_gain_ = 20.0;
     cv_sad_cell_size_ = 0.05;
   }
+  if (cv_sad_min_cell_occupancy_ < 0.0 || cv_sad_min_cell_occupancy_ > 1.0) {
+    RCLCPP_WARN(
+      get_logger(), "cv_sad_min_cell_occupancy must be in [0, 1]; using 0.1");
+    cv_sad_min_cell_occupancy_ = 0.1;
+  }
   if (cv_sad_min_positive_mass_ < 0.0) {
     RCLCPP_WARN(
       get_logger(), "cv_sad_min_positive_mass must be non-negative; using 5.0");
     cv_sad_min_positive_mass_ = 5.0;
   }
-  if (
-    cv_z_hit_ < 0.0 || cv_z_rand_ < 0.0 || cv_sigma_hit_ <= 0.0 ||
-    cv_distance_exponent_ <= 0.0 ||
-    cv_max_occ_dist_ <= 0.0 || cv_sensor_max_range_ <= 0.0 ||
-    cv_voxel_leaf_size_ <= 0.0 || cv_max_points_ < 1 ||
-    cv_occupied_threshold_ < 0 || cv_occupied_threshold_ > 100 ||
-    cv_semantic_mismatch_penalty_ < 0.0)
-  {
-    RCLCPP_WARN(get_logger(), "Invalid CV model parameters; restoring safe defaults");
-    cv_z_hit_ = 0.5;
-    cv_z_rand_ = 0.5;
-    cv_sigma_hit_ = 0.2;
-    cv_distance_exponent_ = 3.0;
-    cv_max_occ_dist_ = 2.0;
-    cv_sensor_max_range_ = 10.0;
-    cv_voxel_leaf_size_ = 0.05;
-    cv_max_points_ = 600;
+  if (cv_occupied_threshold_ < 0 || cv_occupied_threshold_ > 100) {
+    RCLCPP_WARN(get_logger(), "Invalid CV occupancy threshold; using 50");
     cv_occupied_threshold_ = 50;
-    cv_semantic_mismatch_penalty_ = 1.0;
   }
 
   if (always_reset_initial_pose_) {
@@ -2113,16 +2123,7 @@ AmclNode::initPubSub()
     // Construct the static SAD reference before transient-local subscriptions,
     // so latched maps and the latest local template are accepted immediately.
     CvLikelihoodModel::Parameters cv_parameters;
-    cv_parameters.z_hit = cv_z_hit_;
-    cv_parameters.z_rand = cv_z_rand_;
-    cv_parameters.sigma_hit = cv_sigma_hit_;
-    cv_parameters.distance_exponent = cv_distance_exponent_;
-    cv_parameters.max_occ_dist = cv_max_occ_dist_;
-    cv_parameters.sensor_max_range = cv_sensor_max_range_;
-    cv_parameters.voxel_leaf_size = cv_voxel_leaf_size_;
-    cv_parameters.max_points = static_cast<std::size_t>(cv_max_points_);
     cv_parameters.occupied_threshold = cv_occupied_threshold_;
-    cv_parameters.semantic_mismatch_penalty = cv_semantic_mismatch_penalty_;
     cv_likelihood_model_ = std::make_unique<CvLikelihoodModel>(cv_parameters);
     cv_street_likelihood_model_ = std::make_unique<CvLikelihoodModel>(cv_parameters);
 
