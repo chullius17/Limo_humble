@@ -72,7 +72,9 @@ planner_server:
       reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.15
-      cost_penalty: 2.0
+      # A moderate value still prefers the corridor center but does not reject
+      # narrow, high-inflation passages created by small map inaccuracies.
+      cost_penalty: 1.5
 
       # A 5 m window is sufficient for the LIMO operating area and reduces the
       # lookup-table memory footprint compared with the generic 20 m value.
@@ -118,23 +120,20 @@ global_costmap:
       unknown_cost_value: 255
       use_maximum: false
 
-      # The physical body is approximately 0.32 x 0.20 m. This footprint adds
-      # a small margin around the chassis while retaining its rectangular shape
-      # for orientation-aware Hybrid-A* collision checking.
-      footprint: "[[-0.18, -0.12], [-0.18, 0.12], [0.18, 0.12], [0.18, -0.12]]"
-      footprint_padding: 0.01
+      # Use the measured 0.32 x 0.20 m chassis without an extra global-planner
+      # margin. The previous effective 0.38 x 0.26 m footprint closed valid
+      # narrow passages when the 5 cm source map was slightly imprecise.
+      # Live lidar remains responsible for exposing real obstacles.
+      footprint: "[[-0.16, -0.10], [-0.16, 0.10], [0.16, 0.10], [0.16, -0.10]]"
+      footprint_padding: 0.0
 
-      plugins: ["static_layer", "inflation_layer"]
+      # Inflation is deliberately disabled because the source map already
+      # overestimates walls and closes valid narrow passages. Collision checks
+      # still use lethal cells and the complete physical LIMO footprint.
+      plugins: ["static_layer"]
 
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_topic: "/limo/nav_map_package/online/nav_map/combined_grid"
         map_subscribe_transient_local: true
         subscribe_to_updates: false
-
-      inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        # Provide clearance around obstacles while remaining suitable for the
-        # LIMO's small footprint and narrow indoor passages.
-        inflation_radius: 0.25
-        cost_scaling_factor: 5.0

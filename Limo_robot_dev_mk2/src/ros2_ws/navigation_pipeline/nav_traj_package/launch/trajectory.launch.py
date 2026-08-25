@@ -71,6 +71,20 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
             'planner_id': 'GridBased',
+            'costmap_topic': '/global_costmap/costmap',
+            'adjusted_goal_topic': '/adjusted_goal_pose',
+            # Search only a small neighborhood and cap SMAC requests to keep
+            # interactive goal correction sustainable on the Jetson Nano.
+            'enable_goal_adjustment': True,
+            'position_search_radius': 0.30,
+            'position_search_step': 0.05,
+            'angle_search_step_deg': 22.5,
+            'max_planning_attempts': 16,
+            # Match the physical, unpadded footprint used by SMAC.
+            'footprint_length': 0.32,
+            'footprint_width': 0.20,
+            # OccupancyGrid value 99 represents Nav2's inscribed cost.
+            'collision_cost_threshold': 99,
         }],
     )
 
