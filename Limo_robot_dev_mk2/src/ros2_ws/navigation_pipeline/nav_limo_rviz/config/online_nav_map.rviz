@@ -11,7 +11,7 @@ Panels:
         - /Localization Map1
         - /Online Nav Map1
         - /Static CV Map1
-        - /MetricBEV Combined1
+        - /Local CV Costmap1
         - /Camera RGB1
         - /CV Obstacles Subsampled1
         - /CV Street Subsampled1
@@ -101,13 +101,13 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: costmap
       Enabled: true
-      Name: MetricBEV Combined
+      Name: Local CV Costmap
       Topic:
         Depth: 1
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /limo/nav_map_package/online/metric_bev/cost_grid_combined
+        Value: /limo/nav_map_package/online/local_map/combined_grid
     - Class: rviz_default_plugins/Image
       Enabled: true
       Topic:

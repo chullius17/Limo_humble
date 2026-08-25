@@ -195,6 +195,59 @@ def generate_launch_description():
         }],
     )
 
+    filtering_roi = {
+        'use_sim_time': True,
+        'base_frame': 'base_link',
+        'tracking_frame': 'odom',
+        'resolution': 0.05,
+        'cv_offset_x_m': 0.6,
+        'roi_x_min_m': 0.0,
+        'roi_x_max_m': 1.85,
+        'roi_width_near_m': 0.60,
+        'roi_width_far_m': 2.65,
+        'publish_rate_hz': 20.0,
+    }
+    online_filtering_nodes = [
+        Node(
+            package='online_map_package',
+            executable='online_filtering',
+            name=f'online_filtering_{color.lower()}',
+            output='screen',
+            parameters=[{'color': color, **filtering_roi}],
+        )
+        for color in ('TURQUOISE', 'WHITE', 'MAGENTA')
+    ]
+
+    online_local_map = Node(
+        package='online_map_package',
+        executable='online_local_map',
+        name='online_local_map',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'turquoise_topic': (
+                '/limo/nav_map_package/online/filtering/'
+                'map_paper_turquoise'
+            ),
+            'white_topic': (
+                '/limo/nav_map_package/online/filtering/map_paper_white'
+            ),
+            'magenta_topic': (
+                '/limo/nav_map_package/online/filtering/map_paper_magenta'
+            ),
+            'output_topic': (
+                '/limo/nav_map_package/online/local_map/combined_grid'
+            ),
+            'debug_image_topic': (
+                '/limo/nav_map_package/online/local_map/'
+                'combined_image/raw'
+            ),
+            'turquoise_factor': 0.6,
+            'white_factor': 0.3,
+            'magenta_factor': 1.0,
+        }],
+    )
+
     cv_amcl_debug = Node(
         package='online_map_package',
         executable='cv_amcl_debug',
@@ -267,7 +320,8 @@ def generate_launch_description():
             'cv_obstacle_weight_factor',
             default_value=cv_obstacle_weight_factor_default,
             description=(
-                'Relative obstacle evidence factor; zero disables obstacle SAD.'
+                'Relative obstacle evidence factor; zero disables '
+                'obstacle SAD.'
             ),
         ),
         DeclareLaunchArgument(
@@ -343,6 +397,8 @@ def generate_launch_description():
         *map_servers,
         map_lifecycle_manager,
         online_metric_bev,
+        *online_filtering_nodes,
+        online_local_map,
         cv_amcl_debug,
         nav_map,
     ])
