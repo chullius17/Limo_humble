@@ -37,6 +37,10 @@ def generate_launch_description():
                 'global_costmap.global_costmap.ros__parameters.'
                 'static_layer.map_topic'
             ): map_topic,
+            (
+                'global_costmap.global_costmap.ros__parameters.'
+                'border_follow_layer.source_topic'
+            ): map_topic,
         },
         convert_types=True,
     )

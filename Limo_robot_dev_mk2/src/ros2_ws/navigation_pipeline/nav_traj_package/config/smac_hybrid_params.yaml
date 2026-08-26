@@ -127,13 +127,21 @@ global_costmap:
       footprint: "[[-0.16, -0.10], [-0.16, 0.10], [0.16, 0.10], [0.16, -0.10]]"
       footprint_padding: 0.0
 
-      # Inflation is deliberately disabled because the source map already
-      # overestimates walls and closes valid narrow passages. Collision checks
-      # still use lethal cells and the complete physical LIMO footprint.
-      plugins: ["static_layer"]
+      plugins: ["static_layer", "border_follow_layer"]
 
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_topic: "/limo/nav_map_package/online/nav_map/combined_grid"
         map_subscribe_transient_local: true
         subscribe_to_updates: false
+
+      border_follow_layer:
+        plugin: "limo_inflation::BorderFollowLayer"
+        source_topic: "/limo/nav_map_package/online/nav_map/combined_grid"
+        obstacle_threshold: 10
+        robot_width: 0.20
+        safety_margin: 0.05
+        distance_tolerance: 0.02
+        near_max_cost: 200
+        far_cost_slope: 20.0
+        far_max_cost: 25

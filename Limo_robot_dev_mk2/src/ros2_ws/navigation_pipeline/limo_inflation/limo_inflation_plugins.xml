@@ -1,0 +1,11 @@
+<library path="limo_inflation">
+  <class
+    name="limo_inflation::BorderFollowLayer"
+    type="limo_inflation::BorderFollowLayer"
+    base_class_type="nav2_costmap_2d::Layer">
+    <description>
+      Creates a zero-cost band at the preferred distance from obstacles and a
+      bounded cost field on either side while preserving source-map costs.
+    </description>
+  </class>
+</library>
