@@ -141,6 +141,7 @@ global_costmap:
         obstacle_threshold: 10
         robot_width: 0.20
         safety_margin: 0.05
+        second_lane_distance: 0.40
         distance_tolerance: 0.02
         near_max_cost: 200
         far_cost_slope: 20.0

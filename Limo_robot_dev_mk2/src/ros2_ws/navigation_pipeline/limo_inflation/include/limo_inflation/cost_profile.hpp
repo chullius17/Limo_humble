@@ -9,6 +9,7 @@ namespace limo_inflation
 struct CostProfile
 {
   double target_distance{0.15};
+  double second_lane_distance{0.35};
   double tolerance{0.02};
   std::uint8_t near_max_cost{200};
   double far_cost_slope{20.0};
