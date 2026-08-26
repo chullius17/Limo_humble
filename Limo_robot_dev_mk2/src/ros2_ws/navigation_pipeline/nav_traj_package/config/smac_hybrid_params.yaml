@@ -38,12 +38,12 @@ planner_server:
       # safety, the planner must not traverse areas that were never mapped.
       allow_unknown: false
 
-      # The time limit is the main protection for the Jetson Nano, while the
-      # iteration limit also prevents pathological searches. Two seconds are
-      # acceptable for global planning on a robot moving at up to 0.50 m/s.
-      max_iterations: 200000
-      max_on_approach_iterations: 500
-      max_planning_time: 2.0
+      # Longer routes need a larger Hybrid-A* search budget. Planning is an
+      # occasional workload, so five seconds and 500k iterations are accepted
+      # while retaining finite limits for pathological searches on the Nano.
+      max_iterations: 500000
+      max_on_approach_iterations: 1000
+      max_planning_time: 5.0
 
       # The current controller enforces v >= 0 and cannot reverse. DUBIN produces
       # forward-only paths that are kinematically consistent with the Ackermann
@@ -55,10 +55,10 @@ planner_server:
       angle_quantization_bins: 64
 
       # Analytic expansion accelerates the final approach. Its maximum length is
-      # five times the minimum turning radius, preventing a major degradation in
-      # Hybrid-A* search performance.
+      # ten times the minimum turning radius, allowing longer direct final
+      # connections while retaining the normal Hybrid-A* collision checks.
       analytic_expansion_ratio: 3.5
-      analytic_expansion_max_length: 2.5
+      analytic_expansion_max_length: 5.0
 
       # The real LIMO has a 0.20 m wheelbase, a 0.172 m track width, and about
       # 28 degrees of maximum inner steering angle, yielding a center turning
@@ -76,9 +76,9 @@ planner_server:
       # narrow, high-inflation passages created by small map inaccuracies.
       cost_penalty: 1.5
 
-      # A 5 m window is sufficient for the LIMO operating area and reduces the
-      # lookup-table memory footprint compared with the generic 20 m value.
-      lookup_table_size: 5.0
+      # A 10 m lookup window gives the non-holonomic heuristic useful coverage
+      # on longer routes without returning to the generic 20 m memory cost.
+      lookup_table_size: 10.0
 
       # The CV and lidar layers make the map dynamic. Do not cache the obstacle
       # heuristic across replanning requests, because its costs could become stale.

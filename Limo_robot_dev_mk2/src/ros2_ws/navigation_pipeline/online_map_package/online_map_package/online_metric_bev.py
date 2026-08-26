@@ -241,6 +241,27 @@ class OnlineMetricBEV(Node):
         hi = np.clip(exact_color.astype(np.int16) + self.TOLERANCE, 0, 255).astype(np.uint8)
         return cv2.inRange(bgr, lo, hi)
 
+    @staticmethod
+    def _fill_mask_blobs(mask: np.ndarray) -> np.ndarray:
+        """Fill semantic contours so every pixel in a blob gets peak cost."""
+        contours, _ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not contours:
+            return mask
+
+        filled_mask = np.zeros_like(mask)
+        cv2.drawContours(
+            filled_mask,
+            contours,
+            contourIdx=-1,
+            color=255,
+            thickness=cv2.FILLED,
+        )
+        return filled_mask
+
     def _build_cost_layer(self, mask: np.ndarray, peak_cost: float,
                           radius_px: int) -> np.ndarray:
         # Outward inflation: distance from every external pixel to the nearest
@@ -269,6 +290,7 @@ class OnlineMetricBEV(Node):
         config = self.config_map[color]
 
         mask = self._make_mask(bgr, target_color)
+        mask = self._fill_mask_blobs(mask)
 
         return self._build_cost_layer(
             mask,

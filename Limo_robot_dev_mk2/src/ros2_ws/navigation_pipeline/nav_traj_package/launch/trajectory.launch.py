@@ -77,13 +77,13 @@ def generate_launch_description():
             'planner_id': 'GridBased',
             'costmap_topic': '/global_costmap/costmap',
             'adjusted_goal_topic': '/adjusted_goal_pose',
-            # Search only a small neighborhood and cap SMAC requests to keep
-            # interactive goal correction sustainable on the Jetson Nano.
+            # Search a wider spatial neighborhood while using a coarser ring
+            # step and a bounded number of SMAC requests for the Jetson Nano.
             'enable_goal_adjustment': True,
-            'position_search_radius': 0.30,
-            'position_search_step': 0.05,
+            'position_search_radius': 0.75,
+            'position_search_step': 0.10,
             'angle_search_step_deg': 22.5,
-            'max_planning_attempts': 16,
+            'max_planning_attempts': 48,
             # Match the physical, unpadded footprint used by SMAC.
             'footprint_length': 0.32,
             'footprint_width': 0.20,

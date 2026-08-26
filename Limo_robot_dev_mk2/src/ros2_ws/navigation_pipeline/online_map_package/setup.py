@@ -35,6 +35,7 @@ setup(
             'online_metric_bev = online_map_package.online_metric_bev:main',
             'cv_amcl_debug = online_map_package.cv_amcl_debug:main',
             'online_nav_map = online_map_package.online_nav_map:main',
+            'persistent_cloud = online_map_package.persistent_ptcld:main',
         ],
     },
 )

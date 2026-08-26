@@ -266,6 +266,37 @@ def generate_launch_description():
         }],
     )
 
+    persistent_cloud = Node(
+        package='online_map_package',
+        executable='persistent_cloud',
+        name='persistent_cloud',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'input_topic': (
+                '/limo/nav_map_package/online/metric_bev/'
+                'cost_grid_combined'
+            ),
+            'output_topic': (
+                '/limo/nav_map_package/online/persistent_cloud'
+            ),
+            'global_frame': 'map',
+            'base_frame': 'base_link',
+            'bounding_box_topic': (
+                '/limo/nav_map_package/online/cloud_bounding_box'
+            ),
+            'roi_marker_topic': (
+                '/limo/nav_map_package/online/cloud_roi'
+            ),
+            'bounding_box_length': 2.46,
+            'bounding_box_width': 2.66,
+            'voxel_size': 0.03,
+            'source_block_size': 5,
+            'minimum_cells_per_voxel': 5,
+            'maximum_points': 2000,
+        }],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'cost_threshold',
@@ -378,4 +409,5 @@ def generate_launch_description():
         online_metric_bev,
         cv_amcl_debug,
         nav_map,
+        persistent_cloud,
     ])
