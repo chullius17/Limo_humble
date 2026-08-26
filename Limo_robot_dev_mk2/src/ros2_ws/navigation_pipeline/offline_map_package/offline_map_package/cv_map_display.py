@@ -25,8 +25,8 @@ class CVMapDisplay(Node):
         self.declare_parameter('robot_frame',         'base_link')
         self.declare_parameter('view_resolution',     0.02)     # Lightweight definition for images (2cm/px)
         self.declare_parameter('view_range_m',        3.0)      # Semi-side of ego canvas
-        self.declare_parameter('turquoise_factor',    0.6)
-        self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('turquoise_factor',    1.0)
+        self.declare_parameter('white_factor',        0.6)
         self.declare_parameter('magenta_factor',      1.0)
         self.declare_parameter('enable_telemetry',    True)
 

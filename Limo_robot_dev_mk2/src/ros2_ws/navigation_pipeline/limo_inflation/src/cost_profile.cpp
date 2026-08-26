@@ -30,7 +30,7 @@ std::uint8_t computeBorderCost(
     const double half_span = 0.5 * (second_lower - first_upper);
     const double normalized = 1.0 - std::abs(distance - midpoint) / half_span;
     return static_cast<std::uint8_t>(std::lround(
-      static_cast<double>(profile.far_max_cost) *
+      static_cast<double>(profile.inter_lane_peak_cost) *
       std::clamp(normalized, 0.0, 1.0)));
   }
   if (distance <= second_upper) {

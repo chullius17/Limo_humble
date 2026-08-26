@@ -11,9 +11,10 @@ struct CostProfile
   double target_distance{0.15};
   double second_lane_distance{0.35};
   double tolerance{0.02};
-  std::uint8_t near_max_cost{200};
-  double far_cost_slope{20.0};
-  std::uint8_t far_max_cost{25};
+  std::uint8_t near_max_cost{60};
+  std::uint8_t inter_lane_peak_cost{15};
+  double far_cost_slope{5.0};
+  std::uint8_t far_max_cost{8};
 };
 
 std::uint8_t computeBorderCost(double distance, const CostProfile & profile);

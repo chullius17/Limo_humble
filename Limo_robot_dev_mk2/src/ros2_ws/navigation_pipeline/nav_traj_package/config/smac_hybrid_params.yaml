@@ -120,11 +120,10 @@ global_costmap:
       unknown_cost_value: 255
       use_maximum: false
 
-      # Use the measured 0.32 x 0.20 m chassis without an extra global-planner
-      # margin. The previous effective 0.38 x 0.26 m footprint closed valid
-      # narrow passages when the 5 cm source map was slightly imprecise.
-      # Live lidar remains responsible for exposing real obstacles.
-      footprint: "[[-0.16, -0.10], [-0.16, 0.10], [0.16, 0.10], [0.16, -0.10]]"
+      # Use a reduced 0.32 x 0.09 m planning footprint without an additional
+      # margin. The inflation layer deliberately retains its independent
+      # 0.20 m robot width.
+      footprint: "[[-0.16, -0.045], [-0.16, 0.045], [0.16, 0.045], [0.16, -0.045]]"
       footprint_padding: 0.0
 
       plugins: ["static_layer", "border_follow_layer"]
@@ -143,6 +142,7 @@ global_costmap:
         safety_margin: 0.05
         second_lane_distance: 0.40
         distance_tolerance: 0.02
-        near_max_cost: 200
-        far_cost_slope: 20.0
-        far_max_cost: 25
+        near_max_cost: 120
+        inter_lane_peak_cost: 40
+        far_cost_slope: 10.0
+        far_max_cost: 8

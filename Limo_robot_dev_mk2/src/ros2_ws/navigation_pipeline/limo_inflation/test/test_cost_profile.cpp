@@ -16,7 +16,7 @@ TEST(CostProfileTest, CreatesZeroCostBand)
 TEST(CostProfileTest, DecreasesTowardPreferredBand)
 {
   const CostProfile profile;
-  EXPECT_EQ(computeBorderCost(0.0, profile), 200);
+  EXPECT_EQ(computeBorderCost(0.0, profile), 60);
   EXPECT_GT(computeBorderCost(0.05, profile),
     computeBorderCost(0.10, profile));
 }
@@ -24,9 +24,9 @@ TEST(CostProfileTest, DecreasesTowardPreferredBand)
 TEST(CostProfileTest, RisesSlowlyAndSaturatesFarFromObstacle)
 {
   const CostProfile profile;
-  EXPECT_EQ(computeBorderCost(0.50, profile), 3);
-  EXPECT_EQ(computeBorderCost(1.00, profile), 13);
-  EXPECT_EQ(computeBorderCost(10.0, profile), 25);
+  EXPECT_EQ(computeBorderCost(0.50, profile), 1);
+  EXPECT_EQ(computeBorderCost(1.00, profile), 3);
+  EXPECT_EQ(computeBorderCost(10.0, profile), 8);
 }
 
 TEST(CostProfileTest, CreatesSecondLaneWhenClearanceIsAvailable)
@@ -40,7 +40,7 @@ TEST(CostProfileTest, CreatesSecondLaneWhenClearanceIsAvailable)
 TEST(CostProfileTest, SeparatesPreferredLanesWithBoundedRidge)
 {
   const CostProfile profile;
-  EXPECT_EQ(computeBorderCost(0.25, profile), 25);
-  EXPECT_LT(computeBorderCost(0.18, profile), 25);
-  EXPECT_LT(computeBorderCost(0.27, profile), 25);
+  EXPECT_EQ(computeBorderCost(0.25, profile), 15);
+  EXPECT_LT(computeBorderCost(0.18, profile), 15);
+  EXPECT_LT(computeBorderCost(0.27, profile), 15);
 }

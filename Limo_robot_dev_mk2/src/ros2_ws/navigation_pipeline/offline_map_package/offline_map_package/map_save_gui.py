@@ -1,10 +1,11 @@
 """Small Qt GUI used to request saving the current combined map."""
 
+import signal
 import sys
 import threading
 
 import rclpy
-from PyQt5.QtCore import Qt, QTime, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import Qt, QTime, QTimer, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication,
     QLabel,
@@ -274,6 +275,32 @@ class MapSaveWindow(QWidget):
 def main(args=None):
     rclpy.init(args=args)
     app = QApplication(sys.argv)
+
+    shutdown_requested = threading.Event()
+
+    def request_shutdown(_signum=None, _frame=None):
+        """Exit the Qt event loop as soon as the process receives a signal."""
+        if shutdown_requested.is_set():
+            return
+        shutdown_requested.set()
+        app.quit()
+
+    previous_sigint_handler = signal.signal(
+        signal.SIGINT,
+        request_shutdown,
+    )
+    previous_sigterm_handler = signal.signal(
+        signal.SIGTERM,
+        request_shutdown,
+    )
+
+    # Qt spends most of its time in a native event loop. This short timer gives
+    # Python a regular opportunity to dispatch its signal handlers, bounding
+    # Ctrl+C latency without polling ROS from the GUI thread.
+    signal_dispatch_timer = QTimer()
+    signal_dispatch_timer.timeout.connect(lambda: None)
+    signal_dispatch_timer.start(20)
+
     signals = GuiSignals()
     node = MapSaveGuiNode(signals)
     ros_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
@@ -286,10 +313,13 @@ def main(args=None):
     try:
         app.exec_()
     finally:
-        node.destroy_node()
+        signal_dispatch_timer.stop()
+        signal.signal(signal.SIGINT, previous_sigint_handler)
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
         if rclpy.ok():
             rclpy.shutdown()
         ros_thread.join(timeout=1.0)
+        node.destroy_node()
 
 
 if __name__ == '__main__':
