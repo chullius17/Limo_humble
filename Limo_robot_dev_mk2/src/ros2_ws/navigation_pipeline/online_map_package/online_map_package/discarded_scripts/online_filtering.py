@@ -33,14 +33,15 @@ class OnlineFiltering(Node):
 
         self.declare_parameter('color', 'TURQUOISE')
         self.declare_parameter('base_frame', 'base_link')
-        self.declare_parameter('tracking_frame', 'odom')
-        self.declare_parameter('resolution', 0.05)
+        self.declare_parameter('resolution', 0.02)
         self.declare_parameter('cv_offset_x_m', 0.6)
         self.declare_parameter('roi_x_min_m', 0.0)
         self.declare_parameter('roi_x_max_m', 1.85)
         self.declare_parameter('roi_width_near_m', 0.6)
         self.declare_parameter('roi_width_far_m', 2.65)
         self.declare_parameter('publish_rate_hz', 20.0)
+        self.declare_parameter('occupied_logodds_increment', 2.0)
+        self.declare_parameter('free_logodds_decrement', 0.7)
 
         self.color_flag = str(self.get_parameter('color').value).upper()
         if self.color_flag not in self.CHANNELS:
@@ -51,9 +52,6 @@ class OnlineFiltering(Node):
 
         self.color_suffix = self.CHANNELS[self.color_flag]
         self.base_frame = str(self.get_parameter('base_frame').value)
-        self.tracking_frame = str(
-            self.get_parameter('tracking_frame').value
-        )
         self.resolution = float(self.get_parameter('resolution').value)
         self.cv_offset_x_m = float(
             self.get_parameter('cv_offset_x_m').value
@@ -69,6 +67,12 @@ class OnlineFiltering(Node):
         publish_rate_hz = float(
             self.get_parameter('publish_rate_hz').value
         )
+        self.occupied_logodds_increment = float(
+            self.get_parameter('occupied_logodds_increment').value
+        )
+        self.free_logodds_decrement = float(
+            self.get_parameter('free_logodds_decrement').value
+        )
 
         if self.resolution <= 0.0:
             raise ValueError('resolution must be greater than zero')
@@ -80,6 +84,14 @@ class OnlineFiltering(Node):
             raise ValueError('ROI widths must be non-negative and non-zero')
         if publish_rate_hz <= 0.0:
             raise ValueError('publish_rate_hz must be greater than zero')
+        if self.occupied_logodds_increment <= 0.0:
+            raise ValueError(
+                'occupied_logodds_increment must be greater than zero'
+            )
+        if self.free_logodds_decrement <= 0.0:
+            raise ValueError(
+                'free_logodds_decrement must be greater than zero'
+            )
 
         # OccupancyGrid columns follow base X; rows follow base Y. The robot is
         # at x=0 and centered laterally on the rear edge of the local canvas.
@@ -148,19 +160,8 @@ class OnlineFiltering(Node):
             (self.map_size_y, self.map_size_x),
             dtype=bool,
         )
-        canvas_rows, canvas_cols = np.indices(
-            (self.map_size_y, self.map_size_x),
-            dtype=np.float32,
-        )
-        self.canvas_local_x = (
-            self.map_origin_x + (canvas_cols + 0.5) * self.resolution
-        )
-        self.canvas_local_y = (
-            self.map_origin_y + (canvas_rows + 0.5) * self.resolution
-        )
-        self.previous_base_pose = None
-        self.L_OCC = 1.0
-        self.L_FREE = 0.35
+        self.L_OCC = self.occupied_logodds_increment
+        self.L_FREE = self.free_logodds_decrement
         self.L_MAX = 5.0
         self.L_MIN = -3.0
 
@@ -187,7 +188,7 @@ class OnlineFiltering(Node):
             f'grid={self.map_size_x}x{self.map_size_y} '
             f'({self.map_length_x_m:.2f}x{self.map_width_y_m:.2f} m) '
             f'resolution={self.resolution:.3f} m, frame={self.base_frame}, '
-            f'memory_tracking_frame={self.tracking_frame}'
+            f'logodds=+{self.L_OCC:.2f}/-{self.L_FREE:.2f}'
         )
 
     def get_default_occupancy_grid(self) -> OccupancyGrid:
@@ -325,69 +326,6 @@ class OnlineFiltering(Node):
         )
         return translation.x, translation.y, yaw
 
-    def _reproject_memory(self, current_pose: tuple) -> None:
-        """Keep the full rectangular memory fixed in the tracking frame."""
-        if self.previous_base_pose is None:
-            self.previous_base_pose = current_pose
-            return
-
-        old_x, old_y, old_yaw = self.previous_base_pose
-        new_x, new_y, new_yaw = current_pose
-        self.previous_base_pose = current_pose
-
-        if (
-            math.isclose(old_x, new_x, abs_tol=1e-6)
-            and math.isclose(old_y, new_y, abs_tol=1e-6)
-            and math.isclose(old_yaw, new_yaw, abs_tol=1e-6)
-        ):
-            return
-
-        cos_new = math.cos(new_yaw)
-        sin_new = math.sin(new_yaw)
-        tracking_x = (
-            new_x
-            + cos_new * self.canvas_local_x
-            - sin_new * self.canvas_local_y
-        )
-        tracking_y = (
-            new_y
-            + sin_new * self.canvas_local_x
-            + cos_new * self.canvas_local_y
-        )
-
-        delta_x = tracking_x - old_x
-        delta_y = tracking_y - old_y
-        cos_old = math.cos(old_yaw)
-        sin_old = math.sin(old_yaw)
-        old_local_x = cos_old * delta_x + sin_old * delta_y
-        old_local_y = -sin_old * delta_x + cos_old * delta_y
-
-        source_x = np.floor(
-            (old_local_x - self.map_origin_x) / self.resolution
-        ).astype(np.int32)
-        source_y = np.floor(
-            (old_local_y - self.map_origin_y) / self.resolution
-        ).astype(np.int32)
-        valid = (
-            (source_x >= 0)
-            & (source_x < self.map_size_x)
-            & (source_y >= 0)
-            & (source_y < self.map_size_y)
-        )
-
-        reprojected_logodds = np.zeros_like(self.canvas_logodds)
-        reprojected_seen = np.zeros_like(self.seen_canvas)
-        reprojected_logodds[valid] = self.canvas_logodds[
-            source_y[valid],
-            source_x[valid],
-        ]
-        reprojected_seen[valid] = self.seen_canvas[
-            source_y[valid],
-            source_x[valid],
-        ]
-        self.canvas_logodds = reprojected_logodds
-        self.seen_canvas = reprojected_seen
-
     def timer_callback(self) -> None:
         """Project the latest layer, update log-odds and publish the map."""
         if self.costmap is None:
@@ -405,21 +343,12 @@ class OnlineFiltering(Node):
                 )
                 self.cached_sensor_frame = msg.header.frame_id
                 self.cached_projection_key = None
-            base_transform = self.tf_buffer.lookup_transform(
-                self.tracking_frame,
-                self.base_frame,
-                rclpy.time.Time(),
-            )
         except TransformException as exc:
             self.get_logger().warn(
                 f'TF not available: {exc}',
                 throttle_duration_sec=2.0,
             )
             return
-
-        self._reproject_memory(
-            self._pose_from_transform(base_transform)
-        )
 
         self._cache_input_geometry(msg)
         self._cache_static_projection(self.cached_sensor_transform)
