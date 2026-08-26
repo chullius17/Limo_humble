@@ -6,7 +6,7 @@
   <name>nav_limo_controller</name>
   <version>0.0.0</version>
 
-  <description>Pure Pursuit controller and action server for the AgileX LIMO.</description>
+  <description>Nav2 MPPI control and velocity smoothing for the AgileX LIMO.</description>
 
   <maintainer email="giulio.cataldo@studio.unibo.it">Giulio Cataldo</maintainer>
   <license>Apache-2.0</license>
@@ -18,6 +18,17 @@
   <depend>std_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>action_msgs</depend>
+
+  <!-- Nav2 controller runtime -->
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_costmap_2d</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_mppi_controller</exec_depend>
+  <exec_depend>nav2_velocity_smoother</exec_depend>
 
   <!-- Custom interfaces -->
   <depend>nav_limo_interfaces</depend>

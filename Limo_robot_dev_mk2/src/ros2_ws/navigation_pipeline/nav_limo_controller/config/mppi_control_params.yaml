@@ -1,0 +1,206 @@
+# Nav2 MPPI controller profile for the physical AgileX LIMO in Ackermann mode.
+#
+# Robot data used here:
+# - wheelbase: 0.20 m;
+# - track width: 0.172 m;
+# - maximum inner steering angle: 0.48869 rad (28 deg);
+# - minimum centre-line turning radius: 0.462 m;
+# - physical controller footprint: 0.32 x 0.20 m;
+# - configured acceleration limits: 1.3 m/s^2 and 3.4 rad/s^2;
+# - command/feedback topics: /cmd_vel and /odom.
+#
+# The 0.50 m/s speed limit is the operating limit selected for this project.
+# Acceleration is limited downstream by velocity_smoother so the MPPI version
+# shipped with ROS 2 Humble does not need unsupported acceleration parameters.
+
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.0
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.10
+      movement_time_allowance: 10.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.20
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+
+      # 40 * 0.05 s gives a 2 s prediction horizon. A single iteration and
+      # 1200 samples keep the controller sustainable on the Jetson Nano.
+      time_steps: 40
+      model_dt: 0.05
+      batch_size: 1200
+      iteration_count: 1
+      temperature: 0.30
+      gamma: 0.015
+
+      # The LIMO driver converts linear.x/angular.z into front-wheel steering.
+      # AckermannConstraints enforces |v / wz| >= 0.462 m on every sample.
+      motion_model: "Ackermann"
+      AckermannConstraints:
+        min_turning_r: 0.462
+
+      vx_max: 0.50
+      vx_min: 0.0
+      vy_max: 0.0
+      wz_max: 1.10
+      vx_std: 0.15
+      vy_std: 0.0
+      wz_std: 0.25
+
+      transform_tolerance: 0.20
+      prune_distance: 1.50
+      retry_attempt_limit: 1
+      regenerate_noises: false
+      visualize: false
+
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+
+      critics:
+        - "ConstraintCritic"
+        - "CostCritic"
+        - "GoalCritic"
+        - "GoalAngleCritic"
+        - "PathAlignCritic"
+        - "PathFollowCritic"
+        - "PathAngleCritic"
+        - "PreferForwardCritic"
+
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        critical_cost: 300.0
+        consider_footprint: true
+        collision_cost: 1000000.0
+        near_goal_distance: 0.50
+        trajectory_point_step: 2
+        inflation_layer_name: "inflation_layer"
+
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.0
+
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.50
+
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 10.0
+        max_path_occupancy_ratio: 0.15
+        trajectory_point_step: 4
+        threshold_to_consider: 0.50
+        offset_from_furthest: 12
+        use_path_orientations: true
+
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.0
+
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.50
+        max_angle_to_furthest: 1.0
+
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 0.50
+
+# The controller costmap is independent from the global mapping pipeline. It
+# uses live LaserScan data in odom and the real chassis footprint for collision
+# checking, even though the global planner deliberately uses a narrower width.
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 8.0
+      publish_frequency: 4.0
+      global_frame: odom
+      robot_base_frame: base_link
+      transform_tolerance: 0.20
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      footprint: "[[-0.16, -0.10], [-0.16, 0.10], [0.16, 0.10], [0.16, -0.10]]"
+      footprint_padding: 0.0
+      track_unknown_space: false
+      always_send_full_costmap: false
+
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        combination_method: 1
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          clearing: true
+          marking: true
+          inf_is_valid: false
+          max_obstacle_height: 2.0
+          obstacle_min_range: 0.20
+          obstacle_max_range: 2.50
+          raytrace_min_range: 0.20
+          raytrace_max_range: 3.00
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        inflation_radius: 0.30
+        cost_scaling_factor: 8.0
+
+# MPPI publishes cmd_vel_nav. The smoother closes the loop on the real /odom
+# velocity and is the only node that publishes the final /cmd_vel command.
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: false
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "CLOSED_LOOP"
+    max_velocity: [0.50, 0.0, 1.10]
+    min_velocity: [0.0, 0.0, -1.10]
+    max_accel: [1.3, 0.0, 3.4]
+    max_decel: [-1.3, 0.0, -3.4]
+    odom_topic: /odom
+    odom_duration: 0.10
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 0.50
