@@ -3,6 +3,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image
+from std_msgs.msg import Bool
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -10,6 +11,7 @@ import math
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 
 class Filtering(Node):
     CHANNELS = {
@@ -88,6 +90,7 @@ class Filtering(Node):
         self.L_MIN = -3.0    # Minimum saturation point of the map
 
         self.costmap = None
+        self.mapping_enabled = True
         
         # Geometric Caching variables to avoid continuous allocations on the CPU
         self.cached_local_x = None
@@ -97,6 +100,15 @@ class Filtering(Node):
 
         # Subscription and Timer at 10Hz
         self.costmap_sub = self.create_subscription(OccupancyGrid, costmap_topic, self.costmap_callback, 10)
+        control_qos = QoSProfile(depth=1)
+        control_qos.reliability = QoSReliabilityPolicy.RELIABLE
+        control_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
+        self.mapping_control_sub = self.create_subscription(
+            Bool,
+            '/limo/nav_map_package/offline/mapping_enabled',
+            self.mapping_control_callback,
+            control_qos,
+        )
         self.timer = self.create_timer(0.1, self.timer_callback)
 
         # Pre-allocation of the output message to optimize real-time performance
@@ -128,9 +140,23 @@ class Filtering(Node):
         return msg
 
     def costmap_callback(self, msg: OccupancyGrid):
-        self.costmap = msg
+        if self.mapping_enabled:
+            self.costmap = msg
+
+    def mapping_control_callback(self, msg: Bool):
+        """Enable or pause Bayesian updates without clearing the built map."""
+        was_enabled = self.mapping_enabled
+        self.mapping_enabled = msg.data
+        if was_enabled and not self.mapping_enabled:
+            self.costmap = None
+        if was_enabled != self.mapping_enabled:
+            state = 'enabled' if self.mapping_enabled else 'paused'
+            self.get_logger().info(f'Mapping updates {state}')
 
     def timer_callback(self):
+        if not self.mapping_enabled:
+            self._publish_current_map()
+            return
         if self.costmap is None:
             return
 
@@ -232,6 +258,13 @@ class Filtering(Node):
 
         # --- OCCUPANCY GRID MAP PUBLICATION ---
         # np.where(condition, value if true, value if false)
+        self._publish_current_map(canvas_filtered)
+
+    def _publish_current_map(self, canvas_filtered=None):
+        """Publish the accumulated map, optionally reusing computed probabilities."""
+        if canvas_filtered is None:
+            prob_matrix = 1.0 / (1.0 + np.exp(-self.canvas_logodds))
+            canvas_filtered = (prob_matrix * 100.0).astype(np.int8)
         canvas_out = np.where(self.seen_canvas, canvas_filtered, np.int8(-1))
         self.grid_msg_filtered.header.stamp = self.get_clock().now().to_msg()
         self.grid_msg_filtered.data = canvas_out.flatten().tolist()

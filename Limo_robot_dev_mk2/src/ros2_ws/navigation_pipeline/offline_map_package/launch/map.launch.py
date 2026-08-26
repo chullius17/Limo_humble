@@ -20,6 +20,12 @@ def generate_launch_description():
     rviz_share = get_package_share_directory('nav_limo_rviz')
     cv_share = get_package_share_directory('nav_cv_package')
     cost_threshold = LaunchConfiguration('cost_threshold')
+    classification_blue_distance_threshold_px = LaunchConfiguration(
+        'classification_blue_distance_threshold_px'
+    )
+    classification_magenta_distance_threshold_px = LaunchConfiguration(
+        'classification_magenta_distance_threshold_px'
+    )
     filtering_roi = {
         'roi_x_min_m': 0.0,
         'roi_x_max_m': 1.85,
@@ -35,7 +41,15 @@ def generate_launch_description():
     cv_pipeline = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(cv_share, 'launch', 'cv.launch.py')
-        )
+        ),
+        launch_arguments={
+            'classification_blue_distance_threshold_px': (
+                classification_blue_distance_threshold_px
+            ),
+            'classification_magenta_distance_threshold_px': (
+                classification_magenta_distance_threshold_px
+            ),
+        }.items(),
     )
     visualization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -56,6 +70,13 @@ def generate_launch_description():
         name='offline_metric_bev',
         output='screen',
         parameters=[{'enable_telemetry': False}],
+    )
+    mapping_control = Node(
+        package='offline_map_package',
+        executable='mapping_control',
+        name='mapping_control',
+        output='screen',
+        parameters=[{'mapping_enabled': True}],
     )
     filtering_nodes = [
         Node(
@@ -176,6 +197,7 @@ def generate_launch_description():
     )
 
     mapping_nodes = [
+        mapping_control,
         offline_metric_bev,
         *filtering_nodes,
         cv_map_display,
@@ -203,6 +225,16 @@ def generate_launch_description():
             'cost_threshold',
             default_value='40.0',
             description='Publish only CV cells with a cost above this value.',
+        ),
+        DeclareLaunchArgument(
+            'classification_blue_distance_threshold_px',
+            default_value='10.0',
+            description='CV classification distance from blue in pixels.',
+        ),
+        DeclareLaunchArgument(
+            'classification_magenta_distance_threshold_px',
+            default_value='3.0',
+            description='CV classification distance from magenta in pixels.',
         ),
         start_mapping_nodes,
         start_visualization,

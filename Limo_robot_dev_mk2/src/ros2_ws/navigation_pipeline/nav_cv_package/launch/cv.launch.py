@@ -6,10 +6,21 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
-    classification_distance_threshold = DeclareLaunchArgument(
-        'classification_distance_threshold_px',
-        default_value='50.0',
+    classification_blue_distance_threshold_px = LaunchConfiguration(
+        'classification_blue_distance_threshold_px'
+    )
+    classification_magenta_distance_threshold_px = LaunchConfiguration(
+        'classification_magenta_distance_threshold_px'
+    )
+    classification_blue_distance_threshold = DeclareLaunchArgument(
+        'classification_blue_distance_threshold_px',
+        default_value='5.0',
         description='Maximum distance in pixels from a blue pixel before a white pixel is classified as magenta',
+    )
+    classification_magenta_distance_threshold = DeclareLaunchArgument(
+        'classification_magenta_distance_threshold_px',
+        default_value='5.0',
+        description='Maximum distance in pixels from magenta for propagating the classification',
     )
 
     lane_node = Node(
@@ -58,6 +69,16 @@ def generate_launch_description():
         name='classification',
         output='screen',
         emulate_tty=True,
+        parameters=[{
+            'blue_distance_threshold_px': ParameterValue(
+                classification_blue_distance_threshold_px,
+                value_type=float,
+            ),
+            'magenta_distance_threshold_px': ParameterValue(
+                classification_magenta_distance_threshold_px,
+                value_type=float,
+            ),
+        }],
     )
 
     boundary_trigger = RegisterEventHandler(
@@ -75,7 +96,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        classification_distance_threshold,
+        classification_blue_distance_threshold,
+        classification_magenta_distance_threshold,
         lane_node,
         classification_node,
         boundary_trigger,

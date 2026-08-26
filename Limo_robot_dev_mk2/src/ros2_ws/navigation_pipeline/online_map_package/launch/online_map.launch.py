@@ -38,6 +38,12 @@ def generate_launch_description():
     nav_limo_rviz_share = get_package_share_directory('nav_limo_rviz')
     nav_cv_share = get_package_share_directory('nav_cv_package')
     cost_threshold = LaunchConfiguration('cost_threshold')
+    classification_blue_distance_threshold_px = LaunchConfiguration(
+        'classification_blue_distance_threshold_px'
+    )
+    classification_magenta_distance_threshold_px = LaunchConfiguration(
+        'classification_magenta_distance_threshold_px'
+    )
     laser_weight_factor = LaunchConfiguration('laser_weight_factor')
     cv_weight_factor = LaunchConfiguration('cv_weight_factor')
     cv_obstacle_weight_factor = LaunchConfiguration(
@@ -85,7 +91,15 @@ def generate_launch_description():
     cv_pipeline = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(nav_cv_share, 'launch', 'cv.launch.py')
-        )
+        ),
+        launch_arguments={
+            'classification_blue_distance_threshold_px': (
+                classification_blue_distance_threshold_px
+            ),
+            'classification_magenta_distance_threshold_px': (
+                classification_magenta_distance_threshold_px
+            ),
+        }.items(),
     )
 
     amcl = IncludeLaunchDescription(
@@ -312,6 +326,16 @@ def generate_launch_description():
             description=(
                 'Threshold used by obstacle and street binary CV grids.'
             ),
+        ),
+        DeclareLaunchArgument(
+            'classification_blue_distance_threshold_px',
+            default_value='50.0',
+            description='CV classification distance from blue in pixels.',
+        ),
+        DeclareLaunchArgument(
+            'classification_magenta_distance_threshold_px',
+            default_value='50.0',
+            description='CV classification distance from magenta in pixels.',
         ),
         DeclareLaunchArgument(
             'laser_weight_factor',

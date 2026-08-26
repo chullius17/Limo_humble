@@ -21,7 +21,8 @@ class Classification(Node):
         self.declare_parameter('input_topic', 'limo/nav_cv_package/bev/bird_perspective/raw')
         self.declare_parameter('debug_topic', 'limo/nav_cv_package/classification/debug/raw')
         self.declare_parameter('output_topic', 'limo/nav_cv_package/classification/output/raw')
-        self.declare_parameter('distance_threshold_px', 8.0)
+        self.declare_parameter('blue_distance_threshold_px', 8.0)
+        self.declare_parameter('magenta_distance_threshold_px', 8.0)
         self.declare_parameter('color_tolerance', 30)
 
         self.input_topic = self.get_parameter('input_topic').value
@@ -53,7 +54,8 @@ class Classification(Node):
     def classify_images(
         cls,
         image: np.ndarray,
-        distance_threshold_px: float,
+        blue_distance_threshold_px: float,
+        magenta_distance_threshold_px: float,
         color_tolerance: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Return the first-pass debug image and the propagated final output."""
@@ -71,7 +73,9 @@ class Classification(Node):
                 cv2.DIST_L2,
                 cv2.DIST_MASK_PRECISE,
             )
-            far_white_mask = white_mask & (distance_from_blue > distance_threshold_px)
+            far_white_mask = white_mask & (
+                distance_from_blue > blue_distance_threshold_px
+            )
         else:
             far_white_mask = white_mask
 
@@ -101,7 +105,7 @@ class Classification(Node):
                 cv2.DIST_MASK_PRECISE,
             )
             close_white_mask = remaining_white_mask & (
-                distance_from_magenta < distance_threshold_px
+                distance_from_magenta < magenta_distance_threshold_px
             )
             output_image[close_white_mask] = cls.MAGENTA_BGR
 
@@ -114,11 +118,23 @@ class Classification(Node):
             self.get_logger().error(f'Failed to convert BEV image: {exc}')
             return
 
-        threshold_px = float(self.get_parameter('distance_threshold_px').value)
+        blue_threshold_px = float(
+            self.get_parameter('blue_distance_threshold_px').value
+        )
+        magenta_threshold_px = float(
+            self.get_parameter('magenta_distance_threshold_px').value
+        )
         tolerance = int(self.get_parameter('color_tolerance').value)
 
-        if threshold_px < 0.0:
-            self.get_logger().error('distance_threshold_px must be non-negative')
+        if blue_threshold_px < 0.0:
+            self.get_logger().error(
+                'blue_distance_threshold_px must be non-negative'
+            )
+            return
+        if magenta_threshold_px < 0.0:
+            self.get_logger().error(
+                'magenta_distance_threshold_px must be non-negative'
+            )
             return
         if not 0 <= tolerance <= 255:
             self.get_logger().error('color_tolerance must be between 0 and 255')
@@ -126,7 +142,8 @@ class Classification(Node):
 
         debug_image, output_image = self.classify_images(
             image,
-            distance_threshold_px=threshold_px,
+            blue_distance_threshold_px=blue_threshold_px,
+            magenta_distance_threshold_px=magenta_threshold_px,
             color_tolerance=tolerance,
         )
 
