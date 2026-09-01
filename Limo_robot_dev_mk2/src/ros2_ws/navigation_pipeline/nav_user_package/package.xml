@@ -20,6 +20,12 @@
   <depend>action_msgs</depend>
   <depend>tf2_ros</depend>
 
+  <!-- Application launch dependencies -->
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>online_map_package</exec_depend>
+  <exec_depend>nav_limo_controller</exec_depend>
+
   <!-- Custom interfaces -->
   <depend>nav_limo_interfaces</depend>
 

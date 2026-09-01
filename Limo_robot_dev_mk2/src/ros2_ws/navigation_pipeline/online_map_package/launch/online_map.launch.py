@@ -19,7 +19,7 @@ def find_project_root(start: Path):
 
 
 def generate_launch_description():
-    laser_weight_factor_default = '0.0'
+    laser_weight_factor_default = '1.0'
     cv_weight_factor_default = '1.0'
     cv_obstacle_weight_factor_default = '1.0'
     cv_street_weight_factor_default = '1.0'

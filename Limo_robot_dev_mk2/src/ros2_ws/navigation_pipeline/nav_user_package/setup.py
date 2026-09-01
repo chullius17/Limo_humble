@@ -23,10 +23,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'visualizer  = nav_user_package.mission_visualizer:main',
-            'user        = nav_user_package.user_server:main',
-            'ctrl_viz    = nav_user_package.control_viz:main',
-            'gui         = nav_user_package.gui:main'
         ],
     },
 )

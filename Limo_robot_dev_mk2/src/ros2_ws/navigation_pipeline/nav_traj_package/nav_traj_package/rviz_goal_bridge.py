@@ -20,13 +20,15 @@ import math
 
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import ComputePathToPose
+from nav2_msgs.action import ComputePathToPose, FollowPath
 from nav_msgs.msg import OccupancyGrid
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, String
+from std_srvs.srv import SetBool
 
 
 @dataclass
@@ -50,7 +52,12 @@ class RvizGoalBridge(Node):
             'compute_path_action',
             '/compute_path_to_pose',
         )
+        self.declare_parameter('follow_path_action', '/follow_path')
         self.declare_parameter('planner_id', 'GridBased')
+        self.declare_parameter('controller_id', 'FollowPath')
+        self.declare_parameter('goal_checker_id', 'goal_checker')
+        self.declare_parameter('enable_control', True)
+        self.declare_parameter('auto_start_control', False)
         self.declare_parameter(
             'costmap_topic',
             '/global_costmap/costmap',
@@ -73,11 +80,20 @@ class RvizGoalBridge(Node):
         action_name = str(
             self.get_parameter('compute_path_action').value
         )
+        follow_path_action = str(
+            self.get_parameter('follow_path_action').value
+        )
         costmap_topic = str(self.get_parameter('costmap_topic').value)
         adjusted_goal_topic = str(
             self.get_parameter('adjusted_goal_topic').value
         )
         self.planner_id = str(self.get_parameter('planner_id').value)
+        self.controller_id = str(
+            self.get_parameter('controller_id').value
+        )
+        self.goal_checker_id = str(
+            self.get_parameter('goal_checker_id').value
+        )
         self.enable_goal_adjustment = bool(
             self.get_parameter('enable_goal_adjustment').value
         )
@@ -137,18 +153,61 @@ class RvizGoalBridge(Node):
             ComputePathToPose,
             action_name,
         )
+        self.follow_path_client = ActionClient(
+            self,
+            FollowPath,
+            follow_path_action,
+        )
+
+        control_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.control_status_publisher = self.create_publisher(
+            String,
+            '/limo/control/status',
+            control_qos,
+        )
+        self.control_active_publisher = self.create_publisher(
+            Bool,
+            '/limo/control/active',
+            control_qos,
+        )
+        self.control_paused_publisher = self.create_publisher(
+            Bool,
+            '/limo/control/paused',
+            control_qos,
+        )
+        self.start_abort_service = self.create_service(
+            SetBool,
+            '/limo/control/set_active',
+            self._set_control_active,
+        )
+        self.pause_resume_service = self.create_service(
+            SetBool,
+            '/limo/control/set_enabled',
+            self._set_control_enabled,
+        )
 
         self.costmap = None
-        self.active_goal_handle = None
+        self.active_planning_goal_handle = None
+        self.active_control_goal_handle = None
+        self.control_path = None
+        self.control_requested = False
+        self.control_paused = False
         self.search_generation = 0
         self.candidates = []
         self.candidate_index = 0
         self.planning_attempts = 0
 
+        self._publish_control_state('IDLE: waiting for a planned path')
+
         self.get_logger().info(
             'RViz goal bridge started to simplify graphical goal selection: '
             f'{goal_topic} -> {action_name} '
             f'(planner={self.planner_id}, '
+            f'control={follow_path_action}, '
             f'adjustment={self.enable_goal_adjustment}, '
             f'radius={self.position_search_radius:.2f} m, '
             f'max_attempts={self.max_planning_attempts})'
@@ -179,6 +238,82 @@ class RvizGoalBridge(Node):
         if len(msg.data) == expected_size:
             self.costmap = msg
 
+    def _publish_control_state(self, status: str) -> None:
+        """Publish the GUI-facing control state."""
+        self.control_status_publisher.publish(String(data=status))
+        self.control_active_publisher.publish(
+            Bool(data=self.control_requested)
+        )
+        self.control_paused_publisher.publish(
+            Bool(data=self.control_paused)
+        )
+
+    def _set_control_active(self, request, response):
+        """Start the stored path or abort the current control action."""
+        if request.data:
+            if self.control_path is None:
+                response.success = False
+                response.message = 'No planned path is ready.'
+                return response
+            if self.active_control_goal_handle is not None:
+                response.success = self.control_requested
+                if self.control_requested:
+                    response.message = 'Control is already active.'
+                else:
+                    response.message = 'Wait for control abort to finish.'
+                return response
+            if not self.follow_path_client.wait_for_server(timeout_sec=1.0):
+                response.success = False
+                response.message = 'The FollowPath server is unavailable.'
+                return response
+            self.control_requested = True
+            self.control_paused = False
+            self._send_control_goal(self.control_path, self.search_generation)
+            response.success = True
+            response.message = 'Control start requested.'
+            self._publish_control_state('STARTING: sending path to MPPI')
+            return response
+
+        self.control_requested = False
+        self.control_paused = False
+        if self.active_control_goal_handle is not None:
+            self.active_control_goal_handle.cancel_goal_async()
+        response.success = True
+        response.message = 'Control abort requested.'
+        self._publish_control_state('ABORTING: canceling MPPI control')
+        return response
+
+    def _set_control_enabled(self, request, response):
+        """Pause or resume execution of the stored path."""
+        if not self.control_requested:
+            response.success = False
+            response.message = 'Control has not been started.'
+            return response
+
+        if request.data:
+            if not self.control_paused:
+                response.success = True
+                response.message = 'Control is already running.'
+                return response
+            self.control_paused = False
+            if self.active_control_goal_handle is None:
+                self._send_control_goal(
+                    self.control_path,
+                    self.search_generation,
+                )
+            response.success = True
+            response.message = 'Control resume requested.'
+            self._publish_control_state('RESUMING: sending path to MPPI')
+            return response
+
+        self.control_paused = True
+        if self.active_control_goal_handle is not None:
+            self.active_control_goal_handle.cancel_goal_async()
+        response.success = True
+        response.message = 'Control pause requested.'
+        self._publish_control_state('PAUSING: canceling MPPI control')
+        return response
+
     def _goal_callback(self, pose: PoseStamped) -> None:
         """Start a bounded feasibility search for an RViz-selected pose."""
         if not pose.header.frame_id:
@@ -192,12 +327,26 @@ class RvizGoalBridge(Node):
                 'The ComputePathToPose action server is not available.'
             )
             return
+        if (
+            bool(self.get_parameter('enable_control').value)
+            and not self.follow_path_client.wait_for_server(timeout_sec=1.0)
+        ):
+            self.get_logger().error(
+                'The FollowPath action server is not available.'
+            )
+            return
 
         self.search_generation += 1
         generation = self.search_generation
-        if self.active_goal_handle is not None:
-            self.active_goal_handle.cancel_goal_async()
-            self.active_goal_handle = None
+        self.control_path = None
+        self.control_requested = False
+        self.control_paused = False
+        if self.active_planning_goal_handle is not None:
+            self.active_planning_goal_handle.cancel_goal_async()
+            self.active_planning_goal_handle = None
+        if self.active_control_goal_handle is not None:
+            self.active_control_goal_handle.cancel_goal_async()
+            self.active_control_goal_handle = None
 
         candidates = self._build_candidates(pose)
         if self.costmap is not None:
@@ -214,6 +363,7 @@ class RvizGoalBridge(Node):
         self.candidates = candidates
         self.candidate_index = 0
         self.planning_attempts = 0
+        self._publish_control_state('PLANNING: searching for a feasible path')
 
         requested_yaw = self._quaternion_to_yaw(pose.pose.orientation)
         self.get_logger().info(
@@ -440,7 +590,7 @@ class RvizGoalBridge(Node):
             self._send_next_candidate(generation)
             return
 
-        self.active_goal_handle = goal_handle
+        self.active_planning_goal_handle = goal_handle
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
             lambda result, handle=goal_handle,
@@ -461,8 +611,8 @@ class RvizGoalBridge(Node):
         candidate: GoalCandidate,
     ) -> None:
         """Publish the closest successful pose or try the next candidate."""
-        if self.active_goal_handle is goal_handle:
-            self.active_goal_handle = None
+        if self.active_planning_goal_handle is goal_handle:
+            self.active_planning_goal_handle = None
         if generation != self.search_generation:
             return
 
@@ -486,9 +636,130 @@ class RvizGoalBridge(Node):
                 f'angle adjustment={math.degrees(candidate.angle_delta):.1f} '
                 f'deg, attempts={self.planning_attempts}.'
             )
+            self.control_path = copy.deepcopy(response.result.path)
+            self._publish_control_state(
+                f'READY: path contains {pose_count} poses'
+            )
+            if (
+                bool(self.get_parameter('enable_control').value)
+                and bool(self.get_parameter('auto_start_control').value)
+            ):
+                self.control_requested = True
+                self._send_control_goal(
+                    self.control_path,
+                    generation,
+                )
+            elif not bool(self.get_parameter('enable_control').value):
+                self.get_logger().info(
+                    'Controller activation is disabled by enable_control.'
+                )
             return
 
         self._send_next_candidate(generation)
+
+    def _send_control_goal(self, path, generation: int) -> None:
+        """Send a successful SMAC path to the configured Nav2 controller."""
+        if generation != self.search_generation:
+            return
+        request = FollowPath.Goal()
+        request.path = path
+        request.controller_id = self.controller_id
+        request.goal_checker_id = self.goal_checker_id
+        future = self.follow_path_client.send_goal_async(request)
+        future.add_done_callback(
+            lambda response, current_generation=generation,
+            pose_count=len(path.poses): self._control_goal_response_callback(
+                response,
+                current_generation,
+                pose_count,
+            )
+        )
+
+    def _control_goal_response_callback(
+        self,
+        future,
+        generation: int,
+        pose_count: int,
+    ) -> None:
+        """Track controller acceptance and start monitoring its result."""
+        try:
+            goal_handle = future.result()
+        except Exception as exc:  # noqa: B902
+            if generation == self.search_generation:
+                self.get_logger().error(
+                    f'Failed to send FollowPath goal: {exc}'
+                )
+            return
+
+        if generation != self.search_generation:
+            if goal_handle.accepted:
+                goal_handle.cancel_goal_async()
+            return
+        if not goal_handle.accepted:
+            self.control_requested = False
+            self.get_logger().error('MPPI rejected the FollowPath goal.')
+            self._publish_control_state('ERROR: MPPI rejected the path')
+            return
+
+        self.active_control_goal_handle = goal_handle
+        self._publish_control_state(
+            f'ACTIVE: following path with {pose_count} poses'
+        )
+        self.get_logger().info(
+            f'MPPI accepted FollowPath with {pose_count} path poses.'
+        )
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda result, handle=goal_handle,
+            current_generation=generation: self._control_result_callback(
+                result,
+                handle,
+                current_generation,
+            )
+        )
+
+    def _control_result_callback(
+        self,
+        future,
+        goal_handle,
+        generation: int,
+    ) -> None:
+        """Report completion, cancellation or failure of path following."""
+        if self.active_control_goal_handle is goal_handle:
+            self.active_control_goal_handle = None
+        if generation != self.search_generation:
+            return
+        try:
+            response = future.result()
+        except Exception as exc:  # noqa: B902
+            self.get_logger().error(
+                f'Failed to receive FollowPath result: {exc}'
+            )
+            return
+
+        if response.status == GoalStatus.STATUS_SUCCEEDED:
+            self.control_requested = False
+            self.get_logger().info('FollowPath completed successfully.')
+            self._publish_control_state('READY: control completed')
+        elif response.status == GoalStatus.STATUS_CANCELED:
+            self.get_logger().info('FollowPath was canceled.')
+            if self.control_paused:
+                self._publish_control_state('PAUSED: control is stopped')
+            elif not self.control_requested:
+                self._publish_control_state('READY: control aborted')
+            else:
+                self._send_control_goal(
+                    self.control_path,
+                    self.search_generation,
+                )
+        else:
+            self.control_requested = False
+            self.get_logger().error(
+                f'FollowPath failed with status={response.status}.'
+            )
+            self._publish_control_state(
+                f'ERROR: FollowPath failed with status={response.status}'
+            )
 
     @staticmethod
     def _world_to_grid_continuous(

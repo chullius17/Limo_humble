@@ -17,6 +17,7 @@
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>tf2_ros</depend>
   <depend>action_msgs</depend>
 
@@ -30,6 +31,7 @@
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nav2_mppi_controller</exec_depend>
   <exec_depend>nav2_velocity_smoother</exec_depend>
+  <exec_depend>nav_traj_package</exec_depend>
 
   <!-- Custom interfaces -->
   <depend>nav_limo_interfaces</depend>
@@ -37,6 +39,7 @@
   <!-- Python libraries -->
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-pyqt5</exec_depend>
 
   <!-- Optional packages -->
   <exec_depend>nav2_map_server</exec_depend>

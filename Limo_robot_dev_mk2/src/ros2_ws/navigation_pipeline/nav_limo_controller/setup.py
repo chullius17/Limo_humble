@@ -32,6 +32,7 @@ setup(
     entry_points={
         'console_scripts': [
             'local_costmap = nav_limo_controller.local_costmap:main',
+            'control_gui = nav_limo_controller.control_gui:main',
         ],
     },
 )

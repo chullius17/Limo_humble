@@ -88,6 +88,13 @@ def generate_launch_description():
         }],
     )
 
+    control_gui = Node(
+        package='nav_limo_controller',
+        executable='control_gui',
+        name='control_gui',
+        output='screen',
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'params_file',
@@ -113,4 +120,5 @@ def generate_launch_description():
         controller_server,
         velocity_smoother,
         lifecycle_manager,
+        control_gui,
     ])

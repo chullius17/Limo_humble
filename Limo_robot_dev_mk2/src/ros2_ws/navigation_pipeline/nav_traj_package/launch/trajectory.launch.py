@@ -75,6 +75,12 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
             'planner_id': 'GridBased',
+            'follow_path_action': '/follow_path',
+            'controller_id': 'FollowPath',
+            'goal_checker_id': 'goal_checker',
+            'enable_control': True,
+            # Keep the accepted path ready until the control GUI starts it.
+            'auto_start_control': False,
             'costmap_topic': '/global_costmap/costmap',
             'adjusted_goal_topic': '/adjusted_goal_pose',
             # Search a wider spatial neighborhood while using a coarser ring

@@ -34,6 +34,8 @@
 
   <!-- Custom interfaces -->
   <depend>nav_limo_interfaces</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
 
   <!-- Python deps -->
   <exec_depend>python3-numpy</exec_depend>

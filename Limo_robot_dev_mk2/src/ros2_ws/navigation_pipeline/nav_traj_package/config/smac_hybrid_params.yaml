@@ -3,7 +3,7 @@
 # Profile assumptions:
 # - LIMO operating in Ackermann mode;
 # - costmap resolution of 0.05 m/cell;
-# - forward-only controller with a maximum speed of 0.50 m/s;
+# - controller speed range from -0.10 m/s to 0.50 m/s;
 # - execution alongside the CV pipeline on a Jetson Nano.
 #
 # use_sim_time is a false placeholder rewritten by the launch file for either
@@ -45,10 +45,9 @@ planner_server:
       max_on_approach_iterations: 1000
       max_planning_time: 5.0
 
-      # The current controller enforces v >= 0 and cannot reverse. DUBIN produces
-      # forward-only paths that are kinematically consistent with the Ackermann
-      # LIMO.
-      motion_model_for_search: "DUBIN"
+      # Reeds-Shepp paths allow forward/reverse cusps while preserving the
+      # Ackermann minimum-turning-radius constraint.
+      motion_model_for_search: "REEDS_SHEPP"
 
       # 64 headings correspond to 5.625 degrees per bin: sufficient accuracy for
       # a 5 cm grid, with fewer states than the default 72-bin configuration.
@@ -64,11 +63,10 @@ planner_server:
       # 28 degrees of maximum inner steering angle, yielding a center turning
       # radius of about 0.46 m. The Gazebo model requires about 0.50 m, so using
       # 0.50 m is valid for both and prevents physically infeasible paths.
-      minimum_turning_radius: 0.50
+      minimum_turning_radius: 0.60
 
-      # reverse_penalty has no effect with DUBIN, but is kept at a valid and
-      # portable value. The other penalties favor straight paths away from high
-      # costs without forcing excessive detours.
+      # Prefer forward motion, but allow reverse segments when they avoid an
+      # otherwise infeasible turn or final approach.
       reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.15

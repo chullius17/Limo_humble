@@ -55,8 +55,9 @@ controller_server:
       AckermannConstraints:
         min_turning_r: 0.462
 
+      # Keep reverse motion slower than forward motion for stable maneuvers.
       vx_max: 0.50
-      vx_min: 0.0
+      vx_min: -0.10
       vy_max: 0.0
       wz_max: 1.10
       vx_std: 0.15
@@ -65,6 +66,10 @@ controller_server:
 
       transform_tolerance: 0.20
       prune_distance: 1.50
+      # Stop at Reeds-Shepp cusps before switching motion direction.
+      enforce_path_inversion: true
+      inversion_xy_tolerance: 0.20
+      inversion_yaw_tolerance: 0.40
       retry_attempt_limit: 1
       regenerate_noises: false
       visualize: true           # only for simulation, not for real robot operation
@@ -81,7 +86,6 @@ controller_server:
         - "PathAlignCritic"
         - "PathFollowCritic"
         - "PathAngleCritic"
-        - "PreferForwardCritic"
 
       ConstraintCritic:
         enabled: true
@@ -135,12 +139,7 @@ controller_server:
         offset_from_furthest: 4
         threshold_to_consider: 0.50
         max_angle_to_furthest: 1.0
-
-      PreferForwardCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 5.0
-        threshold_to_consider: 0.50
+        forward_preference: false
 
 # The controller costmap is independent from the global mapping pipeline. It
 # uses live LaserScan data in odom and the real chassis footprint for collision
@@ -211,7 +210,7 @@ velocity_smoother:
     scale_velocities: false
     feedback: "CLOSED_LOOP"
     max_velocity: [0.50, 0.0, 1.10]
-    min_velocity: [0.0, 0.0, -1.10]
+    min_velocity: [-0.10, 0.0, -1.10]
     max_accel: [1.3, 0.0, 3.4]
     max_decel: [-1.3, 0.0, -3.4]
     odom_topic: /odom
