@@ -266,10 +266,10 @@ def generate_launch_description():
         }],
     )
 
-    persistent_cloud = Node(
+    cv_pointcloud = Node(
         package='online_map_package',
-        executable='persistent_cloud',
-        name='persistent_cloud',
+        executable='cv_2_ptcld',
+        name='cv_2_ptcld',
         output='screen',
         parameters=[{
             'use_sim_time': True,
@@ -277,23 +277,53 @@ def generate_launch_description():
                 '/limo/nav_map_package/online/metric_bev/'
                 'cost_grid_combined'
             ),
+            'output_topic': '/limo/nav_map_package/online/cv_cloud',
+            'output_frame': 'base_link',
+            'voxel_size': 0.03,
+            'source_block_size': 5,
+            'minimum_cells_per_block': 5,
+            'minimum_cost': 30.0,
+            'high_cost_threshold': 95.0,
+            'high_cost_downsampling_factor': 2,
+            'maximum_points': 2000,
+        }],
+    )
+
+    local_map = Node(
+        package='online_map_package',
+        executable='local_map',
+        name='local_map',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'input_topic': '/limo/nav_map_package/online/cv_cloud',
             'output_topic': (
                 '/limo/nav_map_package/online/persistent_cloud'
             ),
-            'global_frame': 'map',
             'base_frame': 'base_link',
+            'odometry_frame': 'odom',
             'bounding_box_topic': (
                 '/limo/nav_map_package/online/cloud_bounding_box'
             ),
             'roi_marker_topic': (
                 '/limo/nav_map_package/online/cloud_roi'
             ),
+            'roi_frame': 'online_metric_bev_origin_combined',
+            'roi_trapezoid_height': 1.85,
+            'roi_near_base_width': 0.60,
+            'roi_far_base_width': 2.65,
             'bounding_box_length': 2.46,
             'bounding_box_width': 2.66,
-            'voxel_size': 0.03,
-            'source_block_size': 5,
-            'minimum_cells_per_voxel': 5,
+            'cmd_vel_topic': '/cmd_vel',
+            'maximum_decay_per_cycle': 0.02,
+            'linear_speed_at_max_decay': 0.50,
+            'angular_speed_at_max_decay': 1.00,
+            'linear_stationary_threshold': 0.01,
+            'angular_stationary_threshold': 0.02,
+            'cmd_vel_timeout_sec': 0.50,
+            'minimum_confidence': 0.30,
             'maximum_points': 2000,
+            'point_statistics_window_cycles': 30,
         }],
     )
 
@@ -409,5 +439,6 @@ def generate_launch_description():
         online_metric_bev,
         cv_amcl_debug,
         nav_map,
-        persistent_cloud,
+        cv_pointcloud,
+        local_map,
     ])

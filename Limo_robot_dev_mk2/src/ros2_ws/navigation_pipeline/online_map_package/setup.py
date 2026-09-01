@@ -34,8 +34,9 @@ setup(
         'console_scripts': [
             'online_metric_bev = online_map_package.online_metric_bev:main',
             'cv_amcl_debug = online_map_package.cv_amcl_debug:main',
+            'cv_2_ptcld = online_map_package.cv_2_ptcld:main',
             'online_nav_map = online_map_package.online_nav_map:main',
-            'persistent_cloud = online_map_package.persistent_ptcld:main',
+            'local_map = online_map_package.local_map:main',
         ],
     },
 )

@@ -221,7 +221,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
-      Name: Dynamic Cloud ROI
+      Name: Static Cloud ROI
       Namespaces:
         online_cloud_roi: true
       Topic:
