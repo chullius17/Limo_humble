@@ -1,10 +1,13 @@
 """Maintain a motion-compensated local cloud from CV point observations."""
 
 import math
+import time
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Point, Twist
+from rclpy.duration import Duration
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
@@ -28,11 +31,11 @@ POINT_DTYPE = np.dtype([
 INPUT_FIELDS = ('x', 'y', 'cost', 'confidence')
 
 
-class LocalMap(Node):
+class LocalPointCloud(Node):
     """Reproject, decay and replace observations on a local canvas."""
 
     def __init__(self):
-        super().__init__('local_map')
+        super().__init__('local_ptcld')
 
         self.declare_parameter(
             'input_topic',
@@ -40,7 +43,7 @@ class LocalMap(Node):
         )
         self.declare_parameter(
             'output_topic',
-            '/limo/nav_map_package/online/persistent_cloud',
+            '/limo/nav_map_package/online/local_ptcld',
         )
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('odometry_frame', 'odom')
@@ -67,7 +70,9 @@ class LocalMap(Node):
         self.declare_parameter('angular_speed_at_max_decay', 1.00)
         self.declare_parameter('linear_stationary_threshold', 0.01)
         self.declare_parameter('angular_stationary_threshold', 0.02)
-        self.declare_parameter('cmd_vel_timeout_sec', 0.50)
+        self.declare_parameter('cmd_vel_timeout_sec', 0.0)
+        self.declare_parameter('tf_lookup_timeout_sec', 0.0)
+        self.declare_parameter('maximum_tf_age_sec', 0.03)
         self.declare_parameter('minimum_confidence', 0.30)
         self.declare_parameter('maximum_points', 2000)
         self.declare_parameter('point_statistics_window_cycles', 30)
@@ -120,6 +125,12 @@ class LocalMap(Node):
         )
         self.cmd_vel_timeout_sec = float(
             self.get_parameter('cmd_vel_timeout_sec').value
+        )
+        self.tf_lookup_timeout_sec = float(
+            self.get_parameter('tf_lookup_timeout_sec').value
+        )
+        self.maximum_tf_age_sec = float(
+            self.get_parameter('maximum_tf_age_sec').value
         )
         self.minimum_confidence = float(
             self.get_parameter('minimum_confidence').value
@@ -179,6 +190,10 @@ class LocalMap(Node):
             )
         if self.cmd_vel_timeout_sec < 0.0:
             raise ValueError('cmd_vel_timeout_sec must be zero or greater')
+        if self.tf_lookup_timeout_sec < 0.0:
+            raise ValueError('tf_lookup_timeout_sec must be zero or greater')
+        if self.maximum_tf_age_sec < 0.0:
+            raise ValueError('maximum_tf_age_sec must be zero or greater')
         if not 0.0 <= self.minimum_confidence <= 1.0:
             raise ValueError('minimum_confidence must be between 0 and 1')
         if self.maximum_points <= 0:
@@ -189,6 +204,9 @@ class LocalMap(Node):
             )
 
         self.tf_buffer = Buffer()
+        # TransformListener uses a reentrant callback group. The two-threaded
+        # executor in main() lets /tf fill this buffer while a cloud callback
+        # waits briefly for its exact timestamp.
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.points_xy = np.empty((0, 2), dtype=np.float64)
         self.costs = np.empty(0, dtype=np.float32)
@@ -205,6 +223,21 @@ class LocalMap(Node):
         self.decay_statistics_sum = 0.0
         self.decay_statistics_min = None
         self.decay_statistics_max = None
+        self.wall_time_statistics_sum = 0.0
+        self.wall_time_statistics_min = None
+        self.wall_time_statistics_max = None
+        self.tf_wait_time_statistics_sum = 0.0
+        self.tf_wait_time_statistics_min = None
+        self.tf_wait_time_statistics_max = None
+        self.processing_time_statistics_sum = 0.0
+        self.processing_time_statistics_min = None
+        self.processing_time_statistics_max = None
+        self.cpu_time_statistics_sum = 0.0
+        self.cpu_time_statistics_min = None
+        self.cpu_time_statistics_max = None
+        self.tf_drop_count = 0
+        self.tf_latest_fallback_count = 0
+        self.statistics_first_cycle_time_ns = None
 
         input_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -247,11 +280,13 @@ class LocalMap(Node):
         )
 
         self.get_logger().info(
-            f'Persistent cloud: {self.input_topic} -> {self.output_topic}, '
+            f'Local pointcloud: {self.input_topic} -> {self.output_topic}, '
             f'frame={self.base_frame}, motion reference={self.odometry_frame}, '
             f'decay=0..{self.maximum_decay_per_cycle:.2f}/cycle from '
             f'{self.cmd_vel_topic}, '
-            f'threshold={self.minimum_confidence:.2f}'
+            f'threshold={self.minimum_confidence:.2f}, '
+            f'tf_timeout={self.tf_lookup_timeout_sec:.3f}s, '
+            f'latest_tf_max_age={self.maximum_tf_age_sec:.3f}s'
         )
 
     @staticmethod
@@ -273,7 +308,7 @@ class LocalMap(Node):
         return (
             translation.x,
             translation.y,
-            LocalMap._yaw(transform.transform.rotation),
+            LocalPointCloud._yaw(transform.transform.rotation),
         )
 
     @staticmethod
@@ -319,20 +354,36 @@ class LocalMap(Node):
         stamp,
         allow_latest=True,
     ):
+        requested_time = Time.from_msg(stamp)
         try:
             return self.tf_buffer.lookup_transform(
                 target_frame,
                 source_frame,
-                Time.from_msg(stamp),
+                requested_time,
+                timeout=Duration(seconds=self.tf_lookup_timeout_sec),
             )
         except TransformException:
             if not allow_latest:
                 raise
-            return self.tf_buffer.lookup_transform(
+            latest_transform = self.tf_buffer.lookup_transform(
                 target_frame,
                 source_frame,
                 Time(),
+                timeout=Duration(seconds=self.tf_lookup_timeout_sec),
             )
+            latest_time = Time.from_msg(latest_transform.header.stamp)
+            age_sec = abs(
+                requested_time.nanoseconds - latest_time.nanoseconds
+            ) * 1.0e-9
+            if age_sec > self.maximum_tf_age_sec:
+                raise TransformException(
+                    f'Latest transform from frame [{source_frame}] to frame '
+                    f'[{target_frame}] is {age_sec:.6f}s from the requested '
+                    f'time, exceeding maximum_tf_age_sec='
+                    f'{self.maximum_tf_age_sec:.6f}s'
+                )
+            self.tf_latest_fallback_count += 1
+            return latest_transform
 
     def _read_input_cloud(self, msg):
         """Read the fixed CV-cloud interface without per-point Python loops."""
@@ -573,17 +624,39 @@ class LocalMap(Node):
         cloud.is_dense = True
         return cloud
 
-    def _update_cycle_statistics(self, decay_factor):
+    def _update_cycle_statistics(
+        self,
+        decay_factor,
+        wall_time_ms,
+        tf_wait_time_ms,
+        processing_time_ms,
+        cpu_time_ms,
+        cycle_time_ns,
+    ):
         """Log point-count and decay statistics over a cycle window."""
         point_count = int(self.costs.size)
         self.point_statistics_count += 1
         self.point_statistics_sum += point_count
         self.decay_statistics_sum += decay_factor
+        self.wall_time_statistics_sum += wall_time_ms
+        self.tf_wait_time_statistics_sum += tf_wait_time_ms
+        self.processing_time_statistics_sum += processing_time_ms
+        self.cpu_time_statistics_sum += cpu_time_ms
+        if self.statistics_first_cycle_time_ns is None:
+            self.statistics_first_cycle_time_ns = cycle_time_ns
         if self.point_statistics_min is None:
             self.point_statistics_min = point_count
             self.point_statistics_max = point_count
             self.decay_statistics_min = decay_factor
             self.decay_statistics_max = decay_factor
+            self.wall_time_statistics_min = wall_time_ms
+            self.wall_time_statistics_max = wall_time_ms
+            self.tf_wait_time_statistics_min = tf_wait_time_ms
+            self.tf_wait_time_statistics_max = tf_wait_time_ms
+            self.processing_time_statistics_min = processing_time_ms
+            self.processing_time_statistics_max = processing_time_ms
+            self.cpu_time_statistics_min = cpu_time_ms
+            self.cpu_time_statistics_max = cpu_time_ms
         else:
             self.point_statistics_min = min(
                 self.point_statistics_min,
@@ -601,6 +674,38 @@ class LocalMap(Node):
                 self.decay_statistics_max,
                 decay_factor,
             )
+            self.wall_time_statistics_min = min(
+                self.wall_time_statistics_min,
+                wall_time_ms,
+            )
+            self.wall_time_statistics_max = max(
+                self.wall_time_statistics_max,
+                wall_time_ms,
+            )
+            self.tf_wait_time_statistics_min = min(
+                self.tf_wait_time_statistics_min,
+                tf_wait_time_ms,
+            )
+            self.tf_wait_time_statistics_max = max(
+                self.tf_wait_time_statistics_max,
+                tf_wait_time_ms,
+            )
+            self.processing_time_statistics_min = min(
+                self.processing_time_statistics_min,
+                processing_time_ms,
+            )
+            self.processing_time_statistics_max = max(
+                self.processing_time_statistics_max,
+                processing_time_ms,
+            )
+            self.cpu_time_statistics_min = min(
+                self.cpu_time_statistics_min,
+                cpu_time_ms,
+            )
+            self.cpu_time_statistics_max = max(
+                self.cpu_time_statistics_max,
+                cpu_time_ms,
+            )
 
         if (
             self.point_statistics_count
@@ -614,15 +719,50 @@ class LocalMap(Node):
         decay_average = (
             self.decay_statistics_sum / self.point_statistics_count
         )
+        wall_time_average = (
+            self.wall_time_statistics_sum / self.point_statistics_count
+        )
+        tf_wait_time_average = (
+            self.tf_wait_time_statistics_sum / self.point_statistics_count
+        )
+        processing_time_average = (
+            self.processing_time_statistics_sum
+            / self.point_statistics_count
+        )
+        cpu_time_average = (
+            self.cpu_time_statistics_sum / self.point_statistics_count
+        )
+        elapsed_sec = (
+            cycle_time_ns - self.statistics_first_cycle_time_ns
+        ) * 1.0e-9
+        frequency_hz = 0.0
+        if elapsed_sec > 0.0 and self.point_statistics_count > 1:
+            frequency_hz = (
+                self.point_statistics_count - 1
+            ) / elapsed_sec
         self.get_logger().info(
-            f'Persistent cloud points over '
+            f'Local pointcloud over '
             f'{self.point_statistics_count} cycles: '
-            f'average={average:.1f}, '
-            f'min={self.point_statistics_min}, '
-            f'max={self.point_statistics_max}; '
-            f'decay average={decay_average:.4f}, '
-            f'min={self.decay_statistics_min:.4f}, '
-            f'max={self.decay_statistics_max:.4f}'
+            f'points avg/min/max={average:.1f}/'
+            f'{self.point_statistics_min}/{self.point_statistics_max}; '
+            f'decay avg/min/max={decay_average:.4f}/'
+            f'{self.decay_statistics_min:.4f}/'
+            f'{self.decay_statistics_max:.4f}; '
+            f'wall_ms avg/min/max={wall_time_average:.3f}/'
+            f'{self.wall_time_statistics_min:.3f}/'
+            f'{self.wall_time_statistics_max:.3f}; '
+            f'tf_wait_ms avg/min/max={tf_wait_time_average:.3f}/'
+            f'{self.tf_wait_time_statistics_min:.3f}/'
+            f'{self.tf_wait_time_statistics_max:.3f}; '
+            f'processing_ms avg/min/max={processing_time_average:.3f}/'
+            f'{self.processing_time_statistics_min:.3f}/'
+            f'{self.processing_time_statistics_max:.3f}; '
+            f'cpu_ms avg/min/max={cpu_time_average:.3f}/'
+            f'{self.cpu_time_statistics_min:.3f}/'
+            f'{self.cpu_time_statistics_max:.3f}; '
+            f'tf_latest_fallbacks={self.tf_latest_fallback_count}; '
+            f'tf_drops={self.tf_drop_count}; '
+            f'frequency={frequency_hz:.2f} Hz'
         )
         self.point_statistics_count = 0
         self.point_statistics_sum = 0
@@ -631,6 +771,21 @@ class LocalMap(Node):
         self.decay_statistics_sum = 0.0
         self.decay_statistics_min = None
         self.decay_statistics_max = None
+        self.wall_time_statistics_sum = 0.0
+        self.wall_time_statistics_min = None
+        self.wall_time_statistics_max = None
+        self.tf_wait_time_statistics_sum = 0.0
+        self.tf_wait_time_statistics_min = None
+        self.tf_wait_time_statistics_max = None
+        self.processing_time_statistics_sum = 0.0
+        self.processing_time_statistics_min = None
+        self.processing_time_statistics_max = None
+        self.cpu_time_statistics_sum = 0.0
+        self.cpu_time_statistics_min = None
+        self.cpu_time_statistics_max = None
+        self.tf_drop_count = 0
+        self.tf_latest_fallback_count = 0
+        self.statistics_first_cycle_time_ns = None
 
     def _make_bounding_box_marker(self, stamp):
         marker = Marker()
@@ -681,13 +836,18 @@ class LocalMap(Node):
         return marker
 
     def cloud_callback(self, msg):
+        cycle_time_ns = time.perf_counter_ns()
+        cpu_start_ns = time.process_time_ns()
         try:
             current_transform = self._lookup_transform(
                 self.odometry_frame,
                 self.base_frame,
                 msg.header.stamp,
-                allow_latest=False,
             )
+            processing_start_ns = time.perf_counter_ns()
+            tf_wait_time_ms = (
+                processing_start_ns - cycle_time_ns
+            ) * 1.0e-6
             current_odom_from_base = self._pose_from_transform(
                 current_transform
             )
@@ -710,30 +870,53 @@ class LocalMap(Node):
                 input_confidences,
                 msg.header.stamp,
             )
-        except (TransformException, ValueError) as exc:
+        except TransformException as exc:
+            self.tf_drop_count += 1
             self.get_logger().warn(
-                f'Cannot update persistent cloud: {exc}',
+                f'Cannot update local pointcloud: {exc}',
+                throttle_duration_sec=2.0,
+            )
+            return
+        except ValueError as exc:
+            self.get_logger().warn(
+                f'Cannot update local pointcloud: {exc}',
                 throttle_duration_sec=2.0,
             )
             return
 
         self.previous_odom_from_base = current_odom_from_base
-        self._update_cycle_statistics(decay_factor)
         self.cloud_pub.publish(self._make_cloud(msg.header.stamp))
         self.bounding_box_pub.publish(
             self._make_bounding_box_marker(msg.header.stamp)
         )
         self.roi_marker_pub.publish(self._make_roi_marker(msg.header.stamp))
+        cycle_end_ns = time.perf_counter_ns()
+        wall_time_ms = (cycle_end_ns - cycle_time_ns) * 1.0e-6
+        processing_time_ms = (
+            cycle_end_ns - processing_start_ns
+        ) * 1.0e-6
+        cpu_time_ms = (time.process_time_ns() - cpu_start_ns) * 1.0e-6
+        self._update_cycle_statistics(
+            decay_factor,
+            wall_time_ms,
+            tf_wait_time_ms,
+            processing_time_ms,
+            cpu_time_ms,
+            cycle_time_ns,
+        )
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LocalMap()
+    node = LocalPointCloud()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

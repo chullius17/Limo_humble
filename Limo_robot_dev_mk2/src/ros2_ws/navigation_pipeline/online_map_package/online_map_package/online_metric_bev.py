@@ -152,17 +152,6 @@ class OnlineMetricBEV(Node):
             f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_combined',
             map_qos_profile,
         )
-        self.color_costmap_pubs = {
-            color: self.create_publisher(
-                OccupancyGrid,
-                (
-                    f'/limo/nav_map_package/{self.topic_namespace}/'
-                    f'cost_grid_{color.lower()}'
-                ),
-                map_qos_profile,
-            )
-            for color in self.colors
-        }
         self.obstacle_costmap_pub = self.create_publisher(
             OccupancyGrid,
             f'/limo/nav_map_package/{self.topic_namespace}/cost_grid_binary_obstacles',
@@ -197,8 +186,8 @@ class OnlineMetricBEV(Node):
         }
 
         self.get_logger().info(
-            'online_metric_bev initialized for combined and individual '
-            f'channels {self.colors}; publishers=10'
+            'online_metric_bev initialized for combined and binary outputs; '
+            f'internal color layers={self.colors}; publishers=7'
         )
 
         self.bev_queue = queue.Queue(maxsize=1)
@@ -209,7 +198,6 @@ class OnlineMetricBEV(Node):
         """Publish constant base-to-BEV transforms once on ``/tf_static``."""
         output_suffixes = [
             'combined',
-            *(color.lower() for color in self.colors),
             'binary_obstacles',
             'binary_street',
         ]
@@ -404,14 +392,6 @@ class OnlineMetricBEV(Node):
             cost_img_cropped = self._image_to_costmap(roi_bgr, color)
             cost_layers.append(cost_img_cropped)
             t_color[color]['mask_inflate'] = (time.perf_counter() - t_start) * 1000
-            suffix = color.lower()
-            self.color_costmap_pubs[color].publish(
-                self._costmap_to_occupancy_grid(
-                    cost_img_cropped,
-                    msg.header,
-                    suffix,
-                )
-            )
 
         # The semantic costs match CVMapDisplay: turquoise=60, white=30 and
         # magenta=100. Taking the cell-wise maximum preserves the dominant

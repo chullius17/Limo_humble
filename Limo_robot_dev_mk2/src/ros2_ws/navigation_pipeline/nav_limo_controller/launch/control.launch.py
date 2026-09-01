@@ -68,6 +68,26 @@ def generate_launch_description():
         arguments=['--ros-args', '--log-level', log_level],
     )
 
+    local_costmap_converter = Node(
+        package='nav_limo_controller',
+        executable='local_costmap',
+        name='local_costmap_converter',
+        output='screen',
+        parameters=[{
+            'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
+            'input_topic': '/limo/nav_map_package/online/local_ptcld',
+            'output_topic': '/limo/nav_map_package/online/local_costmap',
+            'output_frame': 'base_link',
+            'resolution': 0.05,
+            'length': 2.46,
+            'width': 2.66,
+            'minimum_cost': 1.0,
+            'minimum_confidence': 0.30,
+            'scale_cost_by_confidence': False,
+            'statistics_window_cycles': 30,
+        }],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'params_file',
@@ -89,6 +109,7 @@ def generate_launch_description():
             default_value='info',
             description='ROS log level for controller processes.',
         ),
+        local_costmap_converter,
         controller_server,
         velocity_smoother,
         lifecycle_manager,

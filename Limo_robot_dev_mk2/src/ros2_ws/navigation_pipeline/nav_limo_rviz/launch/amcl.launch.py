@@ -36,6 +36,7 @@ def generate_launch_description():
         'cv_sad_min_positive_mass'
     )
     max_particles = LaunchConfiguration('max_particles')
+    min_particles = LaunchConfiguration('min_particles')
     workload_logging_enabled = LaunchConfiguration(
         'workload_logging_enabled'
     )
@@ -106,6 +107,10 @@ def generate_launch_description():
             ),
             'max_particles': ParameterValue(
                 max_particles,
+                value_type=int,
+            ),
+            'min_particles': ParameterValue(
+                min_particles,
                 value_type=int,
             ),
             'workload_logging_enabled': ParameterValue(
@@ -246,7 +251,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'cv_sad_cell_size',
-            default_value='0.05',
+            default_value='0.075',
             description='Regular SAD template sampling size in metres.',
         ),
         DeclareLaunchArgument(
@@ -267,6 +272,11 @@ def generate_launch_description():
             'max_particles',
             default_value='2000',
             description='Maximum number of particles maintained by AMCL.',
+        ),
+        DeclareLaunchArgument(
+            'min_particles',
+            default_value='300',
+            description='Minimum number of particles maintained by AMCL.',
         ),
         DeclareLaunchArgument(
             'workload_logging_enabled',

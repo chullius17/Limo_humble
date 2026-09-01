@@ -36,7 +36,7 @@ setup(
             'cv_amcl_debug = online_map_package.cv_amcl_debug:main',
             'cv_2_ptcld = online_map_package.cv_2_ptcld:main',
             'online_nav_map = online_map_package.online_nav_map:main',
-            'local_map = online_map_package.local_map:main',
+            'local_ptcld = online_map_package.local_ptcld:main',
         ],
     },
 )

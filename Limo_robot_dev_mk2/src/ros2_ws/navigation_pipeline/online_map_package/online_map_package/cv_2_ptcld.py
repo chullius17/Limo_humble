@@ -1,6 +1,7 @@
 """Convert the metric BEV cost grid into a downsampled point cloud."""
 
 import math
+import time
 
 import numpy as np
 import rclpy
@@ -48,6 +49,7 @@ class CvToPointCloud(Node):
         self.declare_parameter('high_cost_threshold', 95.0)
         self.declare_parameter('high_cost_downsampling_factor', 2)
         self.declare_parameter('maximum_points', 2000)
+        self.declare_parameter('statistics_window_cycles', 30)
 
         self.input_topic = str(self.get_parameter('input_topic').value)
         self.output_topic = str(self.get_parameter('output_topic').value)
@@ -70,6 +72,9 @@ class CvToPointCloud(Node):
         )
         self.maximum_points = int(
             self.get_parameter('maximum_points').value
+        )
+        self.statistics_window_cycles = int(
+            self.get_parameter('statistics_window_cycles').value
         )
 
         if not self.output_frame:
@@ -97,9 +102,19 @@ class CvToPointCloud(Node):
             )
         if self.maximum_points <= 0:
             raise ValueError('maximum_points must be greater than zero')
+        if self.statistics_window_cycles <= 0:
+            raise ValueError(
+                'statistics_window_cycles must be greater than zero'
+            )
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.statistics_count = 0
+        self.statistics_first_cycle_time_ns = None
+        self.statistics = {
+            name: {'sum': 0.0, 'min': None, 'max': None}
+            for name in ('cells', 'points', 'wall_ms', 'cpu_ms')
+        }
 
         input_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
@@ -359,7 +374,73 @@ class CvToPointCloud(Node):
         cloud.is_dense = True
         return cloud
 
+    def _update_statistics(
+        self,
+        cell_count,
+        point_count,
+        wall_time_ms,
+        cpu_time_ms,
+        cycle_time_ns,
+    ):
+        """Accumulate and periodically log CV conversion workload."""
+        values = {
+            'cells': float(cell_count),
+            'points': float(point_count),
+            'wall_ms': wall_time_ms,
+            'cpu_ms': cpu_time_ms,
+        }
+        self.statistics_count += 1
+        if self.statistics_first_cycle_time_ns is None:
+            self.statistics_first_cycle_time_ns = cycle_time_ns
+        for name, value in values.items():
+            statistic = self.statistics[name]
+            statistic['sum'] += value
+            statistic['min'] = (
+                value if statistic['min'] is None
+                else min(statistic['min'], value)
+            )
+            statistic['max'] = (
+                value if statistic['max'] is None
+                else max(statistic['max'], value)
+            )
+
+        if self.statistics_count < self.statistics_window_cycles:
+            return
+
+        elapsed_sec = (
+            cycle_time_ns - self.statistics_first_cycle_time_ns
+        ) * 1.0e-9
+        frequency_hz = 0.0
+        if elapsed_sec > 0.0 and self.statistics_count > 1:
+            frequency_hz = (self.statistics_count - 1) / elapsed_sec
+
+        def summary(name, precision):
+            statistic = self.statistics[name]
+            average = statistic['sum'] / self.statistics_count
+            return (
+                f'{average:.{precision}f}/'
+                f'{statistic["min"]:.{precision}f}/'
+                f'{statistic["max"]:.{precision}f}'
+            )
+
+        self.get_logger().info(
+            f'CV to cloud over {self.statistics_count} cycles: '
+            f'cells avg/min/max={summary("cells", 1)}; '
+            f'points avg/min/max={summary("points", 1)}; '
+            f'wall_ms avg/min/max={summary("wall_ms", 3)}; '
+            f'cpu_ms avg/min/max={summary("cpu_ms", 3)}; '
+            f'frequency={frequency_hz:.2f} Hz'
+        )
+        self.statistics_count = 0
+        self.statistics_first_cycle_time_ns = None
+        self.statistics = {
+            name: {'sum': 0.0, 'min': None, 'max': None}
+            for name in self.statistics
+        }
+
     def grid_callback(self, msg):
+        cycle_time_ns = time.perf_counter_ns()
+        cpu_start_ns = time.process_time_ns()
         resolution = self.voxel_size or float(msg.info.resolution)
         if resolution <= 0.0:
             self.get_logger().warn(
@@ -391,6 +472,15 @@ class CvToPointCloud(Node):
             costs = costs[strongest]
         self.cloud_pub.publish(
             self._make_cloud(indices, costs, resolution, msg.header.stamp)
+        )
+        wall_time_ms = (time.perf_counter_ns() - cycle_time_ns) * 1.0e-6
+        cpu_time_ms = (time.process_time_ns() - cpu_start_ns) * 1.0e-6
+        self._update_statistics(
+            msg.info.width * msg.info.height,
+            costs.size,
+            wall_time_ms,
+            cpu_time_ms,
+            cycle_time_ns,
         )
 
 

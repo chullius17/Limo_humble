@@ -24,10 +24,11 @@ def generate_launch_description():
     cv_obstacle_weight_factor_default = '1.0'
     cv_street_weight_factor_default = '1.0'
     cv_sad_gain_default = '20.0'
-    cv_sad_cell_size_default = '0.05'
+    cv_sad_cell_size_default = '0.075'
     cv_sad_min_cell_occupancy_default = '0.1'
     cv_sad_min_positive_mass_default = '5.0'
     max_particles_default = '800'
+    min_particles_default = '300'
     workload_logging_enabled_default = 'true'
     cv_sync_tolerance_default = '0.20'
     alpha1_default = '0.2'
@@ -61,6 +62,7 @@ def generate_launch_description():
         'cv_sad_min_positive_mass'
     )
     max_particles = LaunchConfiguration('max_particles')
+    min_particles = LaunchConfiguration('min_particles')
     workload_logging_enabled = LaunchConfiguration(
         'workload_logging_enabled'
     )
@@ -145,6 +147,7 @@ def generate_launch_description():
             'cv_sad_min_cell_occupancy': cv_sad_min_cell_occupancy,
             'cv_sad_min_positive_mass': cv_sad_min_positive_mass,
             'max_particles': max_particles,
+            'min_particles': min_particles,
             'workload_logging_enabled': workload_logging_enabled,
             'cv_sync_tolerance': cv_sync_tolerance,
             'alpha1': alpha1,
@@ -286,19 +289,20 @@ def generate_launch_description():
             'high_cost_threshold': 95.0,
             'high_cost_downsampling_factor': 2,
             'maximum_points': 2000,
+            'statistics_window_cycles': 30,
         }],
     )
 
-    local_map = Node(
+    local_ptcld = Node(
         package='online_map_package',
-        executable='local_map',
-        name='local_map',
+        executable='local_ptcld',
+        name='local_ptcld',
         output='screen',
         parameters=[{
             'use_sim_time': True,
             'input_topic': '/limo/nav_map_package/online/cv_cloud',
             'output_topic': (
-                '/limo/nav_map_package/online/persistent_cloud'
+                '/limo/nav_map_package/online/local_ptcld'
             ),
             'base_frame': 'base_link',
             'odometry_frame': 'odom',
@@ -320,7 +324,10 @@ def generate_launch_description():
             'angular_speed_at_max_decay': 1.00,
             'linear_stationary_threshold': 0.01,
             'angular_stationary_threshold': 0.02,
-            'cmd_vel_timeout_sec': 0.50,
+            # teleop_twist_keyboard publishes on key events, not continuously.
+            'cmd_vel_timeout_sec': 0.0,
+            'tf_lookup_timeout_sec': 0.0,
+            'maximum_tf_age_sec': 0.03,
             'minimum_confidence': 0.30,
             'maximum_points': 2000,
             'point_statistics_window_cycles': 30,
@@ -402,6 +409,13 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument(
+            'min_particles',
+            default_value=min_particles_default,
+            description=(
+                'Minimum AMCL particle count used by adaptive sampling.'
+            ),
+        ),
+        DeclareLaunchArgument(
             'workload_logging_enabled',
             default_value=workload_logging_enabled_default,
             description='Publish throttled AMCL and CV workload counters.',
@@ -440,5 +454,5 @@ def generate_launch_description():
         cv_amcl_debug,
         nav_map,
         cv_pointcloud,
-        local_map,
+        local_ptcld,
     ])
