@@ -57,7 +57,7 @@ controller_server:
 
       # Keep reverse motion slower than forward motion for stable maneuvers.
       vx_max: 0.50
-      vx_min: -0.10
+      vx_min: 0.0
       vy_max: 0.0
       wz_max: 1.10
       vx_std: 0.15

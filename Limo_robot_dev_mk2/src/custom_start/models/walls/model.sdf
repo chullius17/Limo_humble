@@ -1,12 +1,12 @@
 <?xml version='1.0'?>
 <sdf version='1.7'>
   <model name='walls'>
-    <pose>-0.051936 0.025334 0 0 -0 0</pose>
+    <pose>-0.065984688 0.032186847 0 0 -0 0</pose>
     <link name='Wall_0'>
       <collision name='Wall_0_Collision'>
         <geometry>
           <box>
-            <size>6.5 0.15 0.25</size>
+            <size>8.25825 0.190575 0.25</size>
           </box>
         </geometry>
         <pose>0 0 0.125 0 -0 0</pose>
@@ -15,7 +15,7 @@
         <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>6.5 0.15 0.25</size>
+            <size>8.25825 0.190575 0.25</size>
           </box>
         </geometry>
         <material>
@@ -29,13 +29,13 @@
           <layer>0</layer>
         </meta>
       </visual>
-      <pose>-4.8 0 0 0 -0 -1.5708</pose>
+      <pose>-6.0984 0 0 0 -0 -1.5708</pose>
     </link>
     <link name='Wall_2'>
       <collision name='Wall_2_Collision'>
         <geometry>
           <box>
-            <size>9.75 0.15 0.25</size>
+            <size>12.387375 0.190575 0.25</size>
           </box>
         </geometry>
         <pose>0 0 0.125 0 -0 0</pose>
@@ -44,7 +44,7 @@
         <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>9.75 0.15 0.25</size>
+            <size>12.387375 0.190575 0.25</size>
           </box>
         </geometry>
         <material>
@@ -58,13 +58,13 @@
           <layer>0</layer>
         </meta>
       </visual>
-      <pose>0 -3.175 0 0 -0 0</pose>
+      <pose>0 -4.0338375 0 0 -0 0</pose>
     </link>
     <link name='Wall_4'>
       <collision name='Wall_4_Collision'>
         <geometry>
           <box>
-            <size>6.5 0.15 0.25</size>
+            <size>8.25825 0.190575 0.25</size>
           </box>
         </geometry>
         <pose>0 0 0.125 0 -0 0</pose>
@@ -73,7 +73,7 @@
         <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>6.5 0.15 0.25</size>
+            <size>8.25825 0.190575 0.25</size>
           </box>
         </geometry>
         <material>
@@ -87,13 +87,13 @@
           <layer>0</layer>
         </meta>
       </visual>
-      <pose>4.8 0 0 0 -0 1.5708</pose>
+      <pose>6.0984 0 0 0 -0 1.5708</pose>
     </link>
     <link name='Wall_5'>
       <collision name='Wall_5_Collision'>
         <geometry>
           <box>
-            <size>9.75 0.15 0.25</size>
+            <size>12.387375 0.190575 0.25</size>
           </box>
         </geometry>
         <pose>0 0 0.125 0 -0 0</pose>
@@ -102,7 +102,7 @@
         <pose>0 0 0.125 0 -0 0</pose>
         <geometry>
           <box>
-            <size>9.75 0.15 0.25</size>
+            <size>12.387375 0.190575 0.25</size>
           </box>
         </geometry>
         <material>
@@ -116,7 +116,7 @@
           <layer>0</layer>
         </meta>
       </visual>
-      <pose>0 3.175 0 0 -0 3.14159</pose>
+      <pose>0 4.0338375 0 0 -0 3.14159</pose>
     </link>
     <static>1</static>
   </model>

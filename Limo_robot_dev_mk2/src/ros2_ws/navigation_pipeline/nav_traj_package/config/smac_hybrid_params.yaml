@@ -39,44 +39,41 @@ planner_server:
       allow_unknown: false
 
       # Longer routes need a larger Hybrid-A* search budget. Planning is an
-      # occasional workload, so five seconds and 500k iterations are accepted
+      # occasional workload, so 7.5 seconds and 750k iterations are accepted
       # while retaining finite limits for pathological searches on the Nano.
-      max_iterations: 500000
+      max_iterations: 750000
       max_on_approach_iterations: 1000
-      max_planning_time: 5.0
+      max_planning_time: 7.5
 
-      # Reeds-Shepp paths allow forward/reverse cusps while preserving the
-      # Ackermann minimum-turning-radius constraint.
-      motion_model_for_search: "REEDS_SHEPP"
+      # Dubins paths preserve the Ackermann minimum-turning-radius constraint
+      # while allowing forward motion only.
+      motion_model_for_search: "DUBIN"
 
       # 64 headings correspond to 5.625 degrees per bin: sufficient accuracy for
       # a 5 cm grid, with fewer states than the default 72-bin configuration.
       angle_quantization_bins: 64
 
-      # Analytic expansion accelerates the final approach. Its maximum length is
-      # ten times the minimum turning radius, allowing longer direct final
-      # connections while retaining the normal Hybrid-A* collision checks.
+      # Analytic expansion accelerates the final approach. The longer limit
+      # allows direct Dubins connections from farther away while retaining the
+      # normal Hybrid-A* collision checks.
       analytic_expansion_ratio: 3.5
-      analytic_expansion_max_length: 5.0
+      analytic_expansion_max_length: 7.5
 
-      # The real LIMO has a 0.20 m wheelbase, a 0.172 m track width, and about
-      # 28 degrees of maximum inner steering angle, yielding a center turning
-      # radius of about 0.46 m. The Gazebo model requires about 0.50 m, so using
-      # 0.50 m is valid for both and prevents physically infeasible paths.
-      minimum_turning_radius: 0.60
+      # Physical LIMO Ackermann data: 0.20 m wheelbase, 0.172 m track width and
+      # about 28 degrees of maximum inner steering angle. These values yield a
+      # minimum centre-line turning radius of 0.462 m. 
+      # The radius is rounded up to 0.50 m to avoid the risk of planning paths that are too tight for the controller to follow.
+      minimum_turning_radius: 0.50
 
-      # Prefer forward motion, but allow reverse segments when they avoid an
-      # otherwise infeasible turn or final approach.
-      reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.15
       # A moderate value still prefers the corridor center but does not reject
       # narrow, high-inflation passages created by small map inaccuracies.
       cost_penalty: 1.5
 
-      # A 10 m lookup window gives the non-holonomic heuristic useful coverage
+      # A 15 m lookup window gives the non-holonomic heuristic useful coverage
       # on longer routes without returning to the generic 20 m memory cost.
-      lookup_table_size: 10.0
+      lookup_table_size: 15.0
 
       # The CV and lidar layers make the map dynamic. Do not cache the obstacle
       # heuristic across replanning requests, because its costs could become stale.
@@ -118,10 +115,9 @@ global_costmap:
       unknown_cost_value: 255
       use_maximum: false
 
-      # Use a reduced 0.32 x 0.09 m planning footprint without an additional
-      # margin. The inflation layer deliberately retains its independent
-      # 0.20 m robot width.
-      footprint: "[[-0.16, -0.045], [-0.16, 0.045], [0.16, 0.045], [0.16, -0.045]]"
+      # Use the physical 0.32 x 0.20 m LIMO footprint, matching the local
+      # controller costmap and the goal-validation footprint.
+      footprint: "[[-0.16, -0.10], [-0.16, 0.10], [0.16, 0.10], [0.16, -0.10]]"
       footprint_padding: 0.0
 
       plugins: ["static_layer", "border_follow_layer"]

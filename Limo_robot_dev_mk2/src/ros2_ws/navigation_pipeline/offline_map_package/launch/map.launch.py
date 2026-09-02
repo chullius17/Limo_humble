@@ -233,7 +233,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'classification_magenta_distance_threshold_px',
-            default_value='10.0',
+            default_value='0.0',
             description='CV classification distance from magenta in pixels.',
         ),
         start_mapping_nodes,

@@ -39,8 +39,8 @@ class OfflineMetricBEV(Node):
 
     CONFIG_MAP = {
         'TURQUOISE': {'peak_cost': 40.0, 'radius': 1},
-        'WHITE': {'peak_cost': 30.0, 'radius': 5},
-        'MAGENTA': {'peak_cost': 100.0, 'radius': 5},
+        'WHITE': {'peak_cost': 30.0, 'radius': 2},
+        'MAGENTA': {'peak_cost': 100.0, 'radius': 2},
     }
 
     DECAY = 8.0

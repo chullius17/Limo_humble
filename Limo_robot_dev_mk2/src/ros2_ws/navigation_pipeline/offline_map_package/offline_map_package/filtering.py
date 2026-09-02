@@ -27,7 +27,7 @@ class Filtering(Node):
         self.declare_parameter('color', 'TURQUOISE')
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('resolution', 0.02)
-        self.declare_parameter('map_size_meters', 10.0)
+        self.declare_parameter('map_size_meters', 15.0)
         self.declare_parameter('roi_x_min_m', 0.0)
         self.declare_parameter('roi_x_max_m', 1.85)
         self.declare_parameter('roi_width_near_m', 0.6)
