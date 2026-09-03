@@ -34,6 +34,16 @@ def generate_launch_description():
         launch_arguments={'use_controller': use_controller}.items()
     )
 
+    map_and_rviz_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory('ai_limo_rviz'),
+                'launch',
+                'ai_limo_rviz.launch.py'
+            )
+        )
+    )
+
     control_node = Node(
         package='limo_controller', 
         executable='controller',
@@ -56,6 +66,7 @@ def generate_launch_description():
     return LaunchDescription([
         use_controller_arg,
         ai_mode_arg,
+        map_and_rviz_launch,
         trajectory_launch,
         control_node,
         user_launch

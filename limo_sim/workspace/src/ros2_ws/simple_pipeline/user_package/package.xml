@@ -23,6 +23,11 @@
   <!-- Custom interfaces -->
   <depend>limo_interfaces</depend>
 
+  <!-- Nodes and launch files started by the application launchers -->
+  <exec_depend>ai_limo_rviz</exec_depend>
+  <exec_depend>ai_traj_package</exec_depend>
+  <exec_depend>limo_controller</exec_depend>
+
   <!-- Python GUI / plotting -->
   <exec_depend>python3-pyqt5</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
