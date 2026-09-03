@@ -6,6 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 xhost +local:docker
 
 if docker container inspect limo_sim >/dev/null 2>&1; then
+  CONTAINER_IMAGE="$(docker container inspect limo_sim --format '{{.Image}}')"
+  LATEST_IMAGE="$(docker image inspect limo_sim:latest --format '{{.Id}}')"
+
+  if [ "${CONTAINER_IMAGE}" != "${LATEST_IMAGE}" ]; then
+    echo "The limo_sim image changed; recreating the container..."
+    docker rm -f limo_sim
+  fi
+fi
+
+if docker container inspect limo_sim >/dev/null 2>&1; then
   docker start -ai limo_sim
 else
   docker run -it \
