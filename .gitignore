@@ -1,7 +1,20 @@
 build/
 install/
 log/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Editor and IntelliSense caches
 browse.vc.db
+.vscode/ipch/
+
 .git-backups/
 Limo_robot_dev_mk2/control_logs/
 Limo_robot_dev_mk2/ai_control_logs/
