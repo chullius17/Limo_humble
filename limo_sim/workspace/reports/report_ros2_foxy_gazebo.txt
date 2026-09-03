@@ -1,0 +1,195 @@
+REPORT INTERVENTO ROS 2 FOXY E GAZEBO
+=====================================
+
+Obiettivo
+---------
+Creare un ambiente Docker ROS 2 Foxy capace di eseguire la simulazione
+Gazebo del robot LIMO con cinematica Ackermann, prendendo come riferimento
+il workspace ROS 2 Humble funzionante.
+
+
+1. Ambiente Docker
+------------------
+È stata creata la seguente struttura:
+
+~/limo_foxy/limo_sim/
+|-- ros2_foxy_dev/
+|   |-- Dockerfile
+|   |-- build.sh
+|   |-- run.sh
+|   `-- start_limo_docker.sh
+`-- workspace/
+
+L'immagine e il container Docker sono chiamati "limo_sim".
+
+Il Dockerfile include:
+
+- Ubuntu 20.04 Focal;
+- ROS 2 Foxy Desktop;
+- Gazebo 11 e gazebo_ros_pkgs;
+- Colcon e rosdep;
+- OpenCV;
+- supporto grafico X11;
+- supporto GPU NVIDIA;
+- robot_localization;
+- rqt_robot_steering.
+
+Il mount del workspace è stato corretto in:
+
+-v "${SCRIPT_DIR}/../workspace:/workspace"
+
+
+2. Organizzazione del workspace
+-------------------------------
+Il workspace è stato riorganizzato secondo la struttura standard Colcon:
+
+workspace/
+|-- src/
+|   `-- limo_ros2/
+|       |-- limo_base/
+|       |-- limo_bringup/
+|       |-- limo_description/
+|       |-- limo_msgs/
+|       |-- limo_car/
+|       `-- custom_start/
+|-- build/
+|-- install/
+|-- log/
+`-- .vscode/
+
+È stato aggiornato anche il percorso di limo_base nella configurazione di
+Visual Studio Code.
+
+
+3. Correzioni Gazebo e Ackermann
+--------------------------------
+Il workspace Foxy originale conteneva una configurazione Ackermann basata
+su plugin ROS 1 non adatti alla simulazione ROS 2:
+
+- libgazebo_ros_control.so;
+- libgazebo_ros_ackerman.so.
+
+Dal workspace Humble sono stati portati i seguenti pacchetti:
+
+- limo_car: modello Ackermann completo, sensori e controller Gazebo;
+- custom_start: world, circuito, modelli e launch della simulazione.
+
+Il controller è stato configurato con il plugin ROS 2:
+
+libgazebo_ros_ackermann_drive.so
+
+La configurazione comprende:
+
+- quattro giunti delle ruote;
+- due giunti sterzanti anteriori;
+- controllo tramite il topic /cmd_vel;
+- pubblicazione dell'odometria sul topic /odom;
+- laser scanner;
+- depth camera;
+- IMU;
+- pubblicazione degli stati dei giunti sterzanti.
+
+È stato rimosso anche il riferimento a un giunto volante inesistente che
+generava il messaggio "Steering wheel joint [/] not found".
+
+
+4. World personalizzato
+-----------------------
+Il pacchetto custom_start contiene:
+
+custom_start/
+|-- launch/limo_circuit.launch.py
+|-- worlds/limo_circuit_world.world
+|-- models/
+`-- config/ekf.yaml
+
+Il launch avvia:
+
+- robot_state_publisher;
+- Gazebo Server;
+- Gazebo Client;
+- lo spawn del robot LIMO;
+- il controller Ackermann;
+- robot_localization;
+- il circuito personalizzato.
+
+
+5. Configurazione Git
+---------------------
+La radice Git del progetto Foxy è:
+
+~/limo_foxy
+
+Il repository utilizza lo stesso remote del progetto Humble:
+
+https://github.com/chullius17/Limo_humble.git
+
+È stato creato il branch locale "foxy".
+
+La precedente cronologia del clone AgileX è stata conservata in:
+
+~/limo_foxy/.git-backups/limo_ros2-agilex.git
+
+Il file .gitignore esclude build, install, log e .git-backups.
+
+
+6. Alias Bash
+-------------
+Sono stati aggiunti i seguenti alias:
+
+start_foxy: avvia il container limo_sim;
+ter_foxy: apre un secondo terminale nel container;
+per_foxy: ripristina la proprietà dei file sotto ~/limo_foxy.
+
+
+7. Verifiche effettuate
+-----------------------
+Sono stati completati con successo:
+
+- build dell'immagine Docker limo_sim;
+- build Colcon di limo_car e custom_start;
+- controllo sintattico degli script Bash;
+- controllo sintattico dei launch Python;
+- generazione del modello Xacro;
+- validazione URDF tramite check_urdf;
+- avvio headless di Gazebo;
+- caricamento del circuito;
+- spawn del robot LIMO;
+- avvio di robot_state_publisher;
+- avvio dell'EKF;
+- caricamento del controller Ackermann;
+- sottoscrizione del controller a /cmd_vel;
+- pubblicazione dell'odometria su /odom.
+
+
+8. Conflitto della porta Gazebo
+-------------------------------
+Durante una prova, un processo gzserver del container Humble occupava la
+porta standard 11345. Questo causava i seguenti errori:
+
+- Unable to start server: Address already in use;
+- Conflicting gazebo versions;
+- Spawn service failed.
+
+Il processo Gazebo Humble è stato identificato e terminato, liberando la
+porta per Gazebo Foxy.
+
+
+9. Comandi di compilazione e avvio
+----------------------------------
+Dentro il container Foxy:
+
+cd /workspace
+source /opt/ros/foxy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch custom_start limo_circuit.launch.py
+
+Da un secondo terminale:
+
+ter_foxy
+source /workspace/install/setup.bash
+ros2 run rqt_robot_steering rqt_robot_steering
+
+Il robot riceve i comandi di movimento su /cmd_vel e pubblica
+l'odometria su /odom.

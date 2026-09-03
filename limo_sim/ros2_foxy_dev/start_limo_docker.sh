@@ -18,6 +18,6 @@ else
     -e NVIDIA_VISIBLE_DEVICES=all \
     -e NVIDIA_DRIVER_CAPABILITIES=all \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-    -v "${SCRIPT_DIR}/workspace:/workspace" \
+    -v "${SCRIPT_DIR}/../workspace:/workspace" \
     limo_sim bash
 fi

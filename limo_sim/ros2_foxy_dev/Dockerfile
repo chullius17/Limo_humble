@@ -36,6 +36,8 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-foxy-desktop \
     ros-foxy-gazebo-ros-pkgs \
+    ros-foxy-robot-localization \
+    ros-foxy-rqt-robot-steering \
     ros-foxy-xacro \
     python3-rosdep \
     python3-vcstool \
