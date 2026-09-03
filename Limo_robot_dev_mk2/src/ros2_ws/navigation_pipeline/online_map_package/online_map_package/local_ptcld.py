@@ -66,6 +66,8 @@ class LocalPointCloud(Node):
         self.declare_parameter('bounding_box_width', 2.66)
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('maximum_decay_per_cycle', 0.02)
+        self.declare_parameter('low_cost_threshold', 50.0)
+        self.declare_parameter('low_cost_decay_multiplier', 3.0)
         self.declare_parameter('linear_speed_at_max_decay', 0.50)
         self.declare_parameter('angular_speed_at_max_decay', 1.00)
         self.declare_parameter('linear_stationary_threshold', 0.01)
@@ -110,6 +112,12 @@ class LocalPointCloud(Node):
         )
         self.maximum_decay_per_cycle = float(
             self.get_parameter('maximum_decay_per_cycle').value
+        )
+        self.low_cost_threshold = float(
+            self.get_parameter('low_cost_threshold').value
+        )
+        self.low_cost_decay_multiplier = float(
+            self.get_parameter('low_cost_decay_multiplier').value
         )
         self.linear_speed_at_max_decay = float(
             self.get_parameter('linear_speed_at_max_decay').value
@@ -164,6 +172,10 @@ class LocalPointCloud(Node):
             raise ValueError(
                 'maximum_decay_per_cycle must be between 0 and 1'
             )
+        if not 0.0 <= self.low_cost_threshold <= 100.0:
+            raise ValueError('low_cost_threshold must be between 0 and 100')
+        if self.low_cost_decay_multiplier < 1.0:
+            raise ValueError('low_cost_decay_multiplier must be at least 1')
         if self.linear_stationary_threshold < 0.0:
             raise ValueError(
                 'linear_stationary_threshold must be zero or greater'
@@ -284,6 +296,8 @@ class LocalPointCloud(Node):
             f'frame={self.base_frame}, motion reference={self.odometry_frame}, '
             f'decay=0..{self.maximum_decay_per_cycle:.2f}/cycle from '
             f'{self.cmd_vel_topic}, '
+            f'low_cost=<{self.low_cost_threshold:g} at '
+            f'{self.low_cost_decay_multiplier:g}x decay, '
             f'threshold={self.minimum_confidence:.2f}, '
             f'tf_timeout={self.tf_lookup_timeout_sec:.3f}s, '
             f'latest_tf_max_age={self.maximum_tf_age_sec:.3f}s'
@@ -505,7 +519,15 @@ class LocalPointCloud(Node):
             odom_xy,
             current_odom_from_base,
         )
-        confidences = self.confidences * (1.0 - decay_factor)
+        point_decay = np.full(
+            self.confidences.shape,
+            decay_factor,
+            dtype=np.float32,
+        )
+        low_cost_mask = self.costs < self.low_cost_threshold
+        point_decay[low_cost_mask] *= self.low_cost_decay_multiplier
+        np.clip(point_decay, 0.0, 1.0, out=point_decay)
+        confidences = self.confidences * (1.0 - point_decay)
         half_width = 0.5 * self.bounding_box_width
         keep = (
             (current_base_xy[:, 0] >= 0.0)

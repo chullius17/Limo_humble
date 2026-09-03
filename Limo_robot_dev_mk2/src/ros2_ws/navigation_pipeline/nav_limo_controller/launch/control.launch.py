@@ -19,6 +19,11 @@ def generate_launch_description():
         'config',
         'mppi_control_params.yaml',
     )
+    twist_mux_params_file = os.path.join(
+        package_share,
+        'config',
+        'twist_mux.yaml',
+    )
 
     params_file = LaunchConfiguration('params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
@@ -51,8 +56,20 @@ def generate_launch_description():
         arguments=['--ros-args', '--log-level', log_level],
         remappings=[
             ('cmd_vel', 'cmd_vel_nav'),
-            ('cmd_vel_smoothed', 'cmd_vel'),
+            ('cmd_vel_smoothed', 'cmd_vel_autonomy'),
         ],
+    )
+
+    twist_mux = Node(
+        package='twist_mux',
+        executable='twist_mux',
+        name='twist_mux',
+        output='screen',
+        parameters=[
+            twist_mux_params_file,
+            {'use_sim_time': ParameterValue(use_sim_time, value_type=bool)},
+        ],
+        remappings=[('/cmd_vel_out', '/cmd_vel')],
     )
 
     lifecycle_manager = Node(
@@ -103,7 +120,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_sim_time',
-            default_value='false',
+            default_value='true',
             description='Use Gazebo/rosbag time instead of the robot clock.',
         ),
         DeclareLaunchArgument(
@@ -119,6 +136,7 @@ def generate_launch_description():
         local_costmap_converter,
         controller_server,
         velocity_smoother,
+        twist_mux,
         lifecycle_manager,
         control_gui,
     ])

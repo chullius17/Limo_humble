@@ -45,8 +45,8 @@ planner_server:
       max_on_approach_iterations: 1000
       max_planning_time: 7.5
 
-      # Dubins paths preserve the Ackermann minimum-turning-radius constraint
-      # while allowing forward motion only.
+      # Dubins paths preserve the Ackermann turning-radius constraint and only
+      # permit forward motion, so the planned path contains no reversals.
       motion_model_for_search: "DUBIN"
 
       # 64 headings correspond to 5.625 degrees per bin: sufficient accuracy for
@@ -59,11 +59,10 @@ planner_server:
       analytic_expansion_ratio: 3.5
       analytic_expansion_max_length: 7.5
 
-      # Physical LIMO Ackermann data: 0.20 m wheelbase, 0.172 m track width and
-      # about 28 degrees of maximum inner steering angle. These values yield a
-      # minimum centre-line turning radius of 0.462 m. 
-      # The radius is rounded up to 0.50 m to avoid the risk of planning paths that are too tight for the controller to follow.
-      minimum_turning_radius: 0.50
+      # The theoretical centre-line limit is 0.462 m. Use a conservative
+      # operational radius so every planned primitive remains comfortably
+      # inside the steering capability of the physical robot.
+      minimum_turning_radius: 0.7
 
       change_penalty: 0.0
       non_straight_penalty: 1.15
@@ -79,9 +78,9 @@ planner_server:
       # heuristic across replanning requests, because its costs could become stale.
       cache_obstacle_heuristic: false
 
-      # The integrated smoother removes residual corners. A 1e-4 tolerance and
-      # 500 iterations avoid the unnecessary cost of 1e-10/1000 on the Nano.
-      smooth_path: true
+      # Preserve the curvature of the kinematically feasible Hybrid-A* path.
+      # Geometric smoothing is disabled so it cannot tighten bends afterward.
+      smooth_path: false
       smoother:
         max_iterations: 500
         w_smooth: 0.3

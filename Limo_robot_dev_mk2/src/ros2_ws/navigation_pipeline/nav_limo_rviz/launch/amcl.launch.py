@@ -222,7 +222,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'laser_weight_factor',
-            default_value='1.0',
+            default_value='2.0',
             description='Exponent applied to the normalized laser weight.',
         ),
         DeclareLaunchArgument(

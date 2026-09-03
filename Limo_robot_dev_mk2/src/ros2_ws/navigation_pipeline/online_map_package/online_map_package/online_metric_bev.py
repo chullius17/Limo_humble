@@ -86,6 +86,10 @@ class OnlineMetricBEV(Node):
         self.declare_parameter('resolution', 0.0092)
         self.declare_parameter('publish_debug', True)
         self.declare_parameter('binary_threshold', 40.0)
+        self.declare_parameter(
+            'combined_magenta_max_blue_distance_px',
+            50.0,
+        )
 
         self.fixed_frame   = self.get_parameter('fixed_frame').value
         self.global_frame  = self.get_parameter('global_frame').value
@@ -94,8 +98,17 @@ class OnlineMetricBEV(Node):
         self.binary_threshold = float(
             self.get_parameter('binary_threshold').value
         )
+        self.combined_magenta_max_blue_distance_px = float(
+            self.get_parameter(
+                'combined_magenta_max_blue_distance_px'
+            ).value
+        )
         if not 0.0 <= self.binary_threshold <= 100.0:
             raise ValueError('binary_threshold must be between 0 and 100')
+        if self.combined_magenta_max_blue_distance_px < 0.0:
+            raise ValueError(
+                'combined_magenta_max_blue_distance_px must be non-negative'
+            )
 
         if self.publish_debug:
             # Pre-build the heatmap lookup table only for debug output.
@@ -286,6 +299,25 @@ class OnlineMetricBEV(Node):
             config['radius'],
         )
 
+    def _filter_combined_magenta(
+        self,
+        bgr: np.ndarray,
+        magenta_cost: np.ndarray,
+    ) -> np.ndarray:
+        """Keep combined-grid magenta costs close to observed blue pixels."""
+        blue_mask = self._make_mask(bgr, self.color_map['BLUE'])
+        blue_mask = self._fill_mask_blobs(blue_mask)
+        distance_from_blue = cv2.distanceTransform(
+            cv2.bitwise_not(blue_mask),
+            cv2.DIST_L2,
+            cv2.DIST_MASK_PRECISE,
+        )
+        filtered = magenta_cost.copy()
+        filtered[
+            distance_from_blue > self.combined_magenta_max_blue_distance_px
+        ] = 0
+        return filtered
+
     def _costmap_to_occupancy_grid(self, cost_img: np.ndarray, header: Header, topic_suffix: str) -> OccupancyGrid:
         rotated_cost = cv2.rotate(cost_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
         rotated_cost = cv2.flip(rotated_cost, 1)
@@ -386,17 +418,25 @@ class OnlineMetricBEV(Node):
             t['roi_debug'] = (time.perf_counter() - t_start) * 1000
 
         # --- Per-color processing ---
-        cost_layers = []
+        cost_layers = {}
         for color in self.colors:
             t_start = time.perf_counter()
             cost_img_cropped = self._image_to_costmap(roi_bgr, color)
-            cost_layers.append(cost_img_cropped)
+            cost_layers[color] = cost_img_cropped
             t_color[color]['mask_inflate'] = (time.perf_counter() - t_start) * 1000
 
         # The semantic costs match CVMapDisplay: turquoise=60, white=30 and
-        # magenta=100. Taking the cell-wise maximum preserves the dominant
-        # class wherever inflated layers overlap.
-        combined_cost = np.maximum.reduce(cost_layers)
+        # magenta=100. Only the combined grid rejects magenta costs farther
+        # than the configured distance from the nearest observed blue pixel.
+        combined_magenta = self._filter_combined_magenta(
+            roi_bgr,
+            cost_layers['MAGENTA'],
+        )
+        combined_cost = np.maximum.reduce([
+            cost_layers['TURQUOISE'],
+            cost_layers['WHITE'],
+            combined_magenta,
+        ])
         self.combined_costmap_pub.publish(
             self._costmap_to_occupancy_grid(
                 combined_cost,
@@ -408,8 +448,10 @@ class OnlineMetricBEV(Node):
         # Values above the threshold are foreground (100). Zero cells
         # remain white in the published grid; the AMCL positive-SAD model
         # deliberately treats only foreground cells as semantic evidence.
+        # Preserve the original, unfiltered obstacle evidence for AMCL.
+        unfiltered_obstacle_cost = np.maximum.reduce(list(cost_layers.values()))
         obstacle_binary = np.where(
-            combined_cost > self.binary_threshold,
+            unfiltered_obstacle_cost > self.binary_threshold,
             100,
             0,
         ).astype(np.uint8)

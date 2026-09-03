@@ -19,7 +19,7 @@ def find_project_root(start: Path):
 
 
 def generate_launch_description():
-    laser_weight_factor_default = '1.0'
+    laser_weight_factor_default = '2.0'
     cv_weight_factor_default = '1.0'
     cv_obstacle_weight_factor_default = '1.0'
     cv_street_weight_factor_default = '1.0'
@@ -27,6 +27,7 @@ def generate_launch_description():
     cv_sad_cell_size_default = '0.075'
     cv_sad_min_cell_occupancy_default = '0.1'
     cv_sad_min_positive_mass_default = '5.0'
+    combined_magenta_max_blue_distance_px_default = '20.0'
     max_particles_default = '800'
     min_particles_default = '300'
     workload_logging_enabled_default = 'true'
@@ -60,6 +61,9 @@ def generate_launch_description():
     )
     cv_sad_min_positive_mass = LaunchConfiguration(
         'cv_sad_min_positive_mass'
+    )
+    combined_magenta_max_blue_distance_px = LaunchConfiguration(
+        'combined_magenta_max_blue_distance_px'
     )
     max_particles = LaunchConfiguration('max_particles')
     min_particles = LaunchConfiguration('min_particles')
@@ -216,6 +220,10 @@ def generate_launch_description():
                 cost_threshold,
                 value_type=float,
             ),
+            'combined_magenta_max_blue_distance_px': ParameterValue(
+                combined_magenta_max_blue_distance_px,
+                value_type=float,
+            ),
         }],
     )
 
@@ -286,8 +294,6 @@ def generate_launch_description():
             'source_block_size': 5,
             'minimum_cells_per_block': 5,
             'minimum_cost': 30.0,
-            'high_cost_threshold': 95.0,
-            'high_cost_downsampling_factor': 2,
             'maximum_points': 2000,
             'statistics_window_cycles': 30,
         }],
@@ -320,6 +326,8 @@ def generate_launch_description():
             'bounding_box_width': 2.66,
             'cmd_vel_topic': '/cmd_vel',
             'maximum_decay_per_cycle': 0.02,
+            'low_cost_threshold': 50.0,
+            'low_cost_decay_multiplier': 3.0,
             'linear_speed_at_max_decay': 0.50,
             'angular_speed_at_max_decay': 1.00,
             'linear_stationary_threshold': 0.01,
@@ -399,6 +407,14 @@ def generate_launch_description():
             default_value=cv_sad_min_positive_mass_default,
             description=(
                 'Minimum foreground mass required for a CV class to vote.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'combined_magenta_max_blue_distance_px',
+            default_value=combined_magenta_max_blue_distance_px_default,
+            description=(
+                'Maximum magenta-to-blue distance retained in the combined '
+                'metric BEV grid, in pixels.'
             ),
         ),
         DeclareLaunchArgument(

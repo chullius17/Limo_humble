@@ -46,8 +46,6 @@ class CvToPointCloud(Node):
         self.declare_parameter('source_block_size', 5)
         self.declare_parameter('minimum_cells_per_block', 5)
         self.declare_parameter('minimum_cost', 30.0)
-        self.declare_parameter('high_cost_threshold', 95.0)
-        self.declare_parameter('high_cost_downsampling_factor', 2)
         self.declare_parameter('maximum_points', 2000)
         self.declare_parameter('statistics_window_cycles', 30)
 
@@ -63,12 +61,6 @@ class CvToPointCloud(Node):
         )
         self.minimum_cost = float(
             self.get_parameter('minimum_cost').value
-        )
-        self.high_cost_threshold = float(
-            self.get_parameter('high_cost_threshold').value
-        )
-        self.high_cost_downsampling_factor = int(
-            self.get_parameter('high_cost_downsampling_factor').value
         )
         self.maximum_points = int(
             self.get_parameter('maximum_points').value
@@ -94,12 +86,6 @@ class CvToPointCloud(Node):
             )
         if not 0.0 <= self.minimum_cost <= 100.0:
             raise ValueError('minimum_cost must be between 0 and 100')
-        if not 0.0 <= self.high_cost_threshold <= 100.0:
-            raise ValueError('high_cost_threshold must be between 0 and 100')
-        if self.high_cost_downsampling_factor <= 0:
-            raise ValueError(
-                'high_cost_downsampling_factor must be greater than zero'
-            )
         if self.maximum_points <= 0:
             raise ValueError('maximum_points must be greater than zero')
         if self.statistics_window_cycles <= 0:
@@ -311,34 +297,6 @@ class CvToPointCloud(Node):
             costs[representatives].astype(np.float32, copy=False),
         )
 
-    def _downsample_high_cost(self, indices, costs):
-        """Apply the extra coarse pass only to costs above the threshold."""
-        factor = self.high_cost_downsampling_factor
-        high = costs > self.high_cost_threshold
-        if factor <= 1 or not np.any(high):
-            return indices, costs
-
-        low_indices = indices[~high]
-        low_costs = costs[~high]
-        high_indices = indices[high]
-        high_costs = costs[high]
-        coarse_indices = np.floor_divide(high_indices, factor)
-        _, inverse = np.unique(
-            coarse_indices,
-            axis=0,
-            return_inverse=True,
-        )
-        ordered = np.lexsort((-high_costs, inverse))
-        first_in_group = np.concatenate((
-            np.array([True]),
-            inverse[ordered][1:] != inverse[ordered][:-1],
-        ))
-        representatives = ordered[first_in_group]
-        return (
-            np.concatenate((low_indices, high_indices[representatives])),
-            np.concatenate((low_costs, high_costs[representatives])),
-        )
-
     def _make_cloud(self, indices, costs, resolution, stamp):
         cloud_data = np.empty(costs.size, dtype=POINT_DTYPE)
         cloud_data['x'] = (indices[:, 0] + 0.5) * resolution
@@ -455,7 +413,6 @@ class CvToPointCloud(Node):
                 costs,
                 resolution,
             )
-            indices, costs = self._downsample_high_cost(indices, costs)
         except (TransformException, ValueError) as exc:
             self.get_logger().warn(
                 f'Cannot convert CV grid: {exc}',

@@ -1099,8 +1099,21 @@ bool AmclNode::applyCvFusion(
       static_cast<unsigned long long>(particle_cell_iterations));
   }
 
-  // An all-white or nearly empty class contains no reliable positive semantic
-  // evidence. Gate each enabled channel independently before normalization.
+  // The obstacle grid is the confidence gate for the complete CV update. A
+  // sparse obstacle observation is not sufficiently informative to trust the
+  // accompanying semantic evidence, so preserve the laser-only weights.
+  if (use_obstacles &&
+    obstacle_score.positive_mass < cv_sad_min_positive_mass_)
+  {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "Skipping all CV SAD: obstacle foreground mass %.1f is below %.1f cells",
+      obstacle_score.positive_mass, cv_sad_min_positive_mass_);
+    return false;
+  }
+
+  // Once the obstacle confidence gate passes, keep gating the street channel
+  // independently so an empty street grid cannot dilute obstacle evidence.
   const bool obstacle_active = use_obstacles &&
     obstacle_score.positive_mass >= cv_sad_min_positive_mass_;
   const bool street_active = use_street &&
