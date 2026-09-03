@@ -1,0 +1,6 @@
+build/
+install/
+log/
+.git-backups/
+Limo_robot_dev_mk2/control_logs/
+Limo_robot_dev_mk2/ai_control_logs/
