@@ -33,7 +33,7 @@ class MapSaver(Node):
         self.declare_parameter('view_resolution',     0.02)     
         self.declare_parameter('turquoise_factor',    0.6)
         self.declare_parameter('white_factor',        0.3)
-        self.declare_parameter('canvas_size_meters',  10.0)     
+        self.declare_parameter('canvas_size_meters',  15.0)
         self.declare_parameter('robot_frame',         'base_link')
         self.declare_parameter('save_directory',      '')
         

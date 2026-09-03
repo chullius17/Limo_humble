@@ -34,7 +34,7 @@ class MapSaver(Node):
         self.declare_parameter('magenta_factor',      1.0)      
         self.declare_parameter('red_factor',          0.6)      
         self.declare_parameter('green_factor',        0.3) 
-        self.declare_parameter('canvas_size_meters',  10.0)     
+        self.declare_parameter('canvas_size_meters',  15.0)
         self.declare_parameter('robot_frame',         'base_link')
         self.declare_parameter('save_directory',      '')
         
