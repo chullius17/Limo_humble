@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Forward RViz goals to Nav2 and recover nearby feasible goal poses."""
+"""Forward RViz goals to Nav2 and recover feasible start and goal poses."""
 
 import copy
 from dataclasses import dataclass
@@ -24,11 +24,14 @@ from nav2_msgs.action import ComputePathToPose, FollowPath
 from nav_msgs.msg import OccupancyGrid
 import rclpy
 from rclpy.action import ActionClient
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 @dataclass
@@ -66,6 +69,13 @@ class RvizGoalBridge(Node):
             'adjusted_goal_topic',
             '/adjusted_goal_pose',
         )
+        self.declare_parameter(
+            'adjusted_start_topic',
+            '/adjusted_start_pose',
+        )
+        self.declare_parameter('robot_base_frame', 'base_link')
+        self.declare_parameter('start_transform_timeout', 0.20)
+        self.declare_parameter('enable_start_adjustment', True)
         self.declare_parameter('enable_goal_adjustment', True)
         self.declare_parameter('position_search_radius', 0.75)
         self.declare_parameter('position_search_step', 0.10)
@@ -86,6 +96,18 @@ class RvizGoalBridge(Node):
         costmap_topic = str(self.get_parameter('costmap_topic').value)
         adjusted_goal_topic = str(
             self.get_parameter('adjusted_goal_topic').value
+        )
+        adjusted_start_topic = str(
+            self.get_parameter('adjusted_start_topic').value
+        )
+        self.robot_base_frame = str(
+            self.get_parameter('robot_base_frame').value
+        )
+        self.start_transform_timeout = float(
+            self.get_parameter('start_transform_timeout').value
+        )
+        self.enable_start_adjustment = bool(
+            self.get_parameter('enable_start_adjustment').value
         )
         self.planner_id = str(self.get_parameter('planner_id').value)
         self.controller_id = str(
@@ -123,6 +145,9 @@ class RvizGoalBridge(Node):
         )
         self._validate_parameters()
 
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         # This bridge intentionally keeps goal selection graphical: users can
         # choose both position and final heading with RViz's 2D Goal Pose tool
         # instead of manually composing a ComputePathToPose action request.
@@ -143,10 +168,20 @@ class RvizGoalBridge(Node):
             self._costmap_callback,
             costmap_qos,
         )
+        adjusted_pose_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
         self.adjusted_goal_publisher = self.create_publisher(
             PoseStamped,
             adjusted_goal_topic,
-            10,
+            adjusted_pose_qos,
+        )
+        self.adjusted_start_publisher = self.create_publisher(
+            PoseStamped,
+            adjusted_start_topic,
+            adjusted_pose_qos,
         )
         self.compute_path_client = ActionClient(
             self,
@@ -194,6 +229,9 @@ class RvizGoalBridge(Node):
         self.active_planning_goal_handle = None
         self.active_control_goal_handle = None
         self.control_path = None
+        self.start_candidate = None
+        self.start_candidates = []
+        self.planning_pairs = []
         self.control_requested = False
         self.control_paused = False
         self.search_generation = 0
@@ -225,6 +263,10 @@ class RvizGoalBridge(Node):
             raise ValueError('orientation_score_weight must be non-negative')
         if self.max_planning_attempts <= 0:
             raise ValueError('max_planning_attempts must be positive')
+        if not self.robot_base_frame:
+            raise ValueError('robot_base_frame must not be empty')
+        if self.start_transform_timeout < 0.0:
+            raise ValueError('start_transform_timeout must be non-negative')
         if self.footprint_half_length <= 0.0:
             raise ValueError('footprint_length must be positive')
         if self.footprint_half_width <= 0.0:
@@ -339,6 +381,9 @@ class RvizGoalBridge(Node):
         self.search_generation += 1
         generation = self.search_generation
         self.control_path = None
+        self.start_candidate = None
+        self.start_candidates = []
+        self.planning_pairs = []
         self.control_requested = False
         self.control_paused = False
         if self.active_planning_goal_handle is not None:
@@ -348,24 +393,60 @@ class RvizGoalBridge(Node):
             self.active_control_goal_handle.cancel_goal_async()
             self.active_control_goal_handle = None
 
-        candidates = self._build_candidates(pose)
-        if self.costmap is not None:
-            candidates = [
-                candidate for candidate in candidates
-                if self._is_footprint_free(candidate.pose)
-            ]
-        else:
+        if self.costmap is None or not self.costmap.header.frame_id:
             self.get_logger().warning(
-                'Global costmap not received yet; candidate collision '
-                'filtering is unavailable.'
+                'Global costmap not received yet; cannot validate the '
+                'planning start pose.'
             )
+            self._publish_control_state(
+                'ERROR: global costmap unavailable for start validation'
+            )
+            return
+
+        robot_pose = self._lookup_robot_pose(self.costmap.header.frame_id)
+        if robot_pose is None:
+            self._publish_control_state(
+                'ERROR: base_link pose unavailable for planning'
+            )
+            return
+
+        self.start_candidates = self._find_valid_start_candidates(robot_pose)
+        if not self.start_candidates:
+            self.get_logger().error(
+                'No collision-free start pose found near the robot.'
+            )
+            self._publish_control_state(
+                'ERROR: no valid planning start near base_link'
+            )
+            return
+
+        candidates = self._build_candidates(
+            pose,
+            self.enable_goal_adjustment,
+        )
+        candidates = [
+            candidate for candidate in candidates
+            if self._is_footprint_free(candidate.pose)
+        ]
 
         self.candidates = candidates
+        self.planning_pairs = self._build_planning_pairs(
+            len(self.start_candidates),
+            len(self.candidates),
+            self.max_planning_attempts,
+        )
         self.candidate_index = 0
         self.planning_attempts = 0
         self._publish_control_state('PLANNING: searching for a feasible path')
 
         requested_yaw = self._quaternion_to_yaw(pose.pose.orientation)
+        self.get_logger().info(
+            'Searching a feasible planning start near base_link: '
+            f'frame={robot_pose.header.frame_id}, '
+            f'x={robot_pose.pose.position.x:.3f}, '
+            f'y={robot_pose.pose.position.y:.3f}, '
+            f'collision-free candidates={len(self.start_candidates)}.'
+        )
         self.get_logger().info(
             'Searching a feasible RViz goal near: '
             f'frame={pose.header.frame_id}, '
@@ -376,9 +457,70 @@ class RvizGoalBridge(Node):
         )
         self._send_next_candidate(generation)
 
-    def _build_candidates(self, requested: PoseStamped):
+    def _lookup_robot_pose(self, target_frame: str):
+        """Return the latest base-link pose expressed in the map frame."""
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                target_frame,
+                self.robot_base_frame,
+                Time(),
+                timeout=Duration(seconds=self.start_transform_timeout),
+            )
+        except TransformException as exc:
+            self.get_logger().error(
+                f'Cannot transform {self.robot_base_frame} into '
+                f'{target_frame}: {exc}'
+            )
+            return None
+
+        pose = PoseStamped()
+        pose.header.frame_id = target_frame
+        pose.header.stamp = transform.header.stamp
+        pose.pose.position.x = transform.transform.translation.x
+        pose.pose.position.y = transform.transform.translation.y
+        pose.pose.position.z = transform.transform.translation.z
+        pose.pose.orientation = copy.deepcopy(transform.transform.rotation)
+        return pose
+
+    def _find_valid_start_candidates(self, robot_pose: PoseStamped):
+        """Return collision-free starts ordered by deviation from base_link."""
+        candidates = self._build_candidates(
+            robot_pose,
+            self.enable_start_adjustment,
+        )
+        return [
+            candidate for candidate in candidates
+            if self._is_footprint_free(candidate.pose)
+        ]
+
+    @staticmethod
+    def _build_planning_pairs(
+        start_count: int,
+        goal_count: int,
+        attempt_limit: int,
+    ):
+        """Pair nearby starts and goals while preferring the exact start."""
+        pairs = []
+        diagonal = 0
+        max_diagonal = start_count + goal_count - 2
+        while len(pairs) < attempt_limit and diagonal <= max_diagonal:
+            for start_index in range(diagonal + 1):
+                goal_index = diagonal - start_index
+                if start_index >= start_count or goal_index >= goal_count:
+                    continue
+                pairs.append((start_index, goal_index))
+                if len(pairs) >= attempt_limit:
+                    break
+            diagonal += 1
+        return pairs
+
+    def _build_candidates(
+        self,
+        requested: PoseStamped,
+        adjustment_enabled: bool,
+    ):
         """Create nearby poses ordered by position and heading changes."""
-        if not self.enable_goal_adjustment:
+        if not adjustment_enabled:
             return [GoalCandidate(copy.deepcopy(requested), 0.0, 0.0, 0.0)]
 
         positions = [(0.0, 0.0, 0.0)]
@@ -534,33 +676,37 @@ class RvizGoalBridge(Node):
         """Send candidates sequentially until SMAC accepts one."""
         if generation != self.search_generation:
             return
-        if self.planning_attempts >= self.max_planning_attempts:
+        if self.candidate_index >= len(self.planning_pairs):
             self.get_logger().warning(
-                'No feasible adjusted goal found after '
+                'No feasible start/goal pair found after '
                 f'{self.planning_attempts} planning attempts.'
             )
-            return
-        if self.candidate_index >= len(self.candidates):
-            self.get_logger().warning(
-                'No collision-free goal candidate produced a valid path.'
+            self._publish_control_state(
+                'ERROR: no feasible planning start/goal pair found'
             )
             return
 
-        candidate = self.candidates[self.candidate_index]
+        start_index, goal_index = self.planning_pairs[self.candidate_index]
         self.candidate_index += 1
         self.planning_attempts += 1
+        start_candidate = self.start_candidates[start_index]
+        candidate = self.candidates[goal_index]
         candidate.pose.header.stamp = self.get_clock().now().to_msg()
 
         request = ComputePathToPose.Goal()
+        request.start = copy.deepcopy(start_candidate.pose)
+        request.start.header.stamp = self.get_clock().now().to_msg()
         request.goal = candidate.pose
         request.planner_id = self.planner_id
-        request.use_start = False
+        request.use_start = True
         future = self.compute_path_client.send_goal_async(request)
         future.add_done_callback(
             lambda response, current_generation=generation,
+            current_start=start_candidate,
             current_candidate=candidate: self._goal_response_callback(
                 response,
                 current_generation,
+                current_start,
                 current_candidate,
             )
         )
@@ -569,6 +715,7 @@ class RvizGoalBridge(Node):
         self,
         future,
         generation: int,
+        start_candidate: GoalCandidate,
         candidate: GoalCandidate,
     ) -> None:
         """Monitor an accepted candidate or continue the recovery search."""
@@ -595,10 +742,12 @@ class RvizGoalBridge(Node):
         result_future.add_done_callback(
             lambda result, handle=goal_handle,
             current_generation=generation,
+            current_start=start_candidate,
             current_candidate=candidate: self._result_callback(
                 result,
                 handle,
                 current_generation,
+                current_start,
                 current_candidate,
             )
         )
@@ -608,6 +757,7 @@ class RvizGoalBridge(Node):
         future,
         goal_handle,
         generation: int,
+        start_candidate: GoalCandidate,
         candidate: GoalCandidate,
     ) -> None:
         """Publish the closest successful pose or try the next candidate."""
@@ -626,6 +776,10 @@ class RvizGoalBridge(Node):
             return
 
         if response.status == GoalStatus.STATUS_SUCCEEDED:
+            self.start_candidate = start_candidate
+            selected_start = copy.deepcopy(start_candidate.pose)
+            selected_start.header.stamp = self.get_clock().now().to_msg()
+            self.adjusted_start_publisher.publish(selected_start)
             candidate.pose.header.stamp = self.get_clock().now().to_msg()
             self.adjusted_goal_publisher.publish(candidate.pose)
             pose_count = len(response.result.path.poses)
@@ -634,7 +788,11 @@ class RvizGoalBridge(Node):
                 f'{pose_count} path poses, '
                 f'position adjustment={candidate.position_delta:.3f} m, '
                 f'angle adjustment={math.degrees(candidate.angle_delta):.1f} '
-                f'deg, attempts={self.planning_attempts}.'
+                f'deg, start position adjustment='
+                f'{start_candidate.position_delta:.3f} m, '
+                f'start angle adjustment='
+                f'{math.degrees(start_candidate.angle_delta):.1f} deg, '
+                f'attempts={self.planning_attempts}.'
             )
             self.control_path = copy.deepcopy(response.result.path)
             self._publish_control_state(

@@ -83,6 +83,10 @@ def generate_launch_description():
             'auto_start_control': False,
             'costmap_topic': '/global_costmap/costmap',
             'adjusted_goal_topic': '/adjusted_goal_pose',
+            'adjusted_start_topic': '/adjusted_start_pose',
+            'robot_base_frame': 'base_link',
+            'start_transform_timeout': 0.20,
+            'enable_start_adjustment': True,
             # Search a wider spatial neighborhood while using a coarser ring
             # step and a bounded number of SMAC requests for the Jetson Nano.
             'enable_goal_adjustment': True,
