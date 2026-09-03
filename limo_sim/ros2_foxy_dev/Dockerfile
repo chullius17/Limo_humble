@@ -38,12 +38,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-foxy-gazebo-ros-pkgs \
     ros-foxy-robot-localization \
     ros-foxy-rqt-robot-steering \
+    ros-foxy-nav2-map-server \
+    ros-foxy-nav2-lifecycle-manager \
     ros-foxy-xacro \
     python3-rosdep \
     python3-vcstool \
     python3-colcon-common-extensions \
     python3-argcomplete \
     python3-opencv \
+    python3-scipy \
     libopencv-dev \
     libusb-1.0-0-dev \
     libudev-dev \
@@ -51,6 +54,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglu1-mesa \
     mesa-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# ONNX Runtime 1.10 is compatible with Foxy's Python 3.8 and the pipeline model.
+RUN python3 -m pip install --no-cache-dir onnxruntime==1.10.0
 
 # Initialize rosdep and automatically source Foxy in interactive shells.
 RUN rosdep init || true
