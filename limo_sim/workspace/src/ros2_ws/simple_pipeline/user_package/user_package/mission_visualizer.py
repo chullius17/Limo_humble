@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import rclpy
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node
 
 import numpy as np
@@ -22,6 +23,8 @@ class MissionVisualizer(Node):
 
         self.declare_parameter('grid_spacing_m', 1.0)
         self.grid_spacing_m = self.get_parameter('grid_spacing_m').value
+        self.declare_parameter('render_rate_hz', 4.0)
+        render_rate_hz = float(self.get_parameter('render_rate_hz').value)
 
         map_qos_profile = QoSProfile(
             depth=1,
@@ -120,7 +123,12 @@ class MissionVisualizer(Node):
         self.map_received = False
         self.tf_received = False
 
-        self.create_timer(0.1, self.render)
+        self.render_callback_group = MutuallyExclusiveCallbackGroup()
+        self.create_timer(
+            1.0 / max(render_rate_hz, 0.1),
+            self.render,
+            callback_group=self.render_callback_group,
+        )
 
     def queued_goals_cb(self, msg):
         self.queued_goals = msg.poses
@@ -147,14 +155,19 @@ class MissionVisualizer(Node):
     def goals_cb(self, msg):
         self.get_logger().info(f"Received {len(msg.poses)} input goals.")
         self.goals = msg.poses
+        # A new input-goal message marks the beginning of a new mission.
+        self.goals_astar = []
+        self.paths = []
 
     def goals_astar_cb(self, msg):
         self.get_logger().info(f"Received {len(msg.poses)} A* goals.")
         self.goals_astar = msg.poses
-        self.paths = []  # Reset paths when a new mission arrives.
 
     def path_cb(self, msg):
-        self.paths.append(msg.poses)  # accumula invece di sovrascrivere
+        self.paths.append(msg.poses)
+        self.get_logger().info(
+            f"Received path segment with {len(msg.poses)} poses."
+        )
 
     def ref_cb(self, msg):
         self.ref_pt = msg.pose
@@ -386,10 +399,11 @@ class MissionVisualizer(Node):
         img_msg.header.frame_id = 'map'
         img_msg.height = img.shape[0]
         img_msg.width = img.shape[1]
-        img_msg.encoding = 'bgr8'
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_msg.encoding = 'rgb8'
         img_msg.is_bigendian = 0
-        img_msg.step = img.shape[1] * 3
-        img_msg.data = img.tobytes()
+        img_msg.step = rgb_img.shape[1] * 3
+        img_msg.data = rgb_img.tobytes()
 
         self.image_pub.publish(img_msg)
 

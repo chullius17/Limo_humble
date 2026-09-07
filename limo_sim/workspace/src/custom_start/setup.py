@@ -17,9 +17,10 @@ setup(
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
         (os.path.join('share', package_name, 'config'), glob('config/*.rviz')),
         (os.path.join('share', package_name, 'worlds'), glob('worlds/*')),
+        # Install all files contained in the nested Gazebo model directories.
         *[
             (os.path.join('share', package_name, os.path.dirname(path)), [path])
-            for path in glob('models/**/*', recursive=True) # ** in order to search recursively folders at every level
+            for path in glob('models/**/*', recursive=True)
             if os.path.isfile(path)
         ],
     ],
@@ -27,7 +28,7 @@ setup(
     zip_safe=True,
     maintainer='root',
     maintainer_email='root@todo.todo',
-    description='Launch the LIMO Ackermann simulation in the custom circuit.',
+    description='Launch the simulated or physical LIMO Ackermann robot.',
     license='Apache-2.0',
     extras_require={
         'test': [

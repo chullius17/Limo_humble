@@ -14,6 +14,7 @@ class Mapper(Node):
     CHANNELS = {
         'TURQUOISE': 'turquoise',
         'WHITE': 'white',
+        'MAGENTA': 'magenta',
     }
 
     def __init__(self):

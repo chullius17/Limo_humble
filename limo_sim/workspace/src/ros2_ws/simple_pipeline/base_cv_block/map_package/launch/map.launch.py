@@ -41,6 +41,17 @@ def generate_launch_description():
         }]
     )
 
+    mapper_magenta = Node(
+        package='map_package',
+        executable='mapper',
+        name='mapper_magenta',
+        output='screen',
+        parameters=[{
+            'color': 'MAGENTA',
+            **mapper_roi,
+        }]
+    )
+
     display_node = Node(
         package='map_package',
         executable='map_display',
@@ -62,6 +73,7 @@ def generate_launch_description():
         costmap,
         mapper_turquoise,
         mapper_white,
+        mapper_magenta,
         display_node,
         saver_node
     ])

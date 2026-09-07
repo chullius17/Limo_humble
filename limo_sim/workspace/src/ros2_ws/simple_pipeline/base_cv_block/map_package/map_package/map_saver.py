@@ -33,6 +33,7 @@ class MapSaver(Node):
         self.declare_parameter('view_resolution',     0.02)     
         self.declare_parameter('turquoise_factor',    0.6)
         self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('magenta_factor',      1.0)
         self.declare_parameter('canvas_size_meters',  15.0)
         self.declare_parameter('robot_frame',         'base_link')
         self.declare_parameter('save_directory',      '')
@@ -48,6 +49,7 @@ class MapSaver(Node):
         self.view_resolution    = self.get_parameter('view_resolution').value
         self.turquoise_factor   = self.get_parameter('turquoise_factor').value
         self.white_factor       = self.get_parameter('white_factor').value
+        self.magenta_factor     = self.get_parameter('magenta_factor').value
         self.canvas_size_meters = self.get_parameter('canvas_size_meters').value
         save_directory          = self.get_parameter('save_directory').value
 
@@ -60,11 +62,13 @@ class MapSaver(Node):
         # Storage for incoming occupancy grid messages
         self.map_data_turquoise = None
         self.map_data_white = None
+        self.map_data_magenta = None
 
         # --- SUBSCRIPTIONS ---
         self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_turquoise', self.turquoise_map_callback, 10)
         self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_white', self.white_map_callback, 10)
-        self.get_logger().info('Subscribing to TURQUOISE and WHITE maps')
+        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_magenta', self.magenta_map_callback, 10)
+        self.get_logger().info('Subscribing to TURQUOISE, WHITE and MAGENTA maps')
 
         # Pre-allocation of the OccupancyGrid message to optimize CPU usage
         self.grid_msg_combined = self.get_default_occupancy_grid()
@@ -114,6 +118,10 @@ class MapSaver(Node):
 
     def white_map_callback(self, msg: OccupancyGrid):
         self.map_data_white = msg
+        self.update_and_publish_map()
+
+    def magenta_map_callback(self, msg: OccupancyGrid):
+        self.map_data_magenta = msg
         self.update_and_publish_map()
 
     def _project_grid_layer_optimized(self, m: OccupancyGrid,
@@ -179,6 +187,7 @@ class MapSaver(Node):
         if all(m is None for m in (
             self.map_data_turquoise,
             self.map_data_white,
+            self.map_data_magenta,
         )):
             return
 
@@ -190,6 +199,8 @@ class MapSaver(Node):
             self._project_grid_layer_optimized(self.map_data_turquoise, self.global_canvas, self.seen_canvas, self.turquoise_factor)
         if self.map_data_white is not None:
             self._project_grid_layer_optimized(self.map_data_white, self.global_canvas, self.seen_canvas, self.white_factor)
+        if self.map_data_magenta is not None:
+            self._project_grid_layer_optimized(self.map_data_magenta, self.global_canvas, self.seen_canvas, self.magenta_factor)
 
         grid_data = np.where(self.seen_canvas,
                              np.clip(self.global_canvas, 0, 100),

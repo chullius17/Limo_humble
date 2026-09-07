@@ -28,6 +28,7 @@ class MapDisplay(Node):
         self.declare_parameter('view_range_m',        3.0)      # Semi-side of ego canvas
         self.declare_parameter('turquoise_factor',    0.6)
         self.declare_parameter('white_factor',        0.3)
+        self.declare_parameter('magenta_factor',      1.0)
         self.declare_parameter('enable_telemetry',    True)
 
         self.set_parameters([rclpy.parameter.Parameter('use_sim_time',
@@ -40,6 +41,7 @@ class MapDisplay(Node):
         self.view_range_m       = self.get_parameter('view_range_m').value
         self.turquoise_factor   = self.get_parameter('turquoise_factor').value
         self.white_factor       = self.get_parameter('white_factor').value
+        self.magenta_factor     = self.get_parameter('magenta_factor').value
         self.debug_telemetry    = self.get_parameter('enable_telemetry').value
 
         # Dynamic canvas dimensions based on chosen resolutions
@@ -52,11 +54,13 @@ class MapDisplay(Node):
         # Storage for incoming occupancy grid messages
         self.map_data_turquoise = None
         self.map_data_white = None
+        self.map_data_magenta = None
 
         # --- SUBSCRIPTIONS WITH ROI PROJECTORS ---
         self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_turquoise', self.turquoise_map_callback, 10)
         self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_white', self.white_map_callback, 10)
-        self.get_logger().info('Subscribing to TURQUOISE and WHITE maps')
+        self.create_subscription(OccupancyGrid, '/limo/map_package/mapper/map_paper_magenta', self.magenta_map_callback, 10)
+        self.get_logger().info('Subscribing to TURQUOISE, WHITE and MAGENTA maps')
 
         # --- COMBINED IMAGE PUBLISHERS ---
         self.firstp_img_pub         = self.create_publisher(Image, '/limo/map_package/map_display/map_firstp_combined', 10)
@@ -93,6 +97,9 @@ class MapDisplay(Node):
 
     def white_map_callback(self, msg: OccupancyGrid):
         self.map_data_white = msg
+
+    def magenta_map_callback(self, msg: OccupancyGrid):
+        self.map_data_magenta = msg
 
     # ------------------------------------------------------------------
 
@@ -139,6 +146,7 @@ class MapDisplay(Node):
         if all(m is None for m in (
             self.map_data_turquoise,
             self.map_data_white,
+            self.map_data_magenta,
         )):
             return
 
@@ -168,6 +176,8 @@ class MapDisplay(Node):
             self._project_grid_layer_optimized(self.map_data_turquoise, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.turquoise_factor)
         if self.map_data_white is not None:
             self._project_grid_layer_optimized(self.map_data_white, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.white_factor)
+        if self.map_data_magenta is not None:
+            self._project_grid_layer_optimized(self.map_data_magenta, robot_x, robot_y, cos_y, sin_y, ego_canvas, seen_canvas, self.magenta_factor)
 
         t_ego_done = time.perf_counter()
 

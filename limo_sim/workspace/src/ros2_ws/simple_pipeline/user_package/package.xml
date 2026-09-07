@@ -26,6 +26,8 @@
   <!-- Nodes and launch files started by the application launchers -->
   <exec_depend>ai_limo_rviz</exec_depend>
   <exec_depend>ai_traj_package</exec_depend>
+  <exec_depend>limo_rviz</exec_depend>
+  <exec_depend>traj_package</exec_depend>
   <exec_depend>limo_controller</exec_depend>
 
   <!-- Python GUI / plotting -->

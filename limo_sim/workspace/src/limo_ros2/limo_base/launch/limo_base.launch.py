@@ -21,6 +21,8 @@ def generate_launch_description():
                                                 description='Base link frame id')
     odom_topic_arg = DeclareLaunchArgument('odom_topic_name', default_value='odom',
                                            description='Odometry topic name')
+    imu_topic_arg = DeclareLaunchArgument('imu_topic_name', default_value='/imu',
+                                          description='IMU topic name')
     odom_tf_arg = DeclareLaunchArgument('pub_odom_tf', default_value='True',
                                            description='Odometry topic name')
 
@@ -39,6 +41,9 @@ def generate_launch_description():
         executable='limo_base',  #foxy executable='limo_base',
         output='screen',
         emulate_tty=True,
+        remappings=[
+            ('/imu', launch.substitutions.LaunchConfiguration('imu_topic_name')),
+        ],
         parameters=[{
                 # 'use_sim_time': launch.substitutions.LaunchConfiguration('use_sim_time'),
                 'port_name': launch.substitutions.LaunchConfiguration('port_name'),                
@@ -58,6 +63,7 @@ def generate_launch_description():
         odom_frame_arg,
         base_link_frame_arg,
         odom_topic_arg,
+        imu_topic_arg,
         odom_tf_arg,
         # is_scout_mini_arg,
         # is_omni_wheel_arg,
