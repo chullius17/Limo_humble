@@ -224,6 +224,15 @@ install(FILES openni2_redist/${HOST_PLATFORM}/libOpenNI2.so
   DESTINATION lib/
   )
 
+# The bundled OpenNI2 library advertises the SONAME libOpenNI2.so.0. Install
+# that runtime name as well, otherwise the loader can silently select an
+# incompatible system OpenNI2 library even though this package linked against
+# the bundled Orbbec build.
+install(FILES openni2_redist/${HOST_PLATFORM}/libOpenNI2.so
+  DESTINATION lib/
+  RENAME libOpenNI2.so.0
+  )
+
 install(DIRECTORY openni2_redist/${HOST_PLATFORM}/OpenNI2
   DESTINATION lib/
   )

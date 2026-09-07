@@ -26,6 +26,12 @@ def generate_launch_description():
     port_name = LaunchConfiguration('port_name')
     use_lidar = LaunchConfiguration('use_lidar')
     use_camera = LaunchConfiguration('use_camera')
+    camera_x = LaunchConfiguration('camera_x')
+    camera_y = LaunchConfiguration('camera_y')
+    camera_z = LaunchConfiguration('camera_z')
+    camera_roll = LaunchConfiguration('camera_roll')
+    camera_pitch = LaunchConfiguration('camera_pitch')
+    camera_yaw = LaunchConfiguration('camera_yaw')
     open_rviz = LaunchConfiguration('open_rviz')
 
     limo_base = IncludeLaunchDescription(
@@ -60,6 +66,19 @@ def generate_launch_description():
         condition=IfCondition(use_lidar),
     )
 
+    camera_mount_transform = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_link_to_camera',
+        condition=IfCondition(use_camera),
+        arguments=[
+            camera_x, camera_y, camera_z,
+            # Foxy uses the legacy positional order: yaw, pitch, roll.
+            camera_yaw, camera_pitch, camera_roll,
+            'base_link', 'camera_link',
+        ],
+    )
+
     camera = GroupAction(
         condition=IfCondition(use_camera),
         actions=[
@@ -88,7 +107,7 @@ def generate_launch_description():
                     PathJoinSubstitution([
                         FindPackageShare('astra_camera'),
                         'launch',
-                        'astra.launch.xml',
+                        'dabai_u3.launch.xml',
                     ])
                 ),
                 launch_arguments={
@@ -97,7 +116,7 @@ def generate_launch_description():
                     'color_height': '480',
                     'color_fps': '20',
                     'depth_width': '640',
-                    'depth_height': '480',
+                    'depth_height': '400',
                     'depth_fps': '20',
                     'enable_point_cloud': 'true',
                 }.items(),
@@ -140,12 +159,37 @@ def generate_launch_description():
             description='Start the physical Astra depth camera.',
         ),
         DeclareLaunchArgument(
+            'camera_x', default_value='0.10',
+            description='Camera X offset from base_link in metres.',
+        ),
+        DeclareLaunchArgument(
+            'camera_y', default_value='0.0',
+            description='Camera Y offset from base_link in metres.',
+        ),
+        DeclareLaunchArgument(
+            'camera_z', default_value='0.065',
+            description='Camera Z offset from base_link in metres.',
+        ),
+        DeclareLaunchArgument(
+            'camera_roll', default_value='0.0',
+            description='Camera roll relative to base_link in radians.',
+        ),
+        DeclareLaunchArgument(
+            'camera_pitch', default_value='0.0',
+            description='Camera pitch relative to base_link in radians.',
+        ),
+        DeclareLaunchArgument(
+            'camera_yaw', default_value='0.0',
+            description='Camera yaw relative to base_link in radians.',
+        ),
+        DeclareLaunchArgument(
             'open_rviz', default_value='false',
             description='Start RViz.',
         ),
         limo_base,
         imu_transform,
         lidar,
+        camera_mount_transform,
         camera,
         ekf,
         rviz,
