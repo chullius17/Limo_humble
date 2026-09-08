@@ -46,6 +46,9 @@ def generate_launch_description():
             'imu_topic_name': '/limo/imu',
             # The EKF is the only publisher of odom -> base_link.
             'pub_odom_tf': 'false',
+            # This chassis reports mode 2 even after its mechanical Ackermann
+            # conversion, so force the matching Twist-to-steering conversion.
+            'motion_mode': '1',
         }.items(),
     )
 

@@ -25,6 +25,9 @@ def generate_launch_description():
                                           description='IMU topic name')
     odom_tf_arg = DeclareLaunchArgument('pub_odom_tf', default_value='True',
                                            description='Odometry topic name')
+    motion_mode_arg = DeclareLaunchArgument(
+        'motion_mode', default_value='-1',
+        description='Override chassis motion mode: -1 auto, 0 differential, 1 Ackermann, 2 Mecanum')
 
     # is_scout_mini_arg = DeclareLaunchArgument('is_scout_mini', default_value='false',
     #                                       description='Scout mini model')
@@ -54,6 +57,7 @@ def generate_launch_description():
                 # 'is_omni_wheel': launch.substitutions.LaunchConfiguration('is_omni_wheel'),
                 # 'simulated_robot': launch.substitutions.LaunchConfiguration('simulated_robot'),
                 'pub_odom_tf': launch.substitutions.LaunchConfiguration('pub_odom_tf'),
+                'motion_mode': launch.substitutions.LaunchConfiguration('motion_mode'),
                 'control_rate': launch.substitutions.LaunchConfiguration('control_rate'),
         }])
 
@@ -65,6 +69,7 @@ def generate_launch_description():
         odom_topic_arg,
         imu_topic_arg,
         odom_tf_arg,
+        motion_mode_arg,
         # is_scout_mini_arg,
         # is_omni_wheel_arg,
         # simulated_robot_arg,

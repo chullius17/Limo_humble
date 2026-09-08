@@ -125,6 +125,7 @@ private:
 
     ImuData imu_data_;
     uint8_t motion_mode_;  // current motion type
+    int64_t motion_mode_override_ = -1;  // -1: use the mode reported by the chassis
 
     static constexpr double max_inner_angle_ = 0.48869;  // 28 degree
     static constexpr double track_ = 0.172;           // m (left right wheel distance)

@@ -4,9 +4,9 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image
+import cv2
 from cv_bridge import CvBridge
 import numpy as np
-import cv2
 import math
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 

@@ -41,6 +41,7 @@ LimoDriver::LimoDriver(std::string node_name):rclcpp::Node(node_name),keep_runni
     this->declare_parameter("base_frame");
     this->declare_parameter("pub_odom_tf");
     this->declare_parameter("use_mcnamu");
+    this->declare_parameter("motion_mode");
     this->declare_parameter("control_rate");  
 
     this->get_parameter_or<std::string>("port_name", port_name, "ttyTHS1");//获取参数
@@ -48,15 +49,22 @@ LimoDriver::LimoDriver(std::string node_name):rclcpp::Node(node_name),keep_runni
     this->get_parameter_or<std::string>("base_frame", base_frame_, "base_link");
     this->get_parameter_or<bool>("pub_odom_tf", pub_odom_tf_, "false");
     this->get_parameter_or<bool>("use_mcnamu", use_mcnamu_, "false");
+    this->get_parameter_or<int64_t>("motion_mode", motion_mode_override_, -1);
 
     std::cout << "Loading parameters: " << std::endl;
     std::cout << "- port name: " << port_name << std::endl;
     std::cout << "- odom frame name: " << odom_frame_ << std::endl;
     std::cout << "- base frame name: " << base_frame_ << std::endl;
     std::cout << "- odom topic name: " << pub_odom_tf_ << std::endl;
+    if (motion_mode_override_ >= MODE_FOUR_DIFF &&
+        motion_mode_override_ <= MODE_MCNAMU) {
+        RCLCPP_INFO_STREAM(this->get_logger(),
+                           "Command motion mode override: " << motion_mode_override_);
+    }
         
     if(use_mcnamu_) {
         motion_mode_ = MODE_MCNAMU;
+        motion_mode_override_ = MODE_MCNAMU;
     }
     tf_broadcaster_=std::make_shared<tf2_ros::TransformBroadcaster>(*this);
     odom_publisher_=this->create_publisher<nav_msgs::msg::Odometry>("/odom",50);
@@ -427,12 +435,31 @@ void LimoDriver::sendFrame(const LimoFrame& frame) {
 }
 void LimoDriver::twistCmdCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
 {
-    switch (motion_mode_) {
+    // Keep motion_mode_ as raw chassis feedback, but allow the command
+    // conversion to be selected independently for mechanically converted
+    // robots whose firmware keeps reporting a stale mode.
+    int64_t configured_mode = -1;
+    this->get_parameter_or<int64_t>("motion_mode", configured_mode, -1);
+    const uint8_t command_motion_mode =
+        configured_mode >= MODE_FOUR_DIFF && configured_mode <= MODE_MCNAMU
+            ? static_cast<uint8_t>(configured_mode)
+            : motion_mode_;
+
+    switch (command_motion_mode) {
         case MODE_FOUR_DIFF: {
             setMotionCommand(msg->linear.x, msg->angular.z, 0, 0);
             break;
         }
         case MODE_ACKERMANN: {
+            if (std::fabs(msg->linear.x) < 1e-6) {
+                setMotionCommand(0, 0, 0, 0);
+                break;
+            }
+            if (std::fabs(msg->angular.z) < 1e-6) {
+                setMotionCommand(msg->linear.x, 0, 0, 0);
+                break;
+            }
+
             double r = msg->linear.x / msg->angular.z;
             if(fabs(r) < track_/2.0)
             {
@@ -454,7 +481,7 @@ void LimoDriver::twistCmdCallback(const geometry_msgs::msg::Twist::SharedPtr msg
                 steering_angle = inner_angle / right_angle_scale_;
             }
             else {
-                steering_angle = inner_angle / right_angle_scale_;
+                steering_angle = inner_angle / left_angle_scale_;
             }
 
             setMotionCommand(msg->linear.x, 0, 0, steering_angle);
@@ -668,5 +695,3 @@ double LimoDriver::convertCentralAngleToInner(double central_angle) {
 }
 
 }
-
-

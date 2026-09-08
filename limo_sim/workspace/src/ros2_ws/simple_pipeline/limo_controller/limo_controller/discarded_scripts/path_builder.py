@@ -5,9 +5,9 @@ from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid, Path
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseStamped
+import cv2
 from cv_bridge import CvBridge
 import numpy as np
-import cv2
 import json
 from tf2_ros import Buffer, TransformListener
 import math
