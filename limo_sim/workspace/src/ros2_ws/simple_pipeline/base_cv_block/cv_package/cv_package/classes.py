@@ -23,6 +23,7 @@ class Classification(Node):
         self.declare_parameter('debug_topic', 'limo/cv_package/classification/debug/raw')
         self.declare_parameter('output_topic', 'limo/cv_package/classification/output/raw')
         self.declare_parameter('blue_distance_threshold_px', 8.0)
+        self.declare_parameter('blue_max_distance_threshold_px', 16.0)
         self.declare_parameter('magenta_distance_threshold_px', 8.0)
         self.declare_parameter('color_tolerance', 30)
 
@@ -56,6 +57,7 @@ class Classification(Node):
         cls,
         image: np.ndarray,
         blue_distance_threshold_px: float,
+        blue_max_distance_threshold_px: float,
         magenta_distance_threshold_px: float,
         color_tolerance: int,
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -74,13 +76,21 @@ class Classification(Node):
                 cv2.DIST_L2,
                 cv2.DIST_MASK_PRECISE,
             )
-            far_white_mask = white_mask & (
+            eligible_white_mask = white_mask & (
+                distance_from_blue <= blue_max_distance_threshold_px
+            )
+            far_white_mask = eligible_white_mask & (
                 distance_from_blue > blue_distance_threshold_px
             )
+            discarded_white_mask = white_mask & (
+                distance_from_blue > blue_max_distance_threshold_px
+            )
         else:
-            far_white_mask = white_mask
+            far_white_mask = np.zeros_like(white_mask)
+            discarded_white_mask = white_mask
 
         debug_image = image.copy()
+        debug_image[discarded_white_mask] = 0
         debug_image[far_white_mask] = cls.MAGENTA_BGR
 
         # Apply the second distance transform to the first-pass image. Only
@@ -110,6 +120,10 @@ class Classification(Node):
             )
             output_image[close_white_mask] = cls.MAGENTA_BGR
 
+        # The propagation step must never reintroduce classifications beyond
+        # the maximum allowed distance from observed blue pixels.
+        output_image[discarded_white_mask] = 0
+
         return debug_image, output_image
 
     def image_callback(self, msg: Image) -> None:
@@ -122,6 +136,9 @@ class Classification(Node):
         blue_threshold_px = float(
             self.get_parameter('blue_distance_threshold_px').value
         )
+        blue_max_threshold_px = float(
+            self.get_parameter('blue_max_distance_threshold_px').value
+        )
         magenta_threshold_px = float(
             self.get_parameter('magenta_distance_threshold_px').value
         )
@@ -130,6 +147,12 @@ class Classification(Node):
         if blue_threshold_px < 0.0:
             self.get_logger().error(
                 'blue_distance_threshold_px must be non-negative'
+            )
+            return
+        if blue_max_threshold_px < blue_threshold_px:
+            self.get_logger().error(
+                'blue_max_distance_threshold_px must be greater than or '
+                'equal to blue_distance_threshold_px'
             )
             return
         if magenta_threshold_px < 0.0:
@@ -144,6 +167,7 @@ class Classification(Node):
         debug_image, output_image = self.classify_images(
             image,
             blue_distance_threshold_px=blue_threshold_px,
+            blue_max_distance_threshold_px=blue_max_threshold_px,
             magenta_distance_threshold_px=magenta_threshold_px,
             color_tolerance=tolerance,
         )

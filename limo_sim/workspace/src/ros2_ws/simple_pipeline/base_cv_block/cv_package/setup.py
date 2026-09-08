@@ -1,12 +1,12 @@
 from setuptools import setup
 import os
-from glob import glob  
+from glob import glob
 
 package_name = 'cv_package'
 
 setup(
     name=package_name,
-    version='0.0.0',
+    version='0.1.0',
     packages=[package_name],
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -26,6 +26,7 @@ setup(
             'lane_detector = cv_package.simple_detector:main',
             'boundaries = cv_package.simple_boundaries:main',
             'bev_node = cv_package.simple_bev:main',
+            'bev_and_clas = cv_package.bev_and_clas:main',
             'classification = cv_package.classes:main',
             'depth_correction = cv_package.depth_correction:main',
         ],

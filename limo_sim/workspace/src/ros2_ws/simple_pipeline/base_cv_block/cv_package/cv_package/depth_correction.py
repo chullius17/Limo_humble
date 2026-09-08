@@ -28,6 +28,9 @@ class DepthCorrection(Node):
         self.declare_parameter(
             'corrected_output_topic',
             'limo/cv_package/depth_correction/image_jet_corrected/raw')
+        self.declare_parameter(
+            'depth_output_topic',
+            'limo/cv_package/depth_correction/depth_corrected/raw')
         self.declare_parameter('plane_frame', 'camera_link')
         self.declare_parameter('output_width', 320)
         self.declare_parameter('output_height', 120)
@@ -41,6 +44,7 @@ class DepthCorrection(Node):
         output_topic = self.get_parameter('output_topic').value
         corrected_topic = self.get_parameter(
             'corrected_output_topic').value
+        depth_output_topic = self.get_parameter('depth_output_topic').value
         self.plane_frame = self.get_parameter('plane_frame').value
         self.output_width = int(self.get_parameter('output_width').value)
         self.output_height = int(self.get_parameter('output_height').value)
@@ -86,6 +90,8 @@ class DepthCorrection(Node):
             Image, output_topic, output_qos)
         self.corrected_publisher = self.create_publisher(
             Image, corrected_topic, output_qos)
+        self.depth_publisher = self.create_publisher(
+            Image, depth_output_topic, output_qos)
         self.info_subscription = self.create_subscription(
             CameraInfo,
             camera_info_topic,
@@ -96,7 +102,8 @@ class DepthCorrection(Node):
             Image, input_topic, self.depth_callback, sensor_qos)
 
         self.get_logger().info(
-            f'Listening on {input_topic}; publishing {output_topic} and '
+            f'Listening on {input_topic}; publishing metric depth on '
+            f'{depth_output_topic} and JET views on {output_topic} and '
             f'{corrected_topic} at {self.output_width}x{self.output_height}. '
             f'Waiting for {self.calibration_frames} calibration frames.')
 
@@ -284,6 +291,13 @@ class DepthCorrection(Node):
         output_msg.header = header
         publisher.publish(output_msg)
 
+    def publish_depth(self, depth, header):
+        """Publish corrected metric depth as a 32-bit floating-point image."""
+        output_msg = self.bridge.cv2_to_imgmsg(
+            depth.astype(np.float32, copy=False), encoding='32FC1')
+        output_msg.header = header
+        self.depth_publisher.publish(output_msg)
+
     def depth_callback(self, msg):
         """Crop, resize, calibrate if needed, then publish both views."""
         try:
@@ -323,6 +337,7 @@ class DepthCorrection(Node):
             fillable = missing & np.isfinite(self.depth_lut)
             completed[fillable] = self.depth_lut[fillable]
 
+        self.publish_depth(completed, msg.header)
         self.publish_image(
             self.corrected_publisher, self.colorize(completed), msg.header)
 

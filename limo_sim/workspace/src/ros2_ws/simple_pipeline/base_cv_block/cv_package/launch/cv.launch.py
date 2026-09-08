@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -12,6 +12,9 @@ def generate_launch_description():
     classification_magenta_distance_threshold_px = LaunchConfiguration(
         'classification_magenta_distance_threshold_px'
     )
+    classification_blue_max_distance_threshold_px = LaunchConfiguration(
+        'classification_blue_max_distance_threshold_px'
+    )
 
     classification_blue_distance_threshold = DeclareLaunchArgument(
         'classification_blue_distance_threshold_px',
@@ -22,6 +25,11 @@ def generate_launch_description():
         'classification_magenta_distance_threshold_px',
         default_value='10.0',
         description='Distance used to propagate the magenta classification',
+    )
+    classification_blue_max_distance_threshold = DeclareLaunchArgument(
+        'classification_blue_max_distance_threshold_px',
+        default_value='16.0',
+        description='Maximum blue distance; farther white is discarded',
     )
 
     lane_node = Node(
@@ -38,7 +46,7 @@ def generate_launch_description():
             }]
         )
 
-    boundary_node = Node( 
+    boundary_node = Node(
         package='cv_package',
         executable='boundaries',
         name='boundary_node',
@@ -46,33 +54,50 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[{
             'enable_telemetry': False,
-                'roi_y_min': 0.0,
+            'roi_y_min': 0.0,
             'roi_y_max': 1.0,
         }]
     )
 
-    bev_node = Node(
+    depth_correction_node = Node(
         package='cv_package',
-        executable='bev_node',
-        name='bev_node',
+        executable='depth_correction',
+        name='depth_correction',
         output='screen',
         emulate_tty=True,
         parameters=[{
-            'enable_telemetry': False,
-            'camera_info_topic': '/rgb/camera_info',
-            'depth_topic': '/depth_camera/depth/image_raw'
-        }]
+            'input_topic': '/depth_camera/depth/image_raw',
+            'camera_info_topic': '/depth_camera/depth/camera_info',
+        }],
     )
 
-    classification_node = Node(
+    bev_node = Node(
         package='cv_package',
-        executable='classification',
-        name='classification',
+        executable='bev_and_clas',
+        name='bev_and_clas',
         output='screen',
         emulate_tty=True,
         parameters=[{
+            'enable_telemetry': True,
+            'telemetry_window_size': 60,
+            'telemetry_log_interval_frames': 30,
+            'camera_info_topic': '/rgb/camera_info',
+            'depth_topic': (
+                'limo/cv_package/depth_correction/depth_corrected/raw'
+            ),
+            'input_crop_y_min': 0.5,
+            'bev_width': 600,
+            'bev_height': 300,
+            'bev_resolution': 0.01,
+            'projection_stride': 3,
+            'use_gpu': True,
+            'max_processing_fps': 12.0,
             'blue_distance_threshold_px': ParameterValue(
                 classification_blue_distance_threshold_px,
+                value_type=float,
+            ),
+            'blue_max_distance_threshold_px': ParameterValue(
+                classification_blue_max_distance_threshold_px,
                 value_type=float,
             ),
             'magenta_distance_threshold_px': ParameterValue(
@@ -92,15 +117,16 @@ def generate_launch_description():
     bev_trigger = RegisterEventHandler(
         OnProcessStart(
             target_action=boundary_node,
-            on_start=[bev_node]
+            on_start=[TimerAction(period=10.0, actions=[bev_node])]
         )
     )
 
     return LaunchDescription([
         classification_blue_distance_threshold,
+        classification_blue_max_distance_threshold,
         classification_magenta_distance_threshold,
         lane_node,
-        classification_node,
+        depth_correction_node,
         boundary_trigger,
         bev_trigger
     ])
