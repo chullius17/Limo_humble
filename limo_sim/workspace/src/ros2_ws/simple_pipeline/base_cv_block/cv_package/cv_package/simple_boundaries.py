@@ -18,7 +18,7 @@ class CurbDetector(Node):
         self.bridge = CvBridge()
 
         # ROI parameters for cropping
-        self.declare_parameter('roi_y_min', 0.5)
+        self.declare_parameter('roi_y_min', 0.0)
         self.declare_parameter('roi_y_max', 1.0)
         self.roi_y_min = self.get_parameter('roi_y_min').value
         self.roi_y_max = self.get_parameter('roi_y_max').value

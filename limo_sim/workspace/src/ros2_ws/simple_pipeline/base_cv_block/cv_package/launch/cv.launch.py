@@ -46,7 +46,7 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[{
             'enable_telemetry': False,
-            'roi_y_min': 0.5,
+                'roi_y_min': 0.0,
             'roi_y_max': 1.0,
         }]
     )

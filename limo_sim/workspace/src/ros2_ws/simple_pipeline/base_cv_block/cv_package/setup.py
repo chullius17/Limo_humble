@@ -27,6 +27,7 @@ setup(
             'boundaries = cv_package.simple_boundaries:main',
             'bev_node = cv_package.simple_bev:main',
             'classification = cv_package.classes:main',
+            'depth_correction = cv_package.depth_correction:main',
         ],
     },
 )
