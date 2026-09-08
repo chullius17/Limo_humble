@@ -18,9 +18,27 @@ class ColorLaneDetector(Node):
     def __init__(self):
         super().__init__('color_lane_detector')
 
+        # Accept the camera's best-effort stream and keep only its latest frame.
+        camera_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
+        # Reliable output remains compatible with image_view while limiting backlog.
+        output_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
         # ROS 2 Publishers
-        self.raw_mask_pub = self.create_publisher(Image, 'limo/cv_package/detection/lane_masks/raw', 10)
-        self.image_pub = self.create_publisher(Image, 'limo/cv_package/detection/lane_overlay/raw', 10)
+        self.raw_mask_pub = self.create_publisher(
+            Image, 'limo/cv_package/detection/lane_masks/raw', output_qos
+        )
+        self.image_pub = self.create_publisher(
+            Image, 'limo/cv_package/detection/lane_overlay/raw', output_qos
+        )
         
         self.bridge = CvBridge()
 
@@ -29,8 +47,9 @@ class ColorLaneDetector(Node):
         self.debug_telemetry = self.get_parameter('enable_telemetry').value
         self.frame_counter = 0
 
-        # Target processing size for low-latency operations
-        self.target_size = 300
+        # Lower half of the frame, published without vertical stretching.
+        self.output_size = (320, 120)
+        self.last_logged_resolution = None
 
         # HSV Threshold parameters for Yellow and Black colors
         self.yellow_lower = np.array([15, 80, 80], dtype=np.uint8)
@@ -39,13 +58,6 @@ class ColorLaneDetector(Node):
         self.black_lower = np.array([0, 0, 0], dtype=np.uint8)
         self.black_upper = np.array([180, 255, 150], dtype=np.uint8)
 
-        # Best effort QoS matching high-rate video streams
-        latest_frame_qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-        )
-
         # Subscriber to Limo's camera
         self.declare_parameter('rgb_topic', '/rgb/image_raw')
         self.camera_topic = self.get_parameter('rgb_topic').value
@@ -53,7 +65,7 @@ class ColorLaneDetector(Node):
             Image,
             self.camera_topic,
             self.image_callback,
-            latest_frame_qos
+            camera_qos
         )
 
         # ROI parameters for cropping
@@ -144,8 +156,27 @@ class ColorLaneDetector(Node):
         """Processes BGR frame using HSV color space thresholds with ROI cropping and low-res scaling."""
         t_start = time.perf_counter() if self.debug_telemetry else 0.0
 
-        # Step 1: Downsampling frame to target size (300x300)
-        low_res = cv2.resize(cv_image, (self.target_size, self.target_size), interpolation=cv2.INTER_NEAREST)
+        # Step 1: Discard the upper half and resize the lower half to 320x120.
+        input_height, input_width = cv_image.shape[:2]
+        crop_y = input_height // 2
+        lower_half = cv_image[crop_y:, :]
+        crop_height, crop_width = lower_half.shape[:2]
+        resolution = (
+            input_width,
+            input_height,
+            crop_width,
+            crop_height,
+            *self.output_size,
+        )
+        if resolution != self.last_logged_resolution:
+            self.get_logger().info(
+                f'Image resolution: input={input_width}x{input_height}, '
+                f'lower_half={crop_width}x{crop_height}, '
+                f'output={self.output_size[0]}x{self.output_size[1]}'
+            )
+            self.last_logged_resolution = resolution
+
+        low_res = cv2.resize(lower_half, self.output_size, interpolation=cv2.INTER_AREA)
 
         # Step 2: Convert to HSV color space
         t_hsv_start = time.perf_counter() if self.debug_telemetry else 0.0
@@ -156,8 +187,9 @@ class ColorLaneDetector(Node):
         black_mask = cv2.inRange(hsv_image, self.black_lower, self.black_upper)
 
         # Step 4: Geometric ROI Cropping (Keep band between Y_min = 54% and Y_max = 91%)
-        y_min = int(self.target_size * self.roi_y_min)
-        y_max = int(self.target_size * self.roi_y_max)
+        output_height = low_res.shape[0]
+        y_min = int(output_height * self.roi_y_min)
+        y_max = int(output_height * self.roi_y_max)
 
         yellow_mask[:y_min, :] = 0
         yellow_mask[y_max:, :] = 0
@@ -269,7 +301,7 @@ class ColorLaneDetector(Node):
             f"[EXECUTION BREAKDOWN]\n"
             f" Queue Waiting Delay:              {avg_queue_wait:.2f} ms\n"
             f" CvBridge Conversion:              {avg_convert:.2f} ms\n"
-            f" HSV Color Thresholding (ROI/300px): {avg_hsv:.2f} ms\n"
+            f" HSV Color Thresholding (320x120):  {avg_hsv:.2f} ms\n"
             f" Canvas Rendering (Masks/Blend):   {avg_canvas:.2f} ms\n"
             f" ROS Publish Enqueue:              {avg_pub_enqueue:.2f} ms\n"
             f" Async Publish:                    {avg_async_pub:.2f} ms\n"
