@@ -15,6 +15,9 @@ def generate_launch_description():
     classification_blue_max_distance_threshold_px = LaunchConfiguration(
         'classification_blue_max_distance_threshold_px'
     )
+    enable_second_distance_transform = LaunchConfiguration(
+        'enable_second_distance_transform'
+    )
 
     classification_blue_distance_threshold = DeclareLaunchArgument(
         'classification_blue_distance_threshold_px',
@@ -30,6 +33,13 @@ def generate_launch_description():
         'classification_blue_max_distance_threshold_px',
         default_value='16.0',
         description='Maximum blue distance; farther white is discarded',
+    )
+    second_distance_transform = DeclareLaunchArgument(
+        'enable_second_distance_transform',
+        default_value='false',
+        description=(
+            'Enable the second magenta propagation distance transform'
+        ),
     )
 
     lane_node = Node(
@@ -56,7 +66,7 @@ def generate_launch_description():
             'enable_telemetry': False,
             'roi_y_min': 0.0,
             'roi_y_max': 1.0,
-            'point_voxel_size': 3,
+            'point_voxel_size': 5,
         }]
     )
 
@@ -93,7 +103,14 @@ def generate_launch_description():
             'projection_stride': 1,
             'point_inflation_size': 3,
             'use_gpu': True,
-            'max_processing_fps': 12.0,
+            'enable_second_distance_transform': ParameterValue(
+                enable_second_distance_transform,
+                value_type=bool,
+            ),
+            'output_topic': (
+                'limo/cv_package/classification/output/raw'
+            ),
+            'max_processing_fps': 15.0,
             'blue_distance_threshold_px': ParameterValue(
                 classification_blue_distance_threshold_px,
                 value_type=float,
@@ -127,6 +144,7 @@ def generate_launch_description():
         classification_blue_distance_threshold,
         classification_blue_max_distance_threshold,
         classification_magenta_distance_threshold,
+        second_distance_transform,
         lane_node,
         depth_correction_node,
         boundary_trigger,

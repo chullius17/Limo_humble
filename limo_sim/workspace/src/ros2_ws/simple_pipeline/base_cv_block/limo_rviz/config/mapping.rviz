@@ -1,0 +1,95 @@
+Panels:
+  - Class: rviz_common/Displays
+    Help Height: 78
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /TF1
+        - /Mapper Output1
+        - /Update ROI1
+      Splitter Ratio: 0.5
+    Tree Height: 620
+  - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.4
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Update Interval: 0.0
+    - Alpha: 1.0
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: false
+      Enabled: true
+      Name: Mapper Output
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /limo/simple_mapping/mapper/map
+      Update Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: ""
+      Use Timestamp: false
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1.0
+      Median window: 5
+      Min Value: 0.0
+      Name: Update ROI
+      Normalize Range: true
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /limo/simple_mapping/mapper/roi_debug
+      Transport Hint: raw
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+Views:
+  Current:
+    Angle: 0
+    Class: rviz_default_plugins/TopDownOrtho
+    Name: Top Down Ortho
+    Scale: 20
+    Target Frame: <Fixed Frame>
+    X: 0
+    Y: 0
+  Saved: ~
+Window Geometry:
+  Height: 900
+  Width: 1400
+  X: 40
+  Y: 40
