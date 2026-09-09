@@ -18,11 +18,12 @@ from rclpy.qos import (
 )
 from sensor_msgs.msg import CameraInfo, Image
 
-from cv_package.classes import Classification
-
-
 class BevAndClassification(Node):
     """Projects boundary pixels to BEV and classifies them in one process."""
+
+    BLUE_BGR = np.array([255, 0, 0], dtype=np.uint8)
+    WHITE_BGR = np.array([255, 255, 255], dtype=np.uint8)
+    MAGENTA_BGR = np.array([255, 0, 255], dtype=np.uint8)
 
     def __init__(self):
         super().__init__('bev_and_classification')
@@ -53,7 +54,8 @@ class BevAndClassification(Node):
         self.declare_parameter('bev_width', 600)
         self.declare_parameter('bev_height', 300)
         self.declare_parameter('bev_resolution', 0.01)
-        self.declare_parameter('projection_stride', 3)
+        self.declare_parameter('projection_stride', 1)
+        self.declare_parameter('point_inflation_size', 3)
         self.declare_parameter('blue_distance_threshold_px', 10.0)
         self.declare_parameter('blue_max_distance_threshold_px', 16.0)
         self.declare_parameter('magenta_distance_threshold_px', 10.0)
@@ -68,6 +70,8 @@ class BevAndClassification(Node):
         self.height = int(self.get_parameter('bev_height').value)
         self.resolution = float(self.get_parameter('bev_resolution').value)
         self.stride = int(self.get_parameter('projection_stride').value)
+        self.point_inflation_size = int(
+            self.get_parameter('point_inflation_size').value)
         self.crop_y_min = float(
             self.get_parameter('input_crop_y_min').value)
         self.use_gpu = bool(self.get_parameter('use_gpu').value)
@@ -83,6 +87,9 @@ class BevAndClassification(Node):
             raise ValueError('BEV dimensions and resolution must be positive')
         if self.stride <= 0:
             raise ValueError('projection_stride must be positive')
+        if (self.point_inflation_size <= 0 or
+                self.point_inflation_size % 2 == 0):
+            raise ValueError('point_inflation_size must be positive and odd')
         if not 0.0 <= self.crop_y_min < 1.0:
             raise ValueError('input_crop_y_min must be in [0, 1)')
         if self.telemetry_window <= 0 or self.telemetry_interval <= 0:
@@ -107,7 +114,6 @@ class BevAndClassification(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-
         self.bev_pub = self.create_publisher(
             Image, self.get_parameter('bev_topic').value, pipeline_qos)
         self.debug_pub = self.create_publisher(
@@ -154,7 +160,8 @@ class BevAndClassification(Node):
         self.last_report_dropped = 0
         timing_names = (
             'queue', 'conversion', 'resize', 'staging', 'upload',
-            'bev_kernels', 'classification', 'download', 'publish',
+            'bev_kernels', 'inflation', 'classification', 'download',
+            'publish',
             'total', 'rgb_age', 'depth_age',
         )
         self.timings = {
@@ -165,6 +172,10 @@ class BevAndClassification(Node):
             (self.height, self.width, 3), dtype=np.uint8)
         self.cpu_debug = np.zeros_like(self.cpu_bev)
         self.cpu_output = np.zeros_like(self.cpu_bev)
+        self.point_inflation_kernel = np.ones(
+            (self.point_inflation_size, self.point_inflation_size),
+            dtype=np.uint8,
+        )
 
         self.cuda = None
         self.cuda_context = None
@@ -459,6 +470,7 @@ class BevAndClassification(Node):
             try:
                 bev = self._process_cuda(
                     rgb, depth, fx, cx, timing)
+                self._inflate_bev(bev, timing)
                 debug, output = self._classify_cpu(
                     bev, thresholds, wanted, timing)
                 images = bev, debug, output
@@ -553,9 +565,79 @@ class BevAndClassification(Node):
         if np.any(inside):
             indices = v[inside] * self.width + u[inside]
             bev.reshape(-1, 3)[indices] = sampled_rgb[rows, cols][inside]
+        self._inflate_bev(bev, timing)
         debug, output = self._classify_cpu(
             bev, thresholds, wanted, timing)
         return bev, debug, output
+
+    def _inflate_bev(self, bev, timing):
+        """Enlarge projected BEV points before classification and publishing."""
+        started = time.perf_counter()
+        if self.point_inflation_size > 1:
+            cv2.dilate(
+                bev,
+                self.point_inflation_kernel,
+                dst=bev,
+                iterations=1,
+            )
+        timing['inflation'] = (time.perf_counter() - started) * 1000.0
+
+    @staticmethod
+    def _color_mask(image, color, tolerance):
+        lower = np.clip(
+            color.astype(np.int16) - tolerance, 0, 255).astype(np.uint8)
+        upper = np.clip(
+            color.astype(np.int16) + tolerance, 0, 255).astype(np.uint8)
+        return cv2.inRange(image, lower, upper) > 0
+
+    @classmethod
+    def _classify_images(cls, image, minimum, maximum, magenta, tolerance):
+        """Classify a BEV ROI using fast approximate distance transforms."""
+        white_mask = cls._color_mask(image, cls.WHITE_BGR, tolerance)
+        blue_mask = cls._color_mask(image, cls.BLUE_BGR, tolerance)
+
+        if np.any(blue_mask):
+            distance_input = np.full(image.shape[:2], 255, dtype=np.uint8)
+            distance_input[blue_mask] = 0
+            distance_from_blue = cv2.distanceTransform(
+                distance_input,
+                cv2.DIST_L2,
+                cv2.DIST_MASK_3,
+            )
+            eligible_white_mask = white_mask & (
+                distance_from_blue <= maximum)
+            far_white_mask = eligible_white_mask & (
+                distance_from_blue > minimum)
+            discarded_white_mask = white_mask & (
+                distance_from_blue > maximum)
+        else:
+            far_white_mask = np.zeros_like(white_mask)
+            discarded_white_mask = white_mask
+
+        debug_image = image.copy()
+        debug_image[discarded_white_mask] = 0
+        debug_image[far_white_mask] = cls.MAGENTA_BGR
+
+        remaining_white_mask = cls._color_mask(
+            debug_image, cls.WHITE_BGR, tolerance)
+        magenta_mask = cls._color_mask(
+            debug_image, cls.MAGENTA_BGR, tolerance)
+
+        output_image = debug_image.copy()
+        if np.any(magenta_mask):
+            distance_input = np.full(image.shape[:2], 255, dtype=np.uint8)
+            distance_input[magenta_mask] = 0
+            distance_from_magenta = cv2.distanceTransform(
+                distance_input,
+                cv2.DIST_L2,
+                cv2.DIST_MASK_3,
+            )
+            close_white_mask = remaining_white_mask & (
+                distance_from_magenta < magenta)
+            output_image[close_white_mask] = cls.MAGENTA_BGR
+
+        output_image[discarded_white_mask] = 0
+        return debug_image, output_image
 
     def _classify_cpu(self, bev, thresholds, wanted, timing):
         """Classify only the occupied BEV rectangle with exact OpenCV EDT."""
@@ -577,13 +659,8 @@ class BevAndClassification(Node):
 
         minimum, maximum, magenta, tolerance = thresholds
         roi = bev[y:y + height, x:x + width]
-        debug_roi, output_roi = Classification.classify_images(
-            roi,
-            blue_distance_threshold_px=minimum,
-            blue_max_distance_threshold_px=maximum,
-            magenta_distance_threshold_px=magenta,
-            color_tolerance=tolerance,
-        )
+        debug_roi, output_roi = self._classify_images(
+            roi, minimum, maximum, magenta, tolerance)
         self.cpu_debug[y:y + height, x:x + width] = debug_roi
         self.cpu_output[y:y + height, x:x + width] = output_roi
         timing['classification'] = (
@@ -634,7 +711,8 @@ class BevAndClassification(Node):
             f'{average("resize"):.2f} ms\n'
             f'GPU staging/upload {average("staging"):.2f}/'
             f'{average("upload"):.2f} ms | BEV kernels '
-            f'{average("bev_kernels"):.2f} ms\n'
+            f'{average("bev_kernels"):.2f} ms | point inflation '
+            f'{average("inflation"):.2f} ms\n'
             f'CPU classification '
             f'{average("classification"):.2f} ms | GPU download '
             f'{average("download"):.2f} ms\n'

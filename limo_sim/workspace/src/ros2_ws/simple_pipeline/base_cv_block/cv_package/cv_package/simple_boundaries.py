@@ -22,6 +22,11 @@ class CurbDetector(Node):
         self.declare_parameter('roi_y_max', 1.0)
         self.roi_y_min = self.get_parameter('roi_y_min').value
         self.roi_y_max = self.get_parameter('roi_y_max').value
+        self.declare_parameter('point_voxel_size', 3)
+        self.point_voxel_size = int(
+            self.get_parameter('point_voxel_size').value)
+        if self.point_voxel_size <= 0:
+            raise ValueError('point_voxel_size must be positive')
 
         # Topic Subscription
         self.image_sub = self.create_subscription(
@@ -46,8 +51,6 @@ class CurbDetector(Node):
         self.kernel_middle = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
         # Top third: No opening performed
 
-        self.sampling_step = 3
-
         # Telemetry & Diagnostics setup
         self.declare_parameter('enable_telemetry', True)
         self.debug_telemetry = self.get_parameter('enable_telemetry').value
@@ -68,6 +71,28 @@ class CurbDetector(Node):
         self.worker_thread = threading.Thread(target=self._processing_worker, daemon=True)
         self.worker_thread.start()
         self.get_logger().info("CurbDetector node initialized: Multi-zone MORPH_OPEN Background Extraction.")
+
+    def voxelize_points(self, raw_points, image_width):
+        """Replace all points in each 2D cell with their centroid."""
+        voxel_size = self.point_voxel_size
+        if voxel_size == 1 or len(raw_points) == 0:
+            return raw_points
+
+        voxel_columns = (image_width + voxel_size - 1) // voxel_size
+        voxel_ids = (
+            (raw_points[:, 0] // voxel_size) * voxel_columns
+            + raw_points[:, 1] // voxel_size
+        )
+        counts = np.bincount(voxel_ids)
+        sum_y = np.bincount(voxel_ids, weights=raw_points[:, 0])
+        sum_x = np.bincount(voxel_ids, weights=raw_points[:, 1])
+        occupied = np.flatnonzero(counts)
+
+        centroids_y = np.rint(
+            sum_y[occupied] / counts[occupied]).astype(np.int32)
+        centroids_x = np.rint(
+            sum_x[occupied] / counts[occupied]).astype(np.int32)
+        return np.column_stack((centroids_y, centroids_x))
 
     def image_callback(self, msg):
         """ROS 2 Callback: Enqueues incoming frames, dropping stale frames if queue is full."""
@@ -187,8 +212,13 @@ class CurbDetector(Node):
         t_start = time.perf_counter()
         raw_points_green = np.argwhere(is_green_low)
         raw_points_blue = np.argwhere(is_blue_low)
-        raw_points_background = np.argwhere(background_mask > 0)
-        raw_points_dashed = np.argwhere(dashed_mask > 0)
+        raw_points_white = np.argwhere(
+            (background_mask > 0) | (dashed_mask > 0))
+
+        raw_points_blue = self.voxelize_points(
+            raw_points_blue, LOW_RES_SIZE)
+        raw_points_white = self.voxelize_points(
+            raw_points_white, LOW_RES_SIZE)
 
         scale_x = high_w / LOW_RES_SIZE
         scale_y = high_h / LOW_RES_SIZE
@@ -198,8 +228,7 @@ class CurbDetector(Node):
 
         pts_green = scale_points(raw_points_green)
         pts_blue = scale_points(raw_points_blue)
-        pts_unclassified = scale_points(raw_points_background)
-        pts_dashed = scale_points(raw_points_dashed)
+        pts_white = scale_points(raw_points_white)
         t['step7_points'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 8: DRAW AND PUBLISH ---
@@ -214,23 +243,13 @@ class CurbDetector(Node):
             v_b = np.clip(pts_blue[:, 1], 0, high_h - 1)
             only_lines_frame[v_b, u_b] = [255, 0, 0]
 
-        # Draw unclassified background points in White BGR [255, 255, 255].
-        if len(pts_unclassified) > 0:
-            pts_sampled = pts_unclassified[::self.sampling_step]
-            u_c = np.clip(pts_sampled[:, 0], 0, high_w - 1)
-            v_c = np.clip(pts_sampled[:, 1], 0, high_h - 1)
-            
-            only_lines_frame[v_c, u_c] = [255, 255, 255]
-            full_overlay_frame[v_c, u_c] = [255, 255, 255]
-
-        # Draw dashed mask points in White BGR [255, 255, 255]
-        if len(pts_dashed) > 0:
-            pts_dashed_sampled = pts_dashed[::self.sampling_step]
-            u_d = np.clip(pts_dashed_sampled[:, 0], 0, high_w - 1)
-            v_d = np.clip(pts_dashed_sampled[:, 1], 0, high_h - 1)
-
-            only_lines_frame[v_d, u_d] = [255, 255, 255]
-            full_overlay_frame[v_d, u_d] = [255, 255, 255]
+        # Background and dashed pixels share the white class and have already
+        # been reduced to at most one representative per spatial voxel.
+        if len(pts_white) > 0:
+            u_w = np.clip(pts_white[:, 0], 0, high_w - 1)
+            v_w = np.clip(pts_white[:, 1], 0, high_h - 1)
+            only_lines_frame[v_w, u_w] = [255, 255, 255]
+            full_overlay_frame[v_w, u_w] = [255, 255, 255]
 
         self.publish_image(self.debug_pub, full_overlay_frame, msg.header.stamp)
         self.publish_image(self.lines_pub, only_lines_frame, msg.header.stamp)

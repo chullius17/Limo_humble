@@ -56,6 +56,7 @@ def generate_launch_description():
             'enable_telemetry': False,
             'roi_y_min': 0.0,
             'roi_y_max': 1.0,
+            'point_voxel_size': 3,
         }]
     )
 
@@ -89,7 +90,8 @@ def generate_launch_description():
             'bev_width': 600,
             'bev_height': 300,
             'bev_resolution': 0.01,
-            'projection_stride': 3,
+            'projection_stride': 1,
+            'point_inflation_size': 3,
             'use_gpu': True,
             'max_processing_fps': 12.0,
             'blue_distance_threshold_px': ParameterValue(

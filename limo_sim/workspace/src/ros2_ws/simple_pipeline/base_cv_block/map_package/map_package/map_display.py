@@ -6,6 +6,7 @@ import cv2
 from cv_bridge import CvBridge
 import numpy as np
 import math
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -65,8 +66,19 @@ class MapDisplay(Node):
         # --- COMBINED IMAGE PUBLISHERS ---
         self.firstp_img_pub         = self.create_publisher(Image, '/limo/map_package/map_display/map_firstp_combined', 10)
         
-        # --- NEW PUBLISHER: COMBINED OCCUPANCY GRID ---
-        self.grid_pub               = self.create_publisher(OccupancyGrid, '/limo/map_package/map_display/global_map_combined', 10)
+        # Match RViz's Map display QoS and retain the latest map for subscribers
+        # that connect after the first publication.
+        map_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.grid_pub = self.create_publisher(
+            OccupancyGrid,
+            '/limo/map_package/map_display/global_map_combined',
+            map_qos,
+        )
 
         # Pre-allocate the OccupancyGrid message to optimize CPU usage
         self.combined_grid_msg      = self.get_default_occupancy_grid()
