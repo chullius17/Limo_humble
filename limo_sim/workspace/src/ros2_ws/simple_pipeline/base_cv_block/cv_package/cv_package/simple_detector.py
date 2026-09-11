@@ -15,6 +15,11 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 class ColorLaneDetector(Node):
 
+    LABEL_INVALID = np.uint8(0)
+    LABEL_BLUE = np.uint8(1)
+    LABEL_TURQUOISE = np.uint8(2)
+    LABEL_BACKGROUND = np.uint8(3)
+
     def __init__(self):
         super().__init__('color_lane_detector')
 
@@ -33,6 +38,9 @@ class ColorLaneDetector(Node):
         )
 
         # ROS 2 Publishers
+        self.label_pub = self.create_publisher(
+            Image, 'limo/cv_package/detection/lane_labels/raw', output_qos
+        )
         self.raw_mask_pub = self.create_publisher(
             Image, 'limo/cv_package/detection/lane_masks/raw', output_qos
         )
@@ -73,6 +81,9 @@ class ColorLaneDetector(Node):
         self.declare_parameter('roi_y_max', 1.0)
         self.roi_y_min = self.get_parameter('roi_y_min').value
         self.roi_y_max = self.get_parameter('roi_y_max').value
+        if not 0.0 <= self.roi_y_min < self.roi_y_max <= 1.0:
+            raise ValueError(
+                'roi_y_min and roi_y_max must define a range in [0, 1]')
 
         # Telemetry metrics window (sliding window of 30 frames)
         self.window_size = 30
@@ -150,9 +161,9 @@ class ColorLaneDetector(Node):
                 convert_time = (time.perf_counter() - t_convert_start) * 1000.0
                 self.telemetry_stats['1_convert_time'].append(convert_time)
 
-            self._process_frame(cv_image, msg.header.stamp)
+            self._process_frame(cv_image, msg.header)
 
-    def _process_frame(self, cv_image, stamp):
+    def _process_frame(self, cv_image, header):
         """Processes BGR frame using HSV color space thresholds with ROI cropping and low-res scaling."""
         t_start = time.perf_counter() if self.debug_telemetry else 0.0
 
@@ -186,7 +197,7 @@ class ColorLaneDetector(Node):
         yellow_mask = cv2.inRange(hsv_image, self.yellow_lower, self.yellow_upper)
         black_mask = cv2.inRange(hsv_image, self.black_lower, self.black_upper)
 
-        # Step 4: Geometric ROI Cropping (Keep band between Y_min = 54% and Y_max = 91%)
+        # Step 4: Keep only the configured vertical ROI.
         output_height = low_res.shape[0]
         y_min = int(output_height * self.roi_y_min)
         y_max = int(output_height * self.roi_y_max)
@@ -200,18 +211,34 @@ class ColorLaneDetector(Node):
             t_hsv_end = time.perf_counter()
             self.telemetry_stats['3_hsv_segmentation'].append((t_hsv_end - t_hsv_start) * 1000.0)
 
-        # Step 5: Construct raw color mask image on low-res scale
+        # Step 5: Encode the segmentation as a compact single-channel label map.
         t_canvas_start = time.perf_counter() if self.debug_telemetry else 0.0
-        mask_overlay = np.zeros_like(low_res)
+        labels = np.full(
+            black_mask.shape,
+            self.LABEL_INVALID,
+            dtype=np.uint8,
+        )
+        labels[y_min:y_max, :] = self.LABEL_BACKGROUND
+        labels[black_mask != 0] = self.LABEL_BLUE
+        # Preserve the existing precedence when the two HSV masks overlap.
+        labels[yellow_mask != 0] = self.LABEL_TURQUOISE
 
-        # Assign Blue color (255, 0, 0) to black-detected pixels
-        mask_overlay[black_mask > 0] = (255, 0, 0)
-
-        # Assign Green color (0, 255, 0) to yellow-detected pixels
-        mask_overlay[yellow_mask > 0] = (0, 255, 0)
-
-        # Create blended debug image overlay
-        overlay_image = cv2.addWeighted(low_res, 0.7, mask_overlay, 0.5, 0)
+        publish_legacy_mask = self.raw_mask_pub.get_subscription_count() > 0
+        publish_overlay = self.image_pub.get_subscription_count() > 0
+        mask_overlay = None
+        overlay_image = None
+        if publish_legacy_mask or publish_overlay:
+            mask_overlay = np.zeros_like(low_res)
+            mask_overlay[labels == self.LABEL_BLUE] = (255, 0, 0)
+            mask_overlay[labels == self.LABEL_TURQUOISE] = (0, 255, 0)
+        if publish_overlay:
+            overlay_image = cv2.addWeighted(
+                low_res,
+                0.7,
+                mask_overlay,
+                0.5,
+                0,
+            )
 
         if self.debug_telemetry:
             t_canvas_end = time.perf_counter()
@@ -225,7 +252,16 @@ class ColorLaneDetector(Node):
             except queue.Empty:
                 pass
         try:
-            self.pub_queue.put_nowait((mask_overlay, overlay_image, stamp))
+            self.pub_queue.put_nowait(
+                (
+                    labels,
+                    mask_overlay,
+                    overlay_image,
+                    header,
+                    publish_legacy_mask,
+                    publish_overlay,
+                )
+            )
         except queue.Full:
             pass
 
@@ -249,19 +285,42 @@ class ColorLaneDetector(Node):
             except queue.Empty:
                 continue
 
-            mask_overlay, overlay_image, stamp = item
+            (
+                labels,
+                mask_overlay,
+                overlay_image,
+                header,
+                publish_legacy_mask,
+                publish_overlay,
+            ) = item
             t_pub_start = time.perf_counter() if self.debug_telemetry else 0.0
 
             try:
-                # 1. Publish raw mask image
-                ros_mask_msg = self.bridge.cv2_to_imgmsg(mask_overlay, encoding='bgr8')
-                ros_mask_msg.header.stamp = stamp
-                self.raw_mask_pub.publish(ros_mask_msg)
+                label_msg = self.bridge.cv2_to_imgmsg(
+                    labels,
+                    encoding='mono8',
+                )
+                label_msg.header = header
+                self.label_pub.publish(label_msg)
 
-                # 2. Publish debug overlay image
-                ros_overlay_msg = self.bridge.cv2_to_imgmsg(overlay_image, encoding='bgr8')
-                ros_overlay_msg.header.stamp = stamp
-                self.image_pub.publish(ros_overlay_msg)
+                # Keep the BGR mask during the boundary-node migration. Once
+                # no subscriber remains, neither this image nor its conversion
+                # is produced.
+                if publish_legacy_mask:
+                    ros_mask_msg = self.bridge.cv2_to_imgmsg(
+                        mask_overlay,
+                        encoding='bgr8',
+                    )
+                    ros_mask_msg.header = header
+                    self.raw_mask_pub.publish(ros_mask_msg)
+
+                if publish_overlay:
+                    ros_overlay_msg = self.bridge.cv2_to_imgmsg(
+                        overlay_image,
+                        encoding='bgr8',
+                    )
+                    ros_overlay_msg.header = header
+                    self.image_pub.publish(ros_overlay_msg)
 
             except Exception as e:
                 self.get_logger().error(f"Publishing failed: {str(e)}")
@@ -271,6 +330,7 @@ class ColorLaneDetector(Node):
                 self.telemetry_stats['async_encode_publish'].append(dt_async_pub)
 
                 t_now_final = self.get_clock().now().nanoseconds / 1e9
+                stamp = header.stamp
                 t_msg_final = stamp.sec + stamp.nanosec * 1e-9
                 final_age = (t_now_final - t_msg_final) * 1000.0
                 self.telemetry_stats['12_msg_age_final_publish'].append(final_age)
@@ -302,7 +362,7 @@ class ColorLaneDetector(Node):
             f" Queue Waiting Delay:              {avg_queue_wait:.2f} ms\n"
             f" CvBridge Conversion:              {avg_convert:.2f} ms\n"
             f" HSV Color Thresholding (320x120):  {avg_hsv:.2f} ms\n"
-            f" Canvas Rendering (Masks/Blend):   {avg_canvas:.2f} ms\n"
+            f" Label-map Encoding:               {avg_canvas:.2f} ms\n"
             f" ROS Publish Enqueue:              {avg_pub_enqueue:.2f} ms\n"
             f" Async Publish:                    {avg_async_pub:.2f} ms\n"
             f"-----------------------------------------\n"

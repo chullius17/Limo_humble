@@ -1,47 +1,10 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler, TimerAction
+from launch.actions import RegisterEventHandler, TimerAction
 from launch.event_handlers import OnProcessStart
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
+
 
 def generate_launch_description():
-    classification_blue_distance_threshold_px = LaunchConfiguration(
-        'classification_blue_distance_threshold_px'
-    )
-    classification_magenta_distance_threshold_px = LaunchConfiguration(
-        'classification_magenta_distance_threshold_px'
-    )
-    classification_blue_max_distance_threshold_px = LaunchConfiguration(
-        'classification_blue_max_distance_threshold_px'
-    )
-    enable_second_distance_transform = LaunchConfiguration(
-        'enable_second_distance_transform'
-    )
-
-    classification_blue_distance_threshold = DeclareLaunchArgument(
-        'classification_blue_distance_threshold_px',
-        default_value='10.0',
-        description='Distance from blue beyond which white becomes magenta',
-    )
-    classification_magenta_distance_threshold = DeclareLaunchArgument(
-        'classification_magenta_distance_threshold_px',
-        default_value='10.0',
-        description='Distance used to propagate the magenta classification',
-    )
-    classification_blue_max_distance_threshold = DeclareLaunchArgument(
-        'classification_blue_max_distance_threshold_px',
-        default_value='16.0',
-        description='Maximum blue distance; farther white is discarded',
-    )
-    second_distance_transform = DeclareLaunchArgument(
-        'enable_second_distance_transform',
-        default_value='false',
-        description=(
-            'Enable the second magenta propagation distance transform'
-        ),
-    )
-
     lane_node = Node(
             package='cv_package',
             executable='lane_detector',
@@ -63,10 +26,23 @@ def generate_launch_description():
         output='screen',
         emulate_tty=True,
         parameters=[{
-            'enable_telemetry': False,
+            'enable_telemetry': True,
             'roi_y_min': 0.0,
             'roi_y_max': 1.0,
             'point_voxel_size': 5,
+            'camera_info_topic': '/rgb/camera_info',
+            'depth_topic': (
+                'limo/cv_package/depth_correction/depth_corrected/raw'
+            ),
+            'fallback_depth_topic': '/depth_camera/depth/image_raw',
+            'corrected_depth_timeout_sec': 1.0,
+            'pointcloud_topic': 'limo/cv_package/boundaries/points',
+            'input_crop_y_min': 0.5,
+            'pointcloud_min_depth_m': 0.1,
+            'pointcloud_max_depth_m': 5.0,
+            'max_depth_time_delta_sec': 0.1,
+            'blue_radius_min_m': 0.10,
+            'blue_radius_max_m': 0.16,
         }]
     )
 
@@ -84,45 +60,18 @@ def generate_launch_description():
 
     bev_node = Node(
         package='cv_package',
-        executable='bev_and_clas',
-        name='bev_and_clas',
+        executable='bev_node',
+        name='simple_bev',
         output='screen',
         emulate_tty=True,
         parameters=[{
             'enable_telemetry': True,
             'telemetry_window_size': 60,
             'telemetry_log_interval_frames': 30,
-            'camera_info_topic': '/rgb/camera_info',
-            'depth_topic': (
-                'limo/cv_package/depth_correction/depth_corrected/raw'
-            ),
-            'input_crop_y_min': 0.5,
-            'bev_width': 600,
-            'bev_height': 300,
-            'bev_resolution': 0.01,
-            'projection_stride': 1,
-            'point_inflation_size': 3,
-            'use_gpu': True,
-            'enable_second_distance_transform': ParameterValue(
-                enable_second_distance_transform,
-                value_type=bool,
-            ),
-            'output_topic': (
-                'limo/cv_package/classification/output/raw'
-            ),
-            'max_processing_fps': 15.0,
-            'blue_distance_threshold_px': ParameterValue(
-                classification_blue_distance_threshold_px,
-                value_type=float,
-            ),
-            'blue_max_distance_threshold_px': ParameterValue(
-                classification_blue_max_distance_threshold_px,
-                value_type=float,
-            ),
-            'magenta_distance_threshold_px': ParameterValue(
-                classification_magenta_distance_threshold_px,
-                value_type=float,
-            ),
+            'pointcloud_topic': 'limo/cv_package/boundaries/points',
+            'bev_pointcloud_topic': 'limo/cv_package/bev/points',
+            'plane_frame': 'base_link',
+            'plane_z': 0.0,
         }],
     )
 
@@ -141,10 +90,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        classification_blue_distance_threshold,
-        classification_blue_max_distance_threshold,
-        classification_magenta_distance_threshold,
-        second_distance_transform,
         lane_node,
         depth_correction_node,
         boundary_trigger,

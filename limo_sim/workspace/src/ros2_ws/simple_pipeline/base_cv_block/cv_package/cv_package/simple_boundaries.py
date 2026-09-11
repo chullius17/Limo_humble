@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
-import cv2
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
 from cv_bridge import CvBridge
+import cv2
 import numpy as np
 import time
 import threading
@@ -12,6 +13,34 @@ from collections import deque
 
 
 class CurbDetector(Node):
+
+    LABEL_INVALID = np.uint8(0)
+    LABEL_BLUE = np.uint8(1)
+    LABEL_TURQUOISE = np.uint8(2)
+    LABEL_BACKGROUND = np.uint8(3)
+    CLOUD_DTYPE = np.dtype({
+        'names': (
+            'x', 'y', 'z', 'class_id', 'radius_min', 'radius_max'),
+        'formats': ('<f4', '<f4', '<f4', 'u1', '<f4', '<f4'),
+        'offsets': (0, 4, 8, 12, 16, 20),
+        'itemsize': 24,
+    })
+    CLOUD_FIELDS = [
+        PointField(
+            name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(
+            name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(
+            name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        PointField(
+            name='class_id', offset=12, datatype=PointField.UINT8, count=1),
+        PointField(
+            name='radius_min', offset=16,
+            datatype=PointField.FLOAT32, count=1),
+        PointField(
+            name='radius_max', offset=20,
+            datatype=PointField.FLOAT32, count=1),
+    ]
 
     def __init__(self):
         super().__init__('curb_detector')
@@ -22,34 +51,121 @@ class CurbDetector(Node):
         self.declare_parameter('roi_y_max', 1.0)
         self.roi_y_min = self.get_parameter('roi_y_min').value
         self.roi_y_max = self.get_parameter('roi_y_max').value
+        if not 0.0 <= self.roi_y_min < self.roi_y_max <= 1.0:
+            raise ValueError(
+                'roi_y_min and roi_y_max must define a range in [0, 1]')
         self.declare_parameter('point_voxel_size', 3)
         self.point_voxel_size = int(
             self.get_parameter('point_voxel_size').value)
         if self.point_voxel_size <= 0:
             raise ValueError('point_voxel_size must be positive')
 
+        self.declare_parameter(
+            'camera_info_topic', '/rgb/camera_info')
+        self.declare_parameter(
+            'depth_topic',
+            'limo/cv_package/depth_correction/depth_corrected/raw')
+        self.declare_parameter(
+            'fallback_depth_topic', '/depth_camera/depth/image_raw')
+        self.declare_parameter('corrected_depth_timeout_sec', 1.0)
+        self.declare_parameter(
+            'pointcloud_topic', 'limo/cv_package/boundaries/points')
+        self.declare_parameter('input_crop_y_min', 0.5)
+        self.declare_parameter('pointcloud_min_depth_m', 0.1)
+        self.declare_parameter('pointcloud_max_depth_m', 5.0)
+        self.declare_parameter('max_depth_time_delta_sec', 0.1)
+        self.declare_parameter('blue_radius_min_m', 0.10)
+        self.declare_parameter('blue_radius_max_m', 0.16)
+
+        self.input_crop_y_min = float(
+            self.get_parameter('input_crop_y_min').value)
+        self.cloud_min_depth = float(
+            self.get_parameter('pointcloud_min_depth_m').value)
+        self.cloud_max_depth = float(
+            self.get_parameter('pointcloud_max_depth_m').value)
+        self.max_depth_time_delta = float(
+            self.get_parameter('max_depth_time_delta_sec').value)
+        self.corrected_depth_timeout = float(
+            self.get_parameter('corrected_depth_timeout_sec').value)
+        self.blue_radius_min = float(
+            self.get_parameter('blue_radius_min_m').value)
+        self.blue_radius_max = float(
+            self.get_parameter('blue_radius_max_m').value)
+        if not 0.0 <= self.input_crop_y_min < 1.0:
+            raise ValueError('input_crop_y_min must be in [0, 1)')
+        if not 0.0 < self.cloud_min_depth < self.cloud_max_depth:
+            raise ValueError('Point-cloud depth range is invalid')
+        if self.max_depth_time_delta < 0.0:
+            raise ValueError('max_depth_time_delta_sec cannot be negative')
+        if self.corrected_depth_timeout <= 0.0:
+            raise ValueError('corrected_depth_timeout_sec must be positive')
+        if not 0.0 <= self.blue_radius_min <= self.blue_radius_max:
+            raise ValueError('Blue point radii are invalid')
+
+        pipeline_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+
         # Topic Subscription
         self.image_sub = self.create_subscription(
             Image,
-            'limo/cv_package/detection/lane_masks/raw',
+            'limo/cv_package/detection/lane_labels/raw',
             self.image_callback,
-            10
+            pipeline_qos,
+        )
+        self.depth_sub = self.create_subscription(
+            Image,
+            self.get_parameter('depth_topic').value,
+            self.depth_callback,
+            sensor_qos,
+        )
+        self.fallback_depth_sub = self.create_subscription(
+            Image,
+            self.get_parameter('fallback_depth_topic').value,
+            self.fallback_depth_callback,
+            sensor_qos,
+        )
+        self.info_sub = self.create_subscription(
+            CameraInfo,
+            self.get_parameter('camera_info_topic').value,
+            self.camera_info_callback,
+            sensor_qos,
         )
 
         # Publishers
-        self.debug_pub = self.create_publisher(Image, 'limo/cv_package/boundaries/curb_points_debug/raw', 10)
-        self.lines_pub = self.create_publisher(Image, 'limo/cv_package/boundaries/lines_and_curbs/raw', 10)
+        self.debug_pub = self.create_publisher(
+            Image,
+            'limo/cv_package/boundaries/curb_points_debug/raw',
+            pipeline_qos,
+        )
+        self.lines_pub = self.create_publisher(
+            Image,
+            'limo/cv_package/boundaries/lines_and_curbs/raw',
+            pipeline_qos,
+        )
+        self.pointcloud_pub = self.create_publisher(
+            PointCloud2,
+            self.get_parameter('pointcloud_topic').value,
+            pipeline_qos,
+        )
+
+        self.sensor_lock = threading.Lock()
+        self.depth_image = None
+        self.depth_stamp_ns = 0
+        self.depth_source = None
+        self.corrected_depth_received_at = None
+        self.camera_intrinsics = None
 
         # Threading and Queue Setup
         self.frame_queue = Queue(maxsize=1)
         self.is_running = True
-
-        # Structuring elements for multi-zone background cleaning
-        # Bottom third: Large kernel for heavy noise removal
-        self.kernel_bottom = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
-        # Middle third: Small kernel for moderate noise removal
-        self.kernel_middle = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
-        # Top third: No opening performed
 
         # Telemetry & Diagnostics setup
         self.declare_parameter('enable_telemetry', True)
@@ -60,17 +176,19 @@ class CurbDetector(Node):
             'decomp': deque(maxlen=self.window_size),
             'step1_masks': deque(maxlen=self.window_size),
             'step3_crop': deque(maxlen=self.window_size),
-            'step4_bg_clean': deque(maxlen=self.window_size),
             'step5_color_iso': deque(maxlen=self.window_size),
             'step7_points': deque(maxlen=self.window_size),
-            'step8_draw_publish': deque(maxlen=self.window_size),
+            'step8_cloud_publish': deque(maxlen=self.window_size),
+            'step9_draw_publish': deque(maxlen=self.window_size),
+            'point_count': deque(maxlen=self.window_size),
             'total': deque(maxlen=self.window_size),
         }
 
         # Start background worker thread
         self.worker_thread = threading.Thread(target=self._processing_worker, daemon=True)
         self.worker_thread.start()
-        self.get_logger().info("CurbDetector node initialized: Multi-zone MORPH_OPEN Background Extraction.")
+        self.get_logger().info(
+            'CurbDetector initialized: label-map image and metric cloud.')
 
     def voxelize_points(self, raw_points, image_width):
         """Replace all points in each 2D cell with their centroid."""
@@ -103,6 +221,79 @@ class CurbDetector(Node):
                 pass
         self.frame_queue.put(msg)
 
+    def camera_info_callback(self, msg):
+        """Store the RGB calibration used to back-project label pixels."""
+        intrinsics = (
+            float(msg.k[0]),
+            float(msg.k[4]),
+            float(msg.k[2]),
+            float(msg.k[5]),
+            int(msg.width),
+            int(msg.height),
+        )
+        with self.sensor_lock:
+            self.camera_intrinsics = intrinsics
+
+    def convert_depth(self, msg):
+        """Convert a ROS depth image to float32 metres."""
+        try:
+            depth = self.bridge.imgmsg_to_cv2(
+                msg, desired_encoding='passthrough')
+        except Exception as error:
+            self.get_logger().error(f'Depth conversion failed: {error}')
+            return None
+        if depth.dtype == np.uint16 or msg.encoding in ('16UC1', 'mono16'):
+            return depth.astype(np.float32) * 0.001
+        elif depth.dtype != np.float32:
+            return depth.astype(np.float32)
+        return depth
+
+    def store_depth(self, depth, msg, source, received_at):
+        """Atomically replace the selected depth frame and report switches."""
+        stamp_ns = (
+            msg.header.stamp.sec * 1000000000
+            + msg.header.stamp.nanosec
+        )
+        with self.sensor_lock:
+            previous_source = self.depth_source
+            self.depth_image = depth
+            self.depth_stamp_ns = stamp_ns
+            self.depth_source = source
+            if source == 'corrected':
+                self.corrected_depth_received_at = received_at
+        if previous_source != source:
+            self.get_logger().info(f'Using {source} depth: {msg.header.frame_id}')
+
+    def depth_callback(self, msg):
+        """Always prefer a valid frame from the corrected depth topic."""
+        depth = self.convert_depth(msg)
+        if depth is None:
+            return
+        received_at = time.monotonic()
+        self.store_depth(depth, msg, 'corrected', received_at)
+
+    def fallback_depth_callback(self, msg):
+        """Use raw depth only while corrected depth is unavailable or stale."""
+        received_at = time.monotonic()
+        with self.sensor_lock:
+            corrected_at = self.corrected_depth_received_at
+        if (corrected_at is not None and
+                received_at - corrected_at <= self.corrected_depth_timeout):
+            return
+
+        depth = self.convert_depth(msg)
+        if depth is None:
+            return
+
+        # A corrected frame may have arrived while the raw image was decoded.
+        with self.sensor_lock:
+            corrected_at = self.corrected_depth_received_at
+        if (corrected_at is not None and
+                time.monotonic() - corrected_at <=
+                self.corrected_depth_timeout):
+            return
+        self.store_depth(depth, msg, 'raw fallback', received_at)
+
     def _processing_worker(self):
         """Worker Thread executing image processing pipeline asynchronously."""
         while self.is_running and rclpy.ok():
@@ -120,147 +311,121 @@ class CurbDetector(Node):
             'decomp': 0.0,
             'step1_masks': 0.0,
             'step3_crop': 0.0,
-            'step4_bg_clean': 0.0,
             'step5_color_iso': 0.0,
             'step7_points': 0.0,
-            'step8_draw_publish': 0.0,
+            'step8_cloud_publish': 0.0,
+            'step9_draw_publish': 0.0,
+            'point_count': float('nan'),
             'total': 0.0,
         }
 
-        # Image Decompression
+        # Decode the compact class-label image.
         try:
             t_start = time.perf_counter()
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            labels = self.bridge.imgmsg_to_cv2(
+                msg,
+                desired_encoding='mono8',
+            )
             t['decomp'] = (time.perf_counter() - t_start) * 1000.0
         except Exception as e:
-            self.get_logger().error(f"Failed to convert image: {str(e)}")
+            self.get_logger().error(
+                f"Failed to convert label image: {str(e)}")
             return
 
-        high_h, high_w, _ = cv_image.shape
+        if labels.ndim != 2:
+            self.get_logger().error('Expected a single-channel label image')
+            return
+        height, width = labels.shape
 
-        # --- STEP 1: DOWN-SAMPLING & UNCLASSIFIED MASK ---
+        # --- STEP 1: DIRECT LABEL MASKS ---
         t_start = time.perf_counter()
-        LOW_RES_SIZE = 300
-        low_res = cv2.resize(cv_image, (LOW_RES_SIZE, LOW_RES_SIZE), interpolation=cv2.INTER_NEAREST)
-
-        # Foreground: Pixels that are classified (non-black)
-        foreground_mask = ((low_res[:, :, 0] > 0) |
-                           (low_res[:, :, 1] > 0) |
-                           (low_res[:, :, 2] > 0)).astype(np.uint8) * 255
-
-        # Background: Pixels that are NOT classified (black in raw lane_masks)
-        background_mask = cv2.bitwise_not(foreground_mask)
+        blue_mask = labels == self.LABEL_BLUE
+        turquoise_mask = labels == self.LABEL_TURQUOISE
+        background_mask = labels == self.LABEL_BACKGROUND
         t['step1_masks'] = (time.perf_counter() - t_start) * 1000.0
 
-        if not np.any(background_mask):
-            empty_frame = np.zeros_like(cv_image)
-            t_start = time.perf_counter()
-            self.publish_image(self.debug_pub, empty_frame, msg.header.stamp)
-            self.publish_image(self.lines_pub, empty_frame, msg.header.stamp)
-            t['step8_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
-            t['total'] = (time.perf_counter() - start_total) * 1000.0
-            self.log_diagnostics(high_w, high_h, t)
-            return
-
-        # --- STEP 3: FIXED GEOMETRIC CROP OF ROI ---
+        # --- STEP 3: OPTIONAL ADDITIONAL BOUNDARY ROI ---
         t_start = time.perf_counter()
-        background_mask[int(LOW_RES_SIZE * self.roi_y_max):, :] = False
-        background_mask[:int(LOW_RES_SIZE * self.roi_y_min), :] = False
-
-        background_pure = background_mask.copy()
-        
+        roi_mask = np.zeros((height, width), dtype=bool)
+        roi_start = int(height * self.roi_y_min)
+        roi_stop = int(height * self.roi_y_max)
+        roi_mask[roi_start:roi_stop, :] = True
+        blue_mask &= roi_mask
+        turquoise_mask &= roi_mask
+        background_mask &= roi_mask
         t['step3_crop'] = (time.perf_counter() - t_start) * 1000.0
 
-        # --- STEP 4: MULTI-ZONE BACKGROUND CLEANING ---
+        # --- STEP 5: LABEL VALIDATION ---
         t_start = time.perf_counter()
-        
-        # Calculate horizontal band indices (3 equal vertical zones)
-        y_third = LOW_RES_SIZE // 3
-        y_two_thirds = 2 * y_third - 10     # Fine tuning by hand
-
-        # Top Third [0 : y_third]: Zero opening (keep mask as is)
-        
-        # Middle Third [y_third : y_two_thirds]: Small kernel opening
-        background_mask[y_third:y_two_thirds, :] = cv2.morphologyEx(
-            background_mask, cv2.MORPH_OPEN, self.kernel_middle, iterations=1
-        )[y_third:y_two_thirds, :]
-
-        # Bottom Third [y_two_thirds : LOW_RES_SIZE]: Large kernel opening
-        background_mask[y_two_thirds:, :] = cv2.morphologyEx(
-            background_mask, cv2.MORPH_OPEN, self.kernel_bottom, iterations=2
-        )[y_two_thirds:, :]
-
-        # Isola il rumore/tratteggio rimosso con le aperture morfologiche
-        dashed_mask = cv2.bitwise_xor(background_pure, background_mask)
-        
-        t['step4_bg_clean'] = (time.perf_counter() - t_start) * 1000.0
-
-        # --- STEP 5: TWO-COLOR ISOLATION ---
-        t_start = time.perf_counter()
-        full_overlay_frame = cv_image.copy()
-        only_lines_frame = np.zeros_like(cv_image)
-
-        b_low = low_res[:, :, 0]
-        g_low = low_res[:, :, 1]
-        r_low = low_res[:, :, 2]
-    
-        is_green_low = (r_low < 50) & (g_low > 200) & (b_low < 50)
-        is_blue_low = (b_low > 200) & (g_low < 50) & (r_low < 50)
+        invalid_values = labels > self.LABEL_BACKGROUND
+        if np.any(invalid_values):
+            self.get_logger().warn(
+                'Ignoring unsupported detector label values',
+                throttle_duration_sec=2.0,
+            )
         t['step5_color_iso'] = (time.perf_counter() - t_start) * 1000.0
 
-        # --- STEP 7: POINT EXTRACTION AND RESCALING ---
+        # --- STEP 7: POINT EXTRACTION ---
         t_start = time.perf_counter()
-        raw_points_green = np.argwhere(is_green_low)
-        raw_points_blue = np.argwhere(is_blue_low)
-        raw_points_white = np.argwhere(
-            (background_mask > 0) | (dashed_mask > 0))
+        raw_points_turquoise = np.argwhere(turquoise_mask)
+        raw_points_blue = np.argwhere(blue_mask)
+        raw_points_white = np.argwhere(background_mask)
 
         raw_points_blue = self.voxelize_points(
-            raw_points_blue, LOW_RES_SIZE)
+            raw_points_blue, width)
         raw_points_white = self.voxelize_points(
-            raw_points_white, LOW_RES_SIZE)
-
-        scale_x = high_w / LOW_RES_SIZE
-        scale_y = high_h / LOW_RES_SIZE
-
-        scale_points = lambda raw_pts: np.stack([raw_pts[:, 1] * scale_x, raw_pts[:, 0] * scale_y], axis=-1).astype(np.int32) \
-                        if len(raw_pts) > 0 else np.empty((0, 2), dtype=np.int32)
-
-        pts_green = scale_points(raw_points_green)
-        pts_blue = scale_points(raw_points_blue)
-        pts_white = scale_points(raw_points_white)
+            raw_points_white, width)
         t['step7_points'] = (time.perf_counter() - t_start) * 1000.0
 
-        # --- STEP 8: DRAW AND PUBLISH ---
+        # --- STEP 8: METRIC POINT CLOUD ---
         t_start = time.perf_counter()
-        if len(pts_green) > 0:
-            u_g = np.clip(pts_green[:, 0], 0, high_w - 1)
-            v_g = np.clip(pts_green[:, 1], 0, high_h - 1)
-            only_lines_frame[v_g, u_g] = [255, 255, 0]
+        point_count = self.publish_pointcloud(
+            raw_points_blue,
+            raw_points_turquoise,
+            raw_points_white,
+            width,
+            height,
+            msg.header,
+        )
+        t['step8_cloud_publish'] = (
+            time.perf_counter() - t_start) * 1000.0
+        if point_count is not None:
+            t['point_count'] = point_count
 
-        if len(pts_blue) > 0:
-            u_b = np.clip(pts_blue[:, 0], 0, high_w - 1)
-            v_b = np.clip(pts_blue[:, 1], 0, high_h - 1)
-            only_lines_frame[v_b, u_b] = [255, 0, 0]
+        # --- STEP 9: DRAW AND PUBLISH COMPATIBILITY IMAGE ---
+        t_start = time.perf_counter()
+        publish_debug = self.debug_pub.get_subscription_count() > 0
+        publish_lines = self.lines_pub.get_subscription_count() > 0
+        if publish_debug or publish_lines:
+            only_lines_frame = np.zeros(
+                (height, width, 3), dtype=np.uint8)
+            if len(raw_points_turquoise) > 0:
+                v_t, u_t = raw_points_turquoise.T
+                only_lines_frame[v_t, u_t] = [255, 255, 0]
 
-        # Background and dashed pixels share the white class and have already
-        # been reduced to at most one representative per spatial voxel.
-        if len(pts_white) > 0:
-            u_w = np.clip(pts_white[:, 0], 0, high_w - 1)
-            v_w = np.clip(pts_white[:, 1], 0, high_h - 1)
-            only_lines_frame[v_w, u_w] = [255, 255, 255]
-            full_overlay_frame[v_w, u_w] = [255, 255, 255]
+            if len(raw_points_blue) > 0:
+                v_b, u_b = raw_points_blue.T
+                only_lines_frame[v_b, u_b] = [255, 0, 0]
 
-        self.publish_image(self.debug_pub, full_overlay_frame, msg.header.stamp)
-        self.publish_image(self.lines_pub, only_lines_frame, msg.header.stamp)
-        t['step8_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
+            # Keep one valid-background representative per spatial voxel.
+            if len(raw_points_white) > 0:
+                v_w, u_w = raw_points_white.T
+                only_lines_frame[v_w, u_w] = [255, 255, 255]
+
+            if publish_debug:
+                self.publish_image(
+                    self.debug_pub, only_lines_frame, msg.header)
+            if publish_lines:
+                self.publish_image(
+                    self.lines_pub, only_lines_frame, msg.header)
+        t['step9_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
 
         t['total'] = (time.perf_counter() - start_total) * 1000.0
-        self.log_diagnostics(high_w, high_h, t)
+        self.log_diagnostics(width, height, t)
 
     def log_diagnostics(self, w, h, t):
         for key, val in t.items():
-            if key in self.telemetry_stats:
+            if key in self.telemetry_stats and np.isfinite(val):
                 self.telemetry_stats[key].append(val)
 
         self.frame_count += 1
@@ -270,6 +435,10 @@ class CurbDetector(Node):
                 for key in self.telemetry_stats
             }
             fps = 1000.0 / avg['total'] if avg['total'] > 0 else 0.0
+            point_count_avg = (
+                f'{avg["point_count"]:.0f}'
+                if self.telemetry_stats['point_count'] else 'n/a'
+            )
 
             self.get_logger().info(
                 f"\n"
@@ -280,17 +449,140 @@ class CurbDetector(Node):
                 f"  [Decompression]                 Current: {t['decomp']:.2f} ms | Avg ({self.window_size}f): {avg['decomp']:.2f} ms\n"
                 f"  [Step 1: Mask Extraction]       Current: {t['step1_masks']:.2f} ms | Avg ({self.window_size}f): {avg['step1_masks']:.2f} ms\n"
                 f"  [Step 3: Crop]                  Current: {t['step3_crop']:.2f} ms | Avg ({self.window_size}f): {avg['step3_crop']:.2f} ms\n"
-                f"  [Step 4: Multi-Zone BG Clean]   Current: {t['step4_bg_clean']:.2f} ms | Avg ({self.window_size}f): {avg['step4_bg_clean']:.2f} ms\n"
-                f"  [Step 5: Color Isolation]       Current: {t['step5_color_iso']:.2f} ms | Avg ({self.window_size}f): {avg['step5_color_iso']:.2f} ms\n"
+                f"  [Step 5: Label Validation]      Current: {t['step5_color_iso']:.2f} ms | Avg ({self.window_size}f): {avg['step5_color_iso']:.2f} ms\n"
                 f"  [Step 7: Point Extraction]      Current: {t['step7_points']:.2f} ms | Avg ({self.window_size}f): {avg['step7_points']:.2f} ms\n"
-                f"  [Step 8: Draw & Publish]        Current: {t['step8_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_draw_publish']:.2f} ms\n"
+                f"  [Step 8: Cloud Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
+                f"  [Step 9: Draw & Publish]        Current: {t['step9_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step9_draw_publish']:.2f} ms\n"
+                f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg}\n"
                 f"======================================================================"
             )
 
-    def publish_image(self, publisher, frame, timestamp):
+    @staticmethod
+    def stamp_to_nanoseconds(stamp):
+        return stamp.sec * 1000000000 + stamp.nanosec
+
+    def publish_pointcloud(
+            self, blue_points, turquoise_points, background_points,
+            width, height, header):
+        """Back-project the three pixel classes into the RGB optical frame."""
+        with self.sensor_lock:
+            depth = self.depth_image
+            depth_stamp_ns = self.depth_stamp_ns
+            depth_source = self.depth_source
+            intrinsics = self.camera_intrinsics
+
+        if depth is None or intrinsics is None:
+            self.get_logger().warning(
+                'Waiting for depth and RGB CameraInfo',
+                throttle_duration_sec=2.0,
+            )
+            return
+        if depth_source == 'raw fallback':
+            crop_start = int(depth.shape[0] * self.input_crop_y_min)
+            cropped_depth = depth[crop_start:, :]
+            if cropped_depth.size == 0:
+                self.get_logger().warning(
+                    f'Cannot crop raw depth with input_crop_y_min='
+                    f'{self.input_crop_y_min:.3f}',
+                    throttle_duration_sec=2.0,
+                )
+                return
+            depth = cv2.resize(
+                cropped_depth,
+                (width, height),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        elif depth.shape[:2] != (height, width):
+            self.get_logger().warning(
+                f'Cannot align label map {width}x{height} with depth '
+                f'{depth.shape[1]}x{depth.shape[0]}',
+                throttle_duration_sec=2.0,
+            )
+            return
+
+        label_stamp_ns = self.stamp_to_nanoseconds(header.stamp)
+        if (self.max_depth_time_delta > 0.0 and label_stamp_ns and
+                depth_stamp_ns and abs(label_stamp_ns - depth_stamp_ns) >
+                self.max_depth_time_delta * 1e9):
+            self.get_logger().warning(
+                'Skipping cloud: label and depth timestamps are too far apart',
+                throttle_duration_sec=2.0,
+            )
+            return
+
+        fx_raw, fy_raw, cx_raw, cy_raw, info_width, info_height = intrinsics
+        if fx_raw <= 0.0 or fy_raw <= 0.0 or not info_width or not info_height:
+            self.get_logger().error('Invalid RGB CameraInfo intrinsics')
+            return
+
+        point_groups = (
+            (blue_points, self.LABEL_BLUE),
+            (turquoise_points, self.LABEL_TURQUOISE),
+            (background_points, self.LABEL_BACKGROUND),
+        )
+        nonempty_groups = [
+            (points, label) for points, label in point_groups if len(points)
+        ]
+        if nonempty_groups:
+            pixels = np.concatenate(
+                [group[0] for group in nonempty_groups], axis=0)
+            class_ids = np.concatenate([
+                np.full(len(group[0]), group[1], dtype=np.uint8)
+                for group in nonempty_groups
+            ])
+        else:
+            pixels = np.empty((0, 2), dtype=np.int32)
+            class_ids = np.empty(0, dtype=np.uint8)
+
+        rows = pixels[:, 0]
+        cols = pixels[:, 1]
+        z = depth[rows, cols]
+        valid = (
+            np.isfinite(z)
+            & (z >= self.cloud_min_depth)
+            & (z <= self.cloud_max_depth)
+        )
+        rows = rows[valid]
+        cols = cols[valid]
+        z = z[valid].astype(np.float32, copy=False)
+        class_ids = class_ids[valid]
+
+        crop_start = int(info_height * self.input_crop_y_min)
+        crop_height = info_height - crop_start
+        source_cols = (
+            (cols.astype(np.float32) + 0.5) * info_width / width - 0.5)
+        source_rows = (
+            crop_start
+            + (rows.astype(np.float32) + 0.5) * crop_height / height
+            - 0.5
+        )
+
+        cloud_points = np.zeros(len(rows), dtype=self.CLOUD_DTYPE)
+        cloud_points['x'] = (source_cols - cx_raw) * z / fx_raw
+        cloud_points['y'] = (source_rows - cy_raw) * z / fy_raw
+        cloud_points['z'] = z
+        cloud_points['class_id'] = class_ids
+        blue = class_ids == self.LABEL_BLUE
+        cloud_points['radius_min'][blue] = self.blue_radius_min
+        cloud_points['radius_max'][blue] = self.blue_radius_max
+
+        cloud = PointCloud2()
+        cloud.header = header
+        cloud.height = 1
+        cloud.width = len(cloud_points)
+        cloud.fields = self.CLOUD_FIELDS
+        cloud.is_bigendian = False
+        cloud.point_step = self.CLOUD_DTYPE.itemsize
+        cloud.row_step = cloud.point_step * cloud.width
+        cloud.data = cloud_points.tobytes()
+        cloud.is_dense = True
+        self.pointcloud_pub.publish(cloud)
+        return len(cloud_points)
+
+    def publish_image(self, publisher, frame, header):
         try:
             msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
-            msg.header.stamp = timestamp
+            msg.header = header
             publisher.publish(msg)
         except Exception as e:
             self.get_logger().error(f"Failed to publish image: {str(e)}")
