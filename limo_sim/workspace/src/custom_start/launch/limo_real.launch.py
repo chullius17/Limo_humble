@@ -121,6 +121,14 @@ def generate_launch_description():
                     'depth_height': '400',
                     'enable_point_cloud': 'false',
                     'color_depth_synchronization': 'true',
+                    # The driver's camera_*_optical_frame transforms are
+                    # rigid (computed once from calibration), but with the
+                    # default rate it re-broadcasts them on /tf every
+                    # 1/tf_publish_rate seconds instead of /tf_static.
+                    # <=0 makes it publish them once on /tf_static, which
+                    # tf2 treats as valid for all time and avoids
+                    # "extrapolation into the future" lookup failures.
+                    'tf_publish_rate': '0.0',
                 }.items(),
             ),
         ],
