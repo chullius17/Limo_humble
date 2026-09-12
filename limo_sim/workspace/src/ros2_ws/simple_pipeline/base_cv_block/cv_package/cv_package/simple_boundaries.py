@@ -2,6 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
 from sensor_msgs.msg import (
     CameraInfo,
     CompressedImage,
@@ -13,6 +14,7 @@ import cv2
 from cv_bridge import CvBridge
 import numpy as np
 from turbojpeg import TJPF_BGR, TurboJPEG
+from tf2_ros import Buffer, TransformException, TransformListener
 import time
 import threading
 from queue import Queue, Empty
@@ -26,11 +28,10 @@ class CurbDetector(Node):
     LABEL_TURQUOISE = np.uint8(2)
     LABEL_BACKGROUND = np.uint8(3)
     CLOUD_DTYPE = np.dtype({
-        'names': (
-            'x', 'y', 'z', 'class_id', 'radius_min', 'radius_max'),
-        'formats': ('<f4', '<f4', '<f4', 'u1', '<f4', '<f4'),
-        'offsets': (0, 4, 8, 12, 16, 20),
-        'itemsize': 24,
+        'names': ('x', 'y', 'class_id'),
+        'formats': ('<f4', '<f4', 'u1'),
+        'offsets': (0, 4, 8),
+        'itemsize': 9,
     })
     CLOUD_FIELDS = [
         PointField(
@@ -38,15 +39,7 @@ class CurbDetector(Node):
         PointField(
             name='y', offset=4, datatype=PointField.FLOAT32, count=1),
         PointField(
-            name='z', offset=8, datatype=PointField.FLOAT32, count=1),
-        PointField(
-            name='class_id', offset=12, datatype=PointField.UINT8, count=1),
-        PointField(
-            name='radius_min', offset=16,
-            datatype=PointField.FLOAT32, count=1),
-        PointField(
-            name='radius_max', offset=20,
-            datatype=PointField.FLOAT32, count=1),
+            name='class_id', offset=8, datatype=PointField.UINT8, count=1),
     ]
 
     def __init__(self):
@@ -86,6 +79,7 @@ class CurbDetector(Node):
         self.declare_parameter('fallback_depth_height', 120)
         self.declare_parameter(
             'pointcloud_topic', 'limo/cv_package/boundaries/points')
+        self.declare_parameter('bev_frame', 'base_link')
         self.declare_parameter('input_crop_y_min', 0.5)
         self.declare_parameter('pointcloud_min_depth_m', 0.1)
         self.declare_parameter('pointcloud_max_depth_m', 5.0)
@@ -108,6 +102,7 @@ class CurbDetector(Node):
             self.get_parameter('blue_radius_min_m').value)
         self.blue_radius_max = float(
             self.get_parameter('blue_radius_max_m').value)
+        self.bev_frame = str(self.get_parameter('bev_frame').value)
         if not 0.0 <= self.input_crop_y_min < 1.0:
             raise ValueError('input_crop_y_min must be in [0, 1)')
         if not 0.0 < self.cloud_min_depth < self.cloud_max_depth:
@@ -118,6 +113,8 @@ class CurbDetector(Node):
             raise ValueError('Fallback depth dimensions must be positive')
         if not 0.0 <= self.blue_radius_min <= self.blue_radius_max:
             raise ValueError('Blue point radii are invalid')
+        if not self.bev_frame:
+            raise ValueError('bev_frame cannot be empty')
 
         pipeline_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -183,6 +180,8 @@ class CurbDetector(Node):
         self.depth_source = None
         self.corrected_depth_received_at = None
         self.camera_intrinsics = None
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Threading and Queue Setup
         self.frame_queue = Queue(maxsize=1)
@@ -210,7 +209,8 @@ class CurbDetector(Node):
         self.worker_thread = threading.Thread(target=self._processing_worker, daemon=True)
         self.worker_thread.start()
         self.get_logger().info(
-            'CurbDetector initialized: label-map image and metric cloud.')
+            f'CurbDetector initialized: compact 2D cloud in '
+            f'{self.bev_frame}.')
 
     def voxelize_points(self, raw_points, image_width):
         """Replace all points in each 2D cell with their centroid."""
@@ -233,6 +233,30 @@ class CurbDetector(Node):
         centroids_x = np.rint(
             sum_x[occupied] / counts[occupied]).astype(np.int32)
         return np.column_stack((centroids_y, centroids_x))
+
+    @staticmethod
+    def quaternion_to_rotation(quaternion):
+        """Return the rotation matrix represented by a ROS quaternion."""
+        x = quaternion.x
+        y = quaternion.y
+        z = quaternion.z
+        w = quaternion.w
+        norm = x * x + y * y + z * z + w * w
+        if norm < 1e-12:
+            raise ValueError('TF contains an invalid zero quaternion')
+
+        scale = 2.0 / norm
+        return np.array([
+            [1.0 - scale * (y * y + z * z),
+             scale * (x * y - z * w),
+             scale * (x * z + y * w)],
+            [scale * (x * y + z * w),
+             1.0 - scale * (x * x + z * z),
+             scale * (y * z - x * w)],
+            [scale * (x * z - y * w),
+             scale * (y * z + x * w),
+             1.0 - scale * (x * x + y * y)],
+        ], dtype=np.float32)
 
     def image_callback(self, msg):
         """ROS 2 Callback: Enqueues incoming frames, dropping stale frames if queue is full."""
@@ -410,7 +434,7 @@ class CurbDetector(Node):
             raw_points_white, width)
         t['step7_points'] = (time.perf_counter() - t_start) * 1000.0
 
-        # --- STEP 8: METRIC POINT CLOUD ---
+        # --- STEP 8: METRIC 2D BEV POINT CLOUD ---
         point_count, prepare_ms, publish_ms = self.publish_pointcloud(
             raw_points_blue,
             raw_points_turquoise,
@@ -497,7 +521,7 @@ class CurbDetector(Node):
     def publish_pointcloud(
             self, blue_points, turquoise_points, background_points,
             width, height, header):
-        """Back-project the three pixel classes into the RGB optical frame."""
+        """Back-project the pixel classes directly into a 2D BEV cloud."""
         prepare_started_at = time.perf_counter()
 
         def skipped_result():
@@ -570,17 +594,48 @@ class CurbDetector(Node):
             - 0.5
         )
 
-        cloud_points = np.zeros(len(rows), dtype=self.CLOUD_DTYPE)
-        cloud_points['x'] = (source_cols - cx_raw) * z / fx_raw
-        cloud_points['y'] = (source_rows - cy_raw) * z / fy_raw
-        cloud_points['z'] = z
+        if not header.frame_id:
+            self.get_logger().warning(
+                'Cannot create BEV points with an empty input frame_id',
+                throttle_duration_sec=2.0,
+            )
+            return skipped_result()
+
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.bev_frame,
+                header.frame_id,
+                Time.from_msg(header.stamp),
+            )
+            rotation = self.quaternion_to_rotation(
+                transform.transform.rotation)
+        except (TransformException, TypeError, ValueError) as error:
+            self.get_logger().warning(
+                f'Waiting for TF {header.frame_id} -> '
+                f'{self.bev_frame}: {error}',
+                throttle_duration_sec=2.0,
+            )
+            return skipped_result()
+
+        camera_points = np.column_stack((
+            (source_cols - cx_raw) * z / fx_raw,
+            (source_rows - cy_raw) * z / fy_raw,
+            z,
+        )).astype(np.float32, copy=False)
+        bev_points = camera_points @ rotation[:2, :].T
+        bev_points += np.array([
+            transform.transform.translation.x,
+            transform.transform.translation.y,
+        ], dtype=np.float32)
+
+        cloud_points = np.empty(len(rows), dtype=self.CLOUD_DTYPE)
+        cloud_points['x'] = bev_points[:, 0]
+        cloud_points['y'] = bev_points[:, 1]
         cloud_points['class_id'] = class_ids
-        blue = class_ids == self.LABEL_BLUE
-        cloud_points['radius_min'][blue] = self.blue_radius_min
-        cloud_points['radius_max'][blue] = self.blue_radius_max
 
         cloud = PointCloud2()
-        cloud.header = header
+        cloud.header.stamp = header.stamp
+        cloud.header.frame_id = self.bev_frame
         cloud.height = 1
         cloud.width = len(cloud_points)
         cloud.fields = self.CLOUD_FIELDS
