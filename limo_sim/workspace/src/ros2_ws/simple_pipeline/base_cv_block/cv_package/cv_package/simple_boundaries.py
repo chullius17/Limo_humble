@@ -201,6 +201,9 @@ class CurbDetector(Node):
             'step5_color_iso': deque(maxlen=self.window_size),
             'step7_points': deque(maxlen=self.window_size),
             'step8_cloud_prepare': deque(maxlen=self.window_size),
+            'step8_lock': deque(maxlen=self.window_size),
+            'step8_tf': deque(maxlen=self.window_size),
+            'step8_math': deque(maxlen=self.window_size),
             'step8_cloud_publish': deque(maxlen=self.window_size),
             'step9_draw_publish': deque(maxlen=self.window_size),
             'point_count': deque(maxlen=self.window_size),
@@ -372,6 +375,9 @@ class CurbDetector(Node):
             'step5_color_iso': 0.0,
             'step7_points': 0.0,
             'step8_cloud_prepare': 0.0,
+            'step8_lock': 0.0,
+            'step8_tf': 0.0,
+            'step8_math': 0.0,
             'step8_cloud_publish': 0.0,
             'step9_draw_publish': 0.0,
             'point_count': float('nan'),
@@ -437,7 +443,8 @@ class CurbDetector(Node):
         t['step7_points'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 8: METRIC 2D BEV POINT CLOUD ---
-        point_count, prepare_ms, publish_ms = self.publish_pointcloud(
+        (point_count, prepare_ms, publish_ms,
+         lock_ms, tf_ms, math_ms) = self.publish_pointcloud(
             raw_points_blue,
             raw_points_turquoise,
             raw_points_white,
@@ -446,6 +453,9 @@ class CurbDetector(Node):
             msg.header,
         )
         t['step8_cloud_prepare'] = prepare_ms
+        t['step8_lock'] = lock_ms
+        t['step8_tf'] = tf_ms
+        t['step8_math'] = math_ms
         t['step8_cloud_publish'] = publish_ms
         if point_count is not None:
             t['point_count'] = point_count
@@ -514,6 +524,9 @@ class CurbDetector(Node):
                 f"  [Step 5: Label Validation]      Current: {t['step5_color_iso']:.2f} ms | Avg ({self.window_size}f): {avg['step5_color_iso']:.2f} ms\n"
                 f"  [Step 7: Point Extraction]      Current: {t['step7_points']:.2f} ms | Avg ({self.window_size}f): {avg['step7_points']:.2f} ms\n"
                 f"  [Step 8a: Cloud Preparation]   Current: {t['step8_cloud_prepare']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_prepare']:.2f} ms\n"
+                f"    [8a.1 Lock/Read]              Current: {t['step8_lock']:.2f} ms | Avg ({self.window_size}f): {avg['step8_lock']:.2f} ms\n"
+                f"    [8a.2 TF Lookup]              Current: {t['step8_tf']:.2f} ms | Avg ({self.window_size}f): {avg['step8_tf']:.2f} ms\n"
+                f"    [8a.3 Projection/Serialize]   Current: {t['step8_math']:.2f} ms | Avg ({self.window_size}f): {avg['step8_math']:.2f} ms\n"
                 f"  [Step 8b: DDS Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
                 f"  [Step 9: Draw & Publish]        Current: {t['step9_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step9_draw_publish']:.2f} ms\n"
                 f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg}\n"
@@ -525,15 +538,20 @@ class CurbDetector(Node):
             width, height, header):
         """Back-project the pixel classes directly into a 2D BEV cloud."""
         prepare_started_at = time.perf_counter()
+        lock_ms = 0.0
+        tf_ms = 0.0
+        math_ms = 0.0
 
         def skipped_result():
             prepare_ms = (
                 time.perf_counter() - prepare_started_at) * 1000.0
-            return None, prepare_ms, 0.0
+            return None, prepare_ms, 0.0, lock_ms, tf_ms, math_ms
 
+        lock_started_at = time.perf_counter()
         with self.sensor_lock:
             depth = self.depth_image
             intrinsics = self.camera_intrinsics
+        lock_ms = (time.perf_counter() - lock_started_at) * 1000.0
 
         if depth is None or intrinsics is None:
             self.get_logger().warning(
@@ -554,6 +572,7 @@ class CurbDetector(Node):
             self.get_logger().error('Invalid RGB CameraInfo intrinsics')
             return skipped_result()
 
+        math_started_at = time.perf_counter()
         point_groups = (
             (blue_points, self.LABEL_BLUE),
             (turquoise_points, self.LABEL_TURQUOISE),
@@ -595,6 +614,7 @@ class CurbDetector(Node):
             + (rows.astype(np.float32) + 0.5) * crop_height / height
             - 0.5
         )
+        math_ms += (time.perf_counter() - math_started_at) * 1000.0
 
         if not header.frame_id:
             self.get_logger().warning(
@@ -603,6 +623,7 @@ class CurbDetector(Node):
             )
             return skipped_result()
 
+        tf_started_at = time.perf_counter()
         try:
             transform = self.tf_buffer.lookup_transform(
                 self.bev_frame,
@@ -612,13 +633,16 @@ class CurbDetector(Node):
             rotation = self.quaternion_to_rotation(
                 transform.transform.rotation)
         except (TransformException, TypeError, ValueError) as error:
+            tf_ms = (time.perf_counter() - tf_started_at) * 1000.0
             self.get_logger().warning(
                 f'Waiting for TF {header.frame_id} -> '
                 f'{self.bev_frame}: {error}',
                 throttle_duration_sec=2.0,
             )
             return skipped_result()
+        tf_ms = (time.perf_counter() - tf_started_at) * 1000.0
 
+        math_started_at = time.perf_counter()
         camera_points = np.column_stack((
             (source_cols - cx_raw) * z / fx_raw,
             (source_rows - cy_raw) * z / fy_raw,
@@ -647,13 +671,17 @@ class CurbDetector(Node):
         cloud.row_step = cloud.point_step * cloud.width
         cloud.data = cloud_points.tobytes()
         cloud.is_dense = True
+        math_ms += (time.perf_counter() - math_started_at) * 1000.0
         prepare_ms = (
             time.perf_counter() - prepare_started_at) * 1000.0
         publish_started_at = time.perf_counter()
         self.pointcloud_pub.publish(cloud)
         publish_ms = (
             time.perf_counter() - publish_started_at) * 1000.0
-        return len(cloud_points), prepare_ms, publish_ms
+        return (
+            len(cloud_points), prepare_ms, publish_ms,
+            lock_ms, tf_ms, math_ms,
+        )
 
     def encode_debug_image(self, frame, header):
         """Encode a BGR debug frame as JPEG using libjpeg-turbo."""
