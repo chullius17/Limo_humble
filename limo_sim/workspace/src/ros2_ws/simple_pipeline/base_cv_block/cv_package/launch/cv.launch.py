@@ -36,11 +36,12 @@ def generate_launch_description():
             ),
             'fallback_depth_topic': '/depth_camera/depth/image_raw',
             'corrected_depth_timeout_sec': 1.0,
+            'fallback_depth_width': 320,
+            'fallback_depth_height': 120,
             'pointcloud_topic': 'limo/cv_package/boundaries/points',
             'input_crop_y_min': 0.5,
             'pointcloud_min_depth_m': 0.1,
             'pointcloud_max_depth_m': 5.0,
-            'max_depth_time_delta_sec': 0.1,
             'blue_radius_min_m': 0.10,
             'blue_radius_max_m': 0.16,
         }]

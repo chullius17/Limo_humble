@@ -47,15 +47,15 @@ class SimpleBev(Node):
         if self.telemetry_window_size <= 0 or self.telemetry_interval <= 0:
             raise ValueError('Telemetry window and interval must be positive')
 
-        qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
+        cloud_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
         self.publisher = self.create_publisher(
-            PointCloud2, output_topic, qos)
+            PointCloud2, output_topic, cloud_qos)
         self.subscription = self.create_subscription(
-            PointCloud2, input_topic, self.pointcloud_callback, qos)
+            PointCloud2, input_topic, self.pointcloud_callback, cloud_qos)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)

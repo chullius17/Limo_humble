@@ -16,7 +16,8 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+from turbojpeg import TJPF_BGR, TurboJPEG
 
 class BevAndClassification(Node):
     """Projects boundary pixels to BEV and classifies them in one process."""
@@ -28,6 +29,7 @@ class BevAndClassification(Node):
     def __init__(self):
         super().__init__('bev_and_classification')
         self.bridge = CvBridge()
+        self.jpeg = TurboJPEG()
 
         self.declare_parameter('camera_info_topic', '/rgb/camera_info')
         self.declare_parameter(
@@ -36,7 +38,7 @@ class BevAndClassification(Node):
         )
         self.declare_parameter(
             'rgb_topic',
-            'limo/cv_package/boundaries/lines_and_curbs/raw',
+            'limo/cv_package/boundaries/lines_and_curbs/compressed',
         )
         self.declare_parameter(
             'bev_topic',
@@ -124,7 +126,7 @@ class BevAndClassification(Node):
         self.output_pub = self.create_publisher(
             Image, self.get_parameter('output_topic').value, pipeline_qos)
         self.rgb_sub = self.create_subscription(
-            Image,
+            CompressedImage,
             self.get_parameter('rgb_topic').value,
             self.rgb_callback,
             pipeline_qos,
@@ -636,7 +638,7 @@ class BevAndClassification(Node):
             return
         stage = time.perf_counter()
         try:
-            rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            rgb = self.jpeg.decode(msg.data, pixel_format=TJPF_BGR)
             thresholds = (
                 self._thresholds()
                 if wanted[1] or wanted[2]

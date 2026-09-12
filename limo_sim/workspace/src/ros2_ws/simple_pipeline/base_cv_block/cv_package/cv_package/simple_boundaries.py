@@ -2,10 +2,17 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import CameraInfo, Image, PointCloud2, PointField
-from cv_bridge import CvBridge
+from sensor_msgs.msg import (
+    CameraInfo,
+    CompressedImage,
+    Image,
+    PointCloud2,
+    PointField,
+)
 import cv2
+from cv_bridge import CvBridge
 import numpy as np
+from turbojpeg import TJPF_BGR, TurboJPEG
 import time
 import threading
 from queue import Queue, Empty
@@ -45,6 +52,13 @@ class CurbDetector(Node):
     def __init__(self):
         super().__init__('curb_detector')
         self.bridge = CvBridge()
+        self.jpeg = TurboJPEG()
+
+        self.declare_parameter('debug_jpeg_quality', 85)
+        self.debug_jpeg_quality = int(
+            self.get_parameter('debug_jpeg_quality').value)
+        if not 1 <= self.debug_jpeg_quality <= 100:
+            raise ValueError('debug_jpeg_quality must be in [1, 100]')
 
         # ROI parameters for cropping
         self.declare_parameter('roi_y_min', 0.0)
@@ -68,12 +82,13 @@ class CurbDetector(Node):
         self.declare_parameter(
             'fallback_depth_topic', '/depth_camera/depth/image_raw')
         self.declare_parameter('corrected_depth_timeout_sec', 1.0)
+        self.declare_parameter('fallback_depth_width', 320)
+        self.declare_parameter('fallback_depth_height', 120)
         self.declare_parameter(
             'pointcloud_topic', 'limo/cv_package/boundaries/points')
         self.declare_parameter('input_crop_y_min', 0.5)
         self.declare_parameter('pointcloud_min_depth_m', 0.1)
         self.declare_parameter('pointcloud_max_depth_m', 5.0)
-        self.declare_parameter('max_depth_time_delta_sec', 0.1)
         self.declare_parameter('blue_radius_min_m', 0.10)
         self.declare_parameter('blue_radius_max_m', 0.16)
 
@@ -83,10 +98,12 @@ class CurbDetector(Node):
             self.get_parameter('pointcloud_min_depth_m').value)
         self.cloud_max_depth = float(
             self.get_parameter('pointcloud_max_depth_m').value)
-        self.max_depth_time_delta = float(
-            self.get_parameter('max_depth_time_delta_sec').value)
         self.corrected_depth_timeout = float(
             self.get_parameter('corrected_depth_timeout_sec').value)
+        self.fallback_depth_width = int(
+            self.get_parameter('fallback_depth_width').value)
+        self.fallback_depth_height = int(
+            self.get_parameter('fallback_depth_height').value)
         self.blue_radius_min = float(
             self.get_parameter('blue_radius_min_m').value)
         self.blue_radius_max = float(
@@ -95,10 +112,10 @@ class CurbDetector(Node):
             raise ValueError('input_crop_y_min must be in [0, 1)')
         if not 0.0 < self.cloud_min_depth < self.cloud_max_depth:
             raise ValueError('Point-cloud depth range is invalid')
-        if self.max_depth_time_delta < 0.0:
-            raise ValueError('max_depth_time_delta_sec cannot be negative')
         if self.corrected_depth_timeout <= 0.0:
             raise ValueError('corrected_depth_timeout_sec must be positive')
+        if self.fallback_depth_width <= 0 or self.fallback_depth_height <= 0:
+            raise ValueError('Fallback depth dimensions must be positive')
         if not 0.0 <= self.blue_radius_min <= self.blue_radius_max:
             raise ValueError('Blue point radii are invalid')
 
@@ -108,6 +125,11 @@ class CurbDetector(Node):
             depth=1,
         )
         sensor_qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        cloud_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
@@ -141,24 +163,23 @@ class CurbDetector(Node):
 
         # Publishers
         self.debug_pub = self.create_publisher(
-            Image,
-            'limo/cv_package/boundaries/curb_points_debug/raw',
+            CompressedImage,
+            'limo/cv_package/boundaries/curb_points_debug/compressed',
             pipeline_qos,
         )
         self.lines_pub = self.create_publisher(
-            Image,
-            'limo/cv_package/boundaries/lines_and_curbs/raw',
+            CompressedImage,
+            'limo/cv_package/boundaries/lines_and_curbs/compressed',
             pipeline_qos,
         )
         self.pointcloud_pub = self.create_publisher(
             PointCloud2,
             self.get_parameter('pointcloud_topic').value,
-            pipeline_qos,
+            cloud_qos,
         )
 
         self.sensor_lock = threading.Lock()
         self.depth_image = None
-        self.depth_stamp_ns = 0
         self.depth_source = None
         self.corrected_depth_received_at = None
         self.camera_intrinsics = None
@@ -178,6 +199,7 @@ class CurbDetector(Node):
             'step3_crop': deque(maxlen=self.window_size),
             'step5_color_iso': deque(maxlen=self.window_size),
             'step7_points': deque(maxlen=self.window_size),
+            'step8_cloud_prepare': deque(maxlen=self.window_size),
             'step8_cloud_publish': deque(maxlen=self.window_size),
             'step9_draw_publish': deque(maxlen=self.window_size),
             'point_count': deque(maxlen=self.window_size),
@@ -250,14 +272,9 @@ class CurbDetector(Node):
 
     def store_depth(self, depth, msg, source, received_at):
         """Atomically replace the selected depth frame and report switches."""
-        stamp_ns = (
-            msg.header.stamp.sec * 1000000000
-            + msg.header.stamp.nanosec
-        )
         with self.sensor_lock:
             previous_source = self.depth_source
             self.depth_image = depth
-            self.depth_stamp_ns = stamp_ns
             self.depth_source = source
             if source == 'corrected':
                 self.corrected_depth_received_at = received_at
@@ -284,6 +301,21 @@ class CurbDetector(Node):
         depth = self.convert_depth(msg)
         if depth is None:
             return
+
+        crop_start = int(depth.shape[0] * self.input_crop_y_min)
+        cropped_depth = depth[crop_start:, :]
+        if cropped_depth.size == 0:
+            self.get_logger().warning(
+                f'Cannot crop raw depth with input_crop_y_min='
+                f'{self.input_crop_y_min:.3f}',
+                throttle_duration_sec=2.0,
+            )
+            return
+        depth = cv2.resize(
+            cropped_depth,
+            (self.fallback_depth_width, self.fallback_depth_height),
+            interpolation=cv2.INTER_NEAREST,
+        )
 
         # A corrected frame may have arrived while the raw image was decoded.
         with self.sensor_lock:
@@ -313,6 +345,7 @@ class CurbDetector(Node):
             'step3_crop': 0.0,
             'step5_color_iso': 0.0,
             'step7_points': 0.0,
+            'step8_cloud_prepare': 0.0,
             'step8_cloud_publish': 0.0,
             'step9_draw_publish': 0.0,
             'point_count': float('nan'),
@@ -378,8 +411,7 @@ class CurbDetector(Node):
         t['step7_points'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 8: METRIC POINT CLOUD ---
-        t_start = time.perf_counter()
-        point_count = self.publish_pointcloud(
+        point_count, prepare_ms, publish_ms = self.publish_pointcloud(
             raw_points_blue,
             raw_points_turquoise,
             raw_points_white,
@@ -387,8 +419,8 @@ class CurbDetector(Node):
             height,
             msg.header,
         )
-        t['step8_cloud_publish'] = (
-            time.perf_counter() - t_start) * 1000.0
+        t['step8_cloud_prepare'] = prepare_ms
+        t['step8_cloud_publish'] = publish_ms
         if point_count is not None:
             t['point_count'] = point_count
 
@@ -412,12 +444,16 @@ class CurbDetector(Node):
                 v_w, u_w = raw_points_white.T
                 only_lines_frame[v_w, u_w] = [255, 255, 255]
 
-            if publish_debug:
-                self.publish_image(
-                    self.debug_pub, only_lines_frame, msg.header)
-            if publish_lines:
-                self.publish_image(
-                    self.lines_pub, only_lines_frame, msg.header)
+            try:
+                debug_msg = self.encode_debug_image(
+                    only_lines_frame, msg.header)
+                if publish_debug:
+                    self.debug_pub.publish(debug_msg)
+                if publish_lines:
+                    self.lines_pub.publish(debug_msg)
+            except Exception as e:
+                self.get_logger().error(
+                    f"Failed to publish compressed debug image: {str(e)}")
         t['step9_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
 
         t['total'] = (time.perf_counter() - start_total) * 1000.0
@@ -451,24 +487,26 @@ class CurbDetector(Node):
                 f"  [Step 3: Crop]                  Current: {t['step3_crop']:.2f} ms | Avg ({self.window_size}f): {avg['step3_crop']:.2f} ms\n"
                 f"  [Step 5: Label Validation]      Current: {t['step5_color_iso']:.2f} ms | Avg ({self.window_size}f): {avg['step5_color_iso']:.2f} ms\n"
                 f"  [Step 7: Point Extraction]      Current: {t['step7_points']:.2f} ms | Avg ({self.window_size}f): {avg['step7_points']:.2f} ms\n"
-                f"  [Step 8: Cloud Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
+                f"  [Step 8a: Cloud Preparation]   Current: {t['step8_cloud_prepare']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_prepare']:.2f} ms\n"
+                f"  [Step 8b: DDS Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
                 f"  [Step 9: Draw & Publish]        Current: {t['step9_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step9_draw_publish']:.2f} ms\n"
                 f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg}\n"
                 f"======================================================================"
             )
 
-    @staticmethod
-    def stamp_to_nanoseconds(stamp):
-        return stamp.sec * 1000000000 + stamp.nanosec
-
     def publish_pointcloud(
             self, blue_points, turquoise_points, background_points,
             width, height, header):
         """Back-project the three pixel classes into the RGB optical frame."""
+        prepare_started_at = time.perf_counter()
+
+        def skipped_result():
+            prepare_ms = (
+                time.perf_counter() - prepare_started_at) * 1000.0
+            return None, prepare_ms, 0.0
+
         with self.sensor_lock:
             depth = self.depth_image
-            depth_stamp_ns = self.depth_stamp_ns
-            depth_source = self.depth_source
             intrinsics = self.camera_intrinsics
 
         if depth is None or intrinsics is None:
@@ -476,44 +514,19 @@ class CurbDetector(Node):
                 'Waiting for depth and RGB CameraInfo',
                 throttle_duration_sec=2.0,
             )
-            return
-        if depth_source == 'raw fallback':
-            crop_start = int(depth.shape[0] * self.input_crop_y_min)
-            cropped_depth = depth[crop_start:, :]
-            if cropped_depth.size == 0:
-                self.get_logger().warning(
-                    f'Cannot crop raw depth with input_crop_y_min='
-                    f'{self.input_crop_y_min:.3f}',
-                    throttle_duration_sec=2.0,
-                )
-                return
-            depth = cv2.resize(
-                cropped_depth,
-                (width, height),
-                interpolation=cv2.INTER_NEAREST,
-            )
-        elif depth.shape[:2] != (height, width):
+            return skipped_result()
+        if depth.shape[:2] != (height, width):
             self.get_logger().warning(
                 f'Cannot align label map {width}x{height} with depth '
                 f'{depth.shape[1]}x{depth.shape[0]}',
                 throttle_duration_sec=2.0,
             )
-            return
-
-        label_stamp_ns = self.stamp_to_nanoseconds(header.stamp)
-        if (self.max_depth_time_delta > 0.0 and label_stamp_ns and
-                depth_stamp_ns and abs(label_stamp_ns - depth_stamp_ns) >
-                self.max_depth_time_delta * 1e9):
-            self.get_logger().warning(
-                'Skipping cloud: label and depth timestamps are too far apart',
-                throttle_duration_sec=2.0,
-            )
-            return
+            return skipped_result()
 
         fx_raw, fy_raw, cx_raw, cy_raw, info_width, info_height = intrinsics
         if fx_raw <= 0.0 or fy_raw <= 0.0 or not info_width or not info_height:
             self.get_logger().error('Invalid RGB CameraInfo intrinsics')
-            return
+            return skipped_result()
 
         point_groups = (
             (blue_points, self.LABEL_BLUE),
@@ -576,16 +589,25 @@ class CurbDetector(Node):
         cloud.row_step = cloud.point_step * cloud.width
         cloud.data = cloud_points.tobytes()
         cloud.is_dense = True
+        prepare_ms = (
+            time.perf_counter() - prepare_started_at) * 1000.0
+        publish_started_at = time.perf_counter()
         self.pointcloud_pub.publish(cloud)
-        return len(cloud_points)
+        publish_ms = (
+            time.perf_counter() - publish_started_at) * 1000.0
+        return len(cloud_points), prepare_ms, publish_ms
 
-    def publish_image(self, publisher, frame, header):
-        try:
-            msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
-            msg.header = header
-            publisher.publish(msg)
-        except Exception as e:
-            self.get_logger().error(f"Failed to publish image: {str(e)}")
+    def encode_debug_image(self, frame, header):
+        """Encode a BGR debug frame as JPEG using libjpeg-turbo."""
+        msg = CompressedImage()
+        msg.header = header
+        msg.format = 'bgr8; jpeg compressed bgr8'
+        msg.data = self.jpeg.encode(
+            frame,
+            quality=self.debug_jpeg_quality,
+            pixel_format=TJPF_BGR,
+        )
+        return msg
 
     def destroy_node(self):
         self.is_running = False

@@ -12,9 +12,12 @@
 
 #include <filesystem>
 #include <fcntl.h>
-#include "astra_camera/ob_camera_node_factory.h"
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_components/register_node_macro.hpp>
 #include <semaphore.h>
 #include <sys/shm.h>
+
+#include "astra_camera/ob_camera_node_factory.h"
 
 namespace astra_camera {
 using namespace std::chrono_literals;
@@ -219,3 +222,5 @@ void OBCameraNodeFactory::checkConnectionTimer() {
 }
 
 }  // namespace astra_camera
+
+RCLCPP_COMPONENTS_REGISTER_NODE(astra_camera::OBCameraNodeFactory)

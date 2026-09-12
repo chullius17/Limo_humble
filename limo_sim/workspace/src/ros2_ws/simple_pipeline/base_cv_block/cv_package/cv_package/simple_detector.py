@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CompressedImage, Image
 import cv2
 from cv_bridge import CvBridge
 import numpy as np
+from turbojpeg import TJPF_BGR, TurboJPEG
 
 import time
 from collections import deque
@@ -41,14 +42,25 @@ class ColorLaneDetector(Node):
         self.label_pub = self.create_publisher(
             Image, 'limo/cv_package/detection/lane_labels/raw', output_qos
         )
-        self.raw_mask_pub = self.create_publisher(
-            Image, 'limo/cv_package/detection/lane_masks/raw', output_qos
+        self.debug_mask_pub = self.create_publisher(
+            CompressedImage,
+            'limo/cv_package/detection/lane_masks/compressed',
+            output_qos,
         )
-        self.image_pub = self.create_publisher(
-            Image, 'limo/cv_package/detection/lane_overlay/raw', output_qos
+        self.debug_overlay_pub = self.create_publisher(
+            CompressedImage,
+            'limo/cv_package/detection/lane_overlay/compressed',
+            output_qos,
         )
         
         self.bridge = CvBridge()
+        self.jpeg = TurboJPEG()
+
+        self.declare_parameter('debug_jpeg_quality', 85)
+        self.debug_jpeg_quality = int(
+            self.get_parameter('debug_jpeg_quality').value)
+        if not 1 <= self.debug_jpeg_quality <= 100:
+            raise ValueError('debug_jpeg_quality must be in [1, 100]')
 
         # Telemetry control parameters
         self.declare_parameter('enable_telemetry', True)
@@ -223,11 +235,11 @@ class ColorLaneDetector(Node):
         # Preserve the existing precedence when the two HSV masks overlap.
         labels[yellow_mask != 0] = self.LABEL_TURQUOISE
 
-        publish_legacy_mask = self.raw_mask_pub.get_subscription_count() > 0
-        publish_overlay = self.image_pub.get_subscription_count() > 0
+        publish_debug_mask = self.debug_mask_pub.get_subscription_count() > 0
+        publish_overlay = self.debug_overlay_pub.get_subscription_count() > 0
         mask_overlay = None
         overlay_image = None
-        if publish_legacy_mask or publish_overlay:
+        if publish_debug_mask or publish_overlay:
             mask_overlay = np.zeros_like(low_res)
             mask_overlay[labels == self.LABEL_BLUE] = (255, 0, 0)
             mask_overlay[labels == self.LABEL_TURQUOISE] = (0, 255, 0)
@@ -258,7 +270,7 @@ class ColorLaneDetector(Node):
                     mask_overlay,
                     overlay_image,
                     header,
-                    publish_legacy_mask,
+                    publish_debug_mask,
                     publish_overlay,
                 )
             )
@@ -290,7 +302,7 @@ class ColorLaneDetector(Node):
                 mask_overlay,
                 overlay_image,
                 header,
-                publish_legacy_mask,
+                publish_debug_mask,
                 publish_overlay,
             ) = item
             t_pub_start = time.perf_counter() if self.debug_telemetry else 0.0
@@ -303,24 +315,13 @@ class ColorLaneDetector(Node):
                 label_msg.header = header
                 self.label_pub.publish(label_msg)
 
-                # Keep the BGR mask during the boundary-node migration. Once
-                # no subscriber remains, neither this image nor its conversion
-                # is produced.
-                if publish_legacy_mask:
-                    ros_mask_msg = self.bridge.cv2_to_imgmsg(
-                        mask_overlay,
-                        encoding='bgr8',
-                    )
-                    ros_mask_msg.header = header
-                    self.raw_mask_pub.publish(ros_mask_msg)
+                if publish_debug_mask:
+                    self.debug_mask_pub.publish(
+                        self._encode_debug_image(mask_overlay, header))
 
                 if publish_overlay:
-                    ros_overlay_msg = self.bridge.cv2_to_imgmsg(
-                        overlay_image,
-                        encoding='bgr8',
-                    )
-                    ros_overlay_msg.header = header
-                    self.image_pub.publish(ros_overlay_msg)
+                    self.debug_overlay_pub.publish(
+                        self._encode_debug_image(overlay_image, header))
 
             except Exception as e:
                 self.get_logger().error(f"Publishing failed: {str(e)}")
@@ -334,6 +335,18 @@ class ColorLaneDetector(Node):
                 t_msg_final = stamp.sec + stamp.nanosec * 1e-9
                 final_age = (t_now_final - t_msg_final) * 1000.0
                 self.telemetry_stats['12_msg_age_final_publish'].append(final_age)
+
+    def _encode_debug_image(self, image, header):
+        """Encode a BGR debug frame as JPEG using libjpeg-turbo."""
+        msg = CompressedImage()
+        msg.header = header
+        msg.format = 'bgr8; jpeg compressed bgr8'
+        msg.data = self.jpeg.encode(
+            image,
+            quality=self.debug_jpeg_quality,
+            pixel_format=TJPF_BGR,
+        )
+        return msg
 
     def _log_telemetry_report(self):
         """Prints sliding window performance statistics averaged over the last 30 frames."""
