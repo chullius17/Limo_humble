@@ -16,6 +16,7 @@ def generate_launch_description():
                 'rgb_topic': '/rgb/image_raw',
                 'roi_y_min': 0.1,
                 'roi_y_max': 1.0,
+                'opencv_num_threads': 1,
             }]
         )
 
