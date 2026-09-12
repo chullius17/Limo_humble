@@ -1,0 +1,229 @@
+RCUTILS_CONSOLE_STDOUT_LINE_BUFFERED is now ignored.  Please set RCUTILS_LOGGING_USE_STDOUT and RCUTILS_LOGGING_BUFFERED_STREAM to control the stream and the buffering of log messages.
+[INFO] [1789228173.150127451] [curb_detector]: CurbDetector initialized: compact 2D cloud in base_link.
+[INFO] [1789228173.163236039] [curb_detector]: Using corrected depth: camera_depth_optical_frame
+[WARN] [1789228173.210436500] [curb_detector]: Waiting for depth and RGB CameraInfo
+[WARN] [1789228173.684438807] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228173.380286 but the latest data is at time 1789228173.373035, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228175.756440919] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 15.2 WORKER FPS) ================
+  Frames processed: 30 | Queue depth: 1
+  [Total Latency]                 Current: 107.26 ms | Avg (30f): 65.69 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 1.76 ms | Avg (30f): 2.73 ms
+  [Step 1: Mask Extraction]       Current: 0.66 ms | Avg (30f): 2.09 ms
+  [Step 3: Crop]                  Current: 0.60 ms | Avg (30f): 1.99 ms
+  [Step 5: Label Validation]      Current: 0.16 ms | Avg (30f): 0.55 ms
+  [Step 7: Point Extraction]      Current: 35.28 ms | Avg (30f): 22.19 ms
+  [Step 8a: Cloud Preparation]   Current: 68.31 ms | Avg (30f): 34.87 ms
+  [Step 8b: DDS Publish]         Current: 0.30 ms | Avg (30f): 0.46 ms
+  [Step 9: Draw & Publish]        Current: 0.08 ms | Avg (30f): 0.70 ms
+  [Cloud Points]                  Avg (30 clouds): 3528
+======================================================================
+[WARN] [1789228177.665909668] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228177.638480 but the latest data is at time 1789228177.617480, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228178.795955413] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 11.9 WORKER FPS) ================
+  Frames processed: 60 | Queue depth: 1
+  [Total Latency]                 Current: 37.02 ms | Avg (30f): 83.91 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 1.91 ms | Avg (30f): 3.41 ms
+  [Step 1: Mask Extraction]       Current: 0.51 ms | Avg (30f): 4.46 ms
+  [Step 3: Crop]                  Current: 0.51 ms | Avg (30f): 2.76 ms
+  [Step 5: Label Validation]      Current: 0.11 ms | Avg (30f): 0.58 ms
+  [Step 7: Point Extraction]      Current: 11.72 ms | Avg (30f): 15.53 ms
+  [Step 8a: Cloud Preparation]   Current: 22.09 ms | Avg (30f): 56.16 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.77 ms
+  [Step 9: Draw & Publish]        Current: 0.07 ms | Avg (30f): 0.10 ms
+  [Cloud Points]                  Avg (30 clouds): 3529
+======================================================================
+[WARN] [1789228179.915198016] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228179.870975 but the latest data is at time 1789228179.822870, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228181.339946735] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 17.3 WORKER FPS) ================
+  Frames processed: 90 | Queue depth: 1
+  [Total Latency]                 Current: 50.28 ms | Avg (30f): 57.94 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 3.00 ms | Avg (30f): 1.54 ms
+  [Step 1: Mask Extraction]       Current: 22.67 ms | Avg (30f): 3.01 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 1.85 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.82 ms
+  [Step 7: Point Extraction]      Current: 9.44 ms | Avg (30f): 13.35 ms
+  [Step 8a: Cloud Preparation]   Current: 14.44 ms | Avg (30f): 36.59 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.50 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 3531
+======================================================================
+[WARN] [1789228182.003769766] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228181.970853 but the latest data is at time 1789228181.926251, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228183.719303670] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 15.3 WORKER FPS) ================
+  Frames processed: 120 | Queue depth: 0
+  [Total Latency]                 Current: 67.17 ms | Avg (30f): 65.41 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.31 ms | Avg (30f): 1.27 ms
+  [Step 1: Mask Extraction]       Current: 0.55 ms | Avg (30f): 1.92 ms
+  [Step 3: Crop]                  Current: 0.51 ms | Avg (30f): 1.23 ms
+  [Step 5: Label Validation]      Current: 0.12 ms | Avg (30f): 0.63 ms
+  [Step 7: Point Extraction]      Current: 10.08 ms | Avg (30f): 16.51 ms
+  [Step 8a: Cloud Preparation]   Current: 55.16 ms | Avg (30f): 42.69 ms
+  [Step 8b: DDS Publish]         Current: 0.29 ms | Avg (30f): 1.01 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 3537
+======================================================================
+[WARN] [1789228184.544792912] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228184.434356 but the latest data is at time 1789228184.430568, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228186.414167448] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 12.2 WORKER FPS) ================
+  Frames processed: 150 | Queue depth: 0
+  [Total Latency]                 Current: 57.89 ms | Avg (30f): 81.91 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.23 ms | Avg (30f): 2.14 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 2.46 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 2.11 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 1.53 ms
+  [Step 7: Point Extraction]      Current: 37.04 ms | Avg (30f): 20.51 ms
+  [Step 8a: Cloud Preparation]   Current: 17.19 ms | Avg (30f): 51.72 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 1.17 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 3542
+======================================================================
+[WARN] [1789228186.753765124] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228186.702234 but the latest data is at time 1789228186.636216, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[WARN] [1789228188.839704368] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228188.766184 but the latest data is at time 1789228188.733008, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228189.221707713] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 14.5 WORKER FPS) ================
+  Frames processed: 180 | Queue depth: 1
+  [Total Latency]                 Current: 68.17 ms | Avg (30f): 69.03 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 3.37 ms | Avg (30f): 1.43 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.67 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 1.37 ms
+  [Step 5: Label Validation]      Current: 0.14 ms | Avg (30f): 0.34 ms
+  [Step 7: Point Extraction]      Current: 37.97 ms | Avg (30f): 18.13 ms
+  [Step 8a: Cloud Preparation]   Current: 26.00 ms | Avg (30f): 46.49 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.45 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 3546
+======================================================================
+[WARN] [1789228190.940023468] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228190.866577 but the latest data is at time 1789228190.044784, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228191.662818568] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 28.4 WORKER FPS) ================
+  Frames processed: 210 | Queue depth: 1
+  [Total Latency]                 Current: 33.13 ms | Avg (30f): 35.19 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.24 ms | Avg (30f): 0.97 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.30 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 2.66 ms
+  [Step 5: Label Validation]      Current: 0.16 ms | Avg (30f): 1.03 ms
+  [Step 7: Point Extraction]      Current: 12.02 ms | Avg (30f): 16.42 ms
+  [Step 8a: Cloud Preparation]   Current: 20.01 ms | Avg (30f): 13.60 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 3546
+======================================================================
+[WARN] [1789228192.952875488] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228192.898088 but the latest data is at time 1789228192.879673, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228193.917536826] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 14.4 WORKER FPS) ================
+  Frames processed: 240 | Queue depth: 1
+  [Total Latency]                 Current: 55.83 ms | Avg (30f): 69.32 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 1.00 ms | Avg (30f): 2.71 ms
+  [Step 1: Mask Extraction]       Current: 0.11 ms | Avg (30f): 0.79 ms
+  [Step 3: Crop]                  Current: 14.66 ms | Avg (30f): 2.08 ms
+  [Step 5: Label Validation]      Current: 0.14 ms | Avg (30f): 0.20 ms
+  [Step 7: Point Extraction]      Current: 36.21 ms | Avg (30f): 20.45 ms
+  [Step 8a: Cloud Preparation]   Current: 3.59 ms | Avg (30f): 42.36 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.43 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================
+[WARN] [1789228194.995591969] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228194.894092 but the latest data is at time 1789228194.383034, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228195.792676091] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 22.2 WORKER FPS) ================
+  Frames processed: 270 | Queue depth: 1
+  [Total Latency]                 Current: 72.02 ms | Avg (30f): 45.05 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.28 ms | Avg (30f): 1.27 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.09 ms
+  [Step 3: Crop]                  Current: 12.12 ms | Avg (30f): 2.39 ms
+  [Step 5: Label Validation]      Current: 0.19 ms | Avg (30f): 1.39 ms
+  [Step 7: Point Extraction]      Current: 33.13 ms | Avg (30f): 24.31 ms
+  [Step 8a: Cloud Preparation]   Current: 24.97 ms | Avg (30f): 15.31 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 1.15 ms | Avg (30f): 0.09 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================
+[WARN] [1789228197.047232646] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228196.925931 but the latest data is at time 1789228196.123055, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228198.249125947] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 23.3 WORKER FPS) ================
+  Frames processed: 300 | Queue depth: 0
+  [Total Latency]                 Current: 12.76 ms | Avg (30f): 42.86 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.23 ms | Avg (30f): 2.11 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.09 ms
+  [Step 3: Crop]                  Current: 0.44 ms | Avg (30f): 1.56 ms
+  [Step 5: Label Validation]      Current: 0.12 ms | Avg (30f): 0.20 ms
+  [Step 7: Point Extraction]      Current: 7.71 ms | Avg (30f): 25.18 ms
+  [Step 8a: Cloud Preparation]   Current: 4.05 ms | Avg (30f): 12.79 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================
+[WARN] [1789228199.049613452] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228198.993903 but the latest data is at time 1789228198.123042, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228200.093082524] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 26.9 WORKER FPS) ================
+  Frames processed: 330 | Queue depth: 1
+  [Total Latency]                 Current: 32.61 ms | Avg (30f): 37.16 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.25 ms | Avg (30f): 1.02 ms
+  [Step 1: Mask Extraction]       Current: 0.12 ms | Avg (30f): 0.09 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 0.48 ms
+  [Step 5: Label Validation]      Current: 0.15 ms | Avg (30f): 1.08 ms
+  [Step 7: Point Extraction]      Current: 27.83 ms | Avg (30f): 21.30 ms
+  [Step 8a: Cloud Preparation]   Current: 3.67 ms | Avg (30f): 12.90 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.19 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================
+[WARN] [1789228201.063536391] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228201.017555 but the latest data is at time 1789228200.133260, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228202.190092847] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 25.3 WORKER FPS) ================
+  Frames processed: 360 | Queue depth: 0
+  [Total Latency]                 Current: 49.49 ms | Avg (30f): 39.59 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.20 ms | Avg (30f): 1.81 ms
+  [Step 1: Mask Extraction]       Current: 0.08 ms | Avg (30f): 0.09 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.12 ms
+  [Step 5: Label Validation]      Current: 0.12 ms | Avg (30f): 0.20 ms
+  [Step 7: Point Extraction]      Current: 42.42 ms | Avg (30f): 21.33 ms
+  [Step 8a: Cloud Preparation]   Current: 6.09 ms | Avg (30f): 14.76 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.09 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================
+[WARN] [1789228203.087984412] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228203.021649 but the latest data is at time 1789228202.183045, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228204.201149373] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 24.3 WORKER FPS) ================
+  Frames processed: 390 | Queue depth: 0
+  [Total Latency]                 Current: 18.03 ms | Avg (30f): 41.18 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.26 ms | Avg (30f): 0.86 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.25 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.82 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.14 ms
+  [Step 7: Point Extraction]      Current: 9.74 ms | Avg (30f): 22.90 ms
+  [Step 8a: Cloud Preparation]   Current: 7.15 ms | Avg (30f): 14.54 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 0.10 ms | Avg (30f): 0.57 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================
+[WARN] [1789228205.090011386] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: Lookup would require extrapolation into the future.  Requested time 1789228204.990684 but the latest data is at time 1789228204.123807, when looking up transform from frame [camera_color_optical_frame] to frame [base_link]
+[INFO] [1789228206.170769474] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 29.5 WORKER FPS) ================
+  Frames processed: 420 | Queue depth: 0
+  [Total Latency]                 Current: 53.16 ms | Avg (30f): 33.86 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 19.08 ms | Avg (30f): 1.30 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.14 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.50 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.18 ms
+  [Step 7: Point Extraction]      Current: 11.87 ms | Avg (30f): 17.27 ms
+  [Step 8a: Cloud Preparation]   Current: 21.40 ms | Avg (30f): 13.23 ms
+  [Step 8b: DDS Publish]         Current: 0.00 ms | Avg (30f): 0.00 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.15 ms
+  [Cloud Points]                  Avg (30 clouds): 3540
+======================================================================

@@ -1,0 +1,599 @@
+RCUTILS_CONSOLE_STDOUT_LINE_BUFFERED is now ignored.  Please set RCUTILS_LOGGING_USE_STDOUT and RCUTILS_LOGGING_BUFFERED_STREAM to control the stream and the buffering of log messages.
+[INFO] [1789233391.735546167] [curb_detector]: CurbDetector initialized: compact 2D cloud in base_link.
+[INFO] [1789233391.816427223] [curb_detector]: Using corrected depth: camera_depth_optical_frame
+[WARN] [1789233391.852160475] [curb_detector]: Waiting for depth and RGB CameraInfo
+[WARN] [1789233392.433793681] [curb_detector]: Waiting for TF camera_color_optical_frame -> base_link: "base_link" passed to lookupTransform argument target_frame does not exist. 
+[INFO] [1789233395.809025760] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 16.4 WORKER FPS) ================
+  Frames processed: 30 | Queue depth: 0
+  [Total Latency]                 Current: 105.22 ms | Avg (30f): 60.94 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 2.64 ms | Avg (30f): 3.45 ms
+  [Step 1: Mask Extraction]       Current: 0.15 ms | Avg (30f): 1.28 ms
+  [Step 3: Crop]                  Current: 0.66 ms | Avg (30f): 1.23 ms
+  [Step 5: Label Validation]      Current: 0.17 ms | Avg (30f): 0.35 ms
+  [Step 7: Point Extraction]      Current: 25.68 ms | Avg (30f): 10.74 ms
+  [Step 8a: Cloud Preparation]   Current: 74.75 ms | Avg (30f): 42.61 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.47 ms | Avg (30f): 0.53 ms
+    [8a.3 Projection/Serialize]   Current: 74.24 ms | Avg (30f): 39.09 ms
+  [Step 8b: DDS Publish]         Current: 0.99 ms | Avg (30f): 1.04 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.08 ms
+  [Cloud Points]                  Avg (30 clouds): 2278
+======================================================================
+[INFO] [1789233402.927413999] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 14.1 WORKER FPS) ================
+  Frames processed: 60 | Queue depth: 0
+  [Total Latency]                 Current: 68.26 ms | Avg (30f): 71.04 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.28 ms | Avg (30f): 1.20 ms
+  [Step 1: Mask Extraction]       Current: 0.15 ms | Avg (30f): 0.19 ms
+  [Step 3: Crop]                  Current: 6.69 ms | Avg (30f): 1.29 ms
+  [Step 5: Label Validation]      Current: 1.42 ms | Avg (30f): 0.74 ms
+  [Step 7: Point Extraction]      Current: 7.35 ms | Avg (30f): 13.27 ms
+  [Step 8a: Cloud Preparation]   Current: 51.81 ms | Avg (30f): 51.47 ms
+    [8a.1 Lock/Read]              Current: 0.02 ms | Avg (30f): 0.02 ms
+    [8a.2 TF Lookup]              Current: 0.83 ms | Avg (30f): 0.65 ms
+    [8a.3 Projection/Serialize]   Current: 50.88 ms | Avg (30f): 50.76 ms
+  [Step 8b: DDS Publish]         Current: 0.31 ms | Avg (30f): 2.68 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2356
+======================================================================
+[INFO] [1789233407.153673531] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 17.0 WORKER FPS) ================
+  Frames processed: 90 | Queue depth: 0
+  [Total Latency]                 Current: 42.27 ms | Avg (30f): 58.84 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.25 ms | Avg (30f): 1.26 ms
+  [Step 1: Mask Extraction]       Current: 0.69 ms | Avg (30f): 0.75 ms
+  [Step 3: Crop]                  Current: 0.45 ms | Avg (30f): 0.60 ms
+  [Step 5: Label Validation]      Current: 0.66 ms | Avg (30f): 0.28 ms
+  [Step 7: Point Extraction]      Current: 5.82 ms | Avg (30f): 10.50 ms
+  [Step 8a: Cloud Preparation]   Current: 33.92 ms | Avg (30f): 42.82 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.02 ms
+    [8a.2 TF Lookup]              Current: 0.92 ms | Avg (30f): 1.00 ms
+    [8a.3 Projection/Serialize]   Current: 32.96 ms | Avg (30f): 41.76 ms
+  [Step 8b: DDS Publish]         Current: 0.32 ms | Avg (30f): 1.77 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2295
+======================================================================
+[INFO] [1789233413.231295817] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 16.8 WORKER FPS) ================
+  Frames processed: 120 | Queue depth: 1
+  [Total Latency]                 Current: 75.29 ms | Avg (30f): 59.40 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.27 ms | Avg (30f): 2.23 ms
+  [Step 1: Mask Extraction]       Current: 0.11 ms | Avg (30f): 0.61 ms
+  [Step 3: Crop]                  Current: 0.58 ms | Avg (30f): 0.85 ms
+  [Step 5: Label Validation]      Current: 0.17 ms | Avg (30f): 0.15 ms
+  [Step 7: Point Extraction]      Current: 5.52 ms | Avg (30f): 10.18 ms
+  [Step 8a: Cloud Preparation]   Current: 68.15 ms | Avg (30f): 44.18 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 1.76 ms | Avg (30f): 0.89 ms
+    [8a.3 Projection/Serialize]   Current: 66.35 ms | Avg (30f): 43.25 ms
+  [Step 8b: DDS Publish]         Current: 0.34 ms | Avg (30f): 0.93 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.14 ms
+  [Cloud Points]                  Avg (30 clouds): 2297
+======================================================================
+[INFO] [1789233418.186212881] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 19.1 WORKER FPS) ================
+  Frames processed: 150 | Queue depth: 0
+  [Total Latency]                 Current: 67.12 ms | Avg (30f): 52.41 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.75 ms | Avg (30f): 0.85 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.25 ms
+  [Step 3: Crop]                  Current: 0.44 ms | Avg (30f): 0.51 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.15 ms
+  [Step 7: Point Extraction]      Current: 8.57 ms | Avg (30f): 10.44 ms
+  [Step 8a: Cloud Preparation]   Current: 36.19 ms | Avg (30f): 38.47 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.03 ms
+    [8a.2 TF Lookup]              Current: 0.48 ms | Avg (30f): 0.78 ms
+    [8a.3 Projection/Serialize]   Current: 35.67 ms | Avg (30f): 37.63 ms
+  [Step 8b: DDS Publish]         Current: 20.77 ms | Avg (30f): 1.33 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 1970
+======================================================================
+[INFO] [1789233423.563388628] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 15.5 WORKER FPS) ================
+  Frames processed: 180 | Queue depth: 0
+  [Total Latency]                 Current: 42.06 ms | Avg (30f): 64.35 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.63 ms | Avg (30f): 0.81 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.61 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.32 ms
+  [Step 5: Label Validation]      Current: 0.15 ms | Avg (30f): 0.16 ms
+  [Step 7: Point Extraction]      Current: 5.55 ms | Avg (30f): 12.83 ms
+  [Step 8a: Cloud Preparation]   Current: 34.69 ms | Avg (30f): 47.69 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.49 ms | Avg (30f): 0.68 ms
+    [8a.3 Projection/Serialize]   Current: 34.16 ms | Avg (30f): 46.97 ms
+  [Step 8b: DDS Publish]         Current: 0.33 ms | Avg (30f): 0.42 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.39 ms
+  [Cloud Points]                  Avg (30 clouds): 2397
+======================================================================
+[INFO] [1789233429.877717715] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 18.8 WORKER FPS) ================
+  Frames processed: 210 | Queue depth: 0
+  [Total Latency]                 Current: 50.53 ms | Avg (30f): 53.09 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 4.59 ms | Avg (30f): 1.00 ms
+  [Step 1: Mask Extraction]       Current: 0.11 ms | Avg (30f): 0.19 ms
+  [Step 3: Crop]                  Current: 0.45 ms | Avg (30f): 0.63 ms
+  [Step 5: Label Validation]      Current: 0.42 ms | Avg (30f): 0.18 ms
+  [Step 7: Point Extraction]      Current: 6.16 ms | Avg (30f): 9.15 ms
+  [Step 8a: Cloud Preparation]   Current: 38.39 ms | Avg (30f): 41.13 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.02 ms
+    [8a.2 TF Lookup]              Current: 0.69 ms | Avg (30f): 0.65 ms
+    [8a.3 Projection/Serialize]   Current: 37.66 ms | Avg (30f): 40.43 ms
+  [Step 8b: DDS Publish]         Current: 0.28 ms | Avg (30f): 0.61 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.07 ms
+  [Cloud Points]                  Avg (30 clouds): 2305
+======================================================================
+[INFO] [1789233435.471111729] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 13.9 WORKER FPS) ================
+  Frames processed: 240 | Queue depth: 0
+  [Total Latency]                 Current: 39.19 ms | Avg (30f): 72.17 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.22 ms | Avg (30f): 0.80 ms
+  [Step 1: Mask Extraction]       Current: 1.78 ms | Avg (30f): 2.05 ms
+  [Step 3: Crop]                  Current: 0.44 ms | Avg (30f): 1.93 ms
+  [Step 5: Label Validation]      Current: 0.12 ms | Avg (30f): 0.16 ms
+  [Step 7: Point Extraction]      Current: 6.75 ms | Avg (30f): 15.06 ms
+  [Step 8a: Cloud Preparation]   Current: 29.49 ms | Avg (30f): 51.19 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.04 ms
+    [8a.2 TF Lookup]              Current: 0.54 ms | Avg (30f): 0.79 ms
+    [8a.3 Projection/Serialize]   Current: 28.90 ms | Avg (30f): 50.32 ms
+  [Step 8b: DDS Publish]         Current: 0.26 ms | Avg (30f): 0.79 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2259
+======================================================================
+[INFO] [1789233439.968165322] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 24.1 WORKER FPS) ================
+  Frames processed: 270 | Queue depth: 0
+  [Total Latency]                 Current: 43.05 ms | Avg (30f): 41.45 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.85 ms | Avg (30f): 0.81 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.43 ms
+  [Step 3: Crop]                  Current: 0.45 ms | Avg (30f): 0.97 ms
+  [Step 5: Label Validation]      Current: 0.12 ms | Avg (30f): 0.14 ms
+  [Step 7: Point Extraction]      Current: 11.03 ms | Avg (30f): 8.90 ms
+  [Step 8a: Cloud Preparation]   Current: 30.08 ms | Avg (30f): 29.72 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.02 ms
+    [8a.2 TF Lookup]              Current: 0.89 ms | Avg (30f): 0.54 ms
+    [8a.3 Projection/Serialize]   Current: 29.15 ms | Avg (30f): 29.14 ms
+  [Step 8b: DDS Publish]         Current: 0.29 ms | Avg (30f): 0.32 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2291
+======================================================================
+[INFO] [1789233445.498392398] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 23.2 WORKER FPS) ================
+  Frames processed: 300 | Queue depth: 0
+  [Total Latency]                 Current: 37.88 ms | Avg (30f): 43.06 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.24 ms | Avg (30f): 0.63 ms
+  [Step 1: Mask Extraction]       Current: 0.61 ms | Avg (30f): 0.69 ms
+  [Step 3: Crop]                  Current: 0.48 ms | Avg (30f): 0.75 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.26 ms
+  [Step 7: Point Extraction]      Current: 8.32 ms | Avg (30f): 9.18 ms
+  [Step 8a: Cloud Preparation]   Current: 27.68 ms | Avg (30f): 30.72 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.52 ms | Avg (30f): 0.55 ms
+    [8a.3 Projection/Serialize]   Current: 27.12 ms | Avg (30f): 30.13 ms
+  [Step 8b: DDS Publish]         Current: 0.27 ms | Avg (30f): 0.68 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2259
+======================================================================
+[INFO] [1789233451.608477862] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 22.3 WORKER FPS) ================
+  Frames processed: 330 | Queue depth: 0
+  [Total Latency]                 Current: 48.18 ms | Avg (30f): 44.88 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.23 ms | Avg (30f): 0.74 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.78 ms
+  [Step 3: Crop]                  Current: 5.69 ms | Avg (30f): 1.15 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.19 ms
+  [Step 7: Point Extraction]      Current: 4.89 ms | Avg (30f): 8.55 ms
+  [Step 8a: Cloud Preparation]   Current: 35.60 ms | Avg (30f): 32.47 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.03 ms
+    [8a.2 TF Lookup]              Current: 0.49 ms | Avg (30f): 0.62 ms
+    [8a.3 Projection/Serialize]   Current: 35.08 ms | Avg (30f): 31.79 ms
+  [Step 8b: DDS Publish]         Current: 1.41 ms | Avg (30f): 0.84 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2296
+======================================================================
+[INFO] [1789233457.417901054] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 24.0 WORKER FPS) ================
+  Frames processed: 360 | Queue depth: 0
+  [Total Latency]                 Current: 38.74 ms | Avg (30f): 41.61 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.59 ms | Avg (30f): 0.53 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.69 ms
+  [Step 3: Crop]                  Current: 0.44 ms | Avg (30f): 0.85 ms
+  [Step 5: Label Validation]      Current: 0.11 ms | Avg (30f): 0.14 ms
+  [Step 7: Point Extraction]      Current: 7.82 ms | Avg (30f): 9.10 ms
+  [Step 8a: Cloud Preparation]   Current: 29.28 ms | Avg (30f): 29.45 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.44 ms | Avg (30f): 0.61 ms
+    [8a.3 Projection/Serialize]   Current: 28.80 ms | Avg (30f): 28.79 ms
+  [Step 8b: DDS Publish]         Current: 0.28 ms | Avg (30f): 0.69 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2255
+======================================================================
+[INFO] [1789233462.686666875] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 21.2 WORKER FPS) ================
+  Frames processed: 390 | Queue depth: 0
+  [Total Latency]                 Current: 39.71 ms | Avg (30f): 47.27 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 1.09 ms | Avg (30f): 0.80 ms
+  [Step 1: Mask Extraction]       Current: 0.30 ms | Avg (30f): 0.35 ms
+  [Step 3: Crop]                  Current: 0.57 ms | Avg (30f): 0.59 ms
+  [Step 5: Label Validation]      Current: 0.30 ms | Avg (30f): 0.46 ms
+  [Step 7: Point Extraction]      Current: 7.55 ms | Avg (30f): 10.36 ms
+  [Step 8a: Cloud Preparation]   Current: 29.42 ms | Avg (30f): 33.53 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.53 ms | Avg (30f): 0.54 ms
+    [8a.3 Projection/Serialize]   Current: 28.85 ms | Avg (30f): 32.95 ms
+  [Step 8b: DDS Publish]         Current: 0.33 ms | Avg (30f): 1.03 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2240
+======================================================================
+[INFO] [1789233468.622353425] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 17.7 WORKER FPS) ================
+  Frames processed: 420 | Queue depth: 0
+  [Total Latency]                 Current: 53.34 ms | Avg (30f): 56.38 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.23 ms | Avg (30f): 1.27 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.42 ms
+  [Step 3: Crop]                  Current: 0.44 ms | Avg (30f): 0.64 ms
+  [Step 5: Label Validation]      Current: 0.13 ms | Avg (30f): 0.18 ms
+  [Step 7: Point Extraction]      Current: 12.16 ms | Avg (30f): 10.80 ms
+  [Step 8a: Cloud Preparation]   Current: 39.26 ms | Avg (30f): 41.48 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.67 ms | Avg (30f): 0.58 ms
+    [8a.3 Projection/Serialize]   Current: 38.54 ms | Avg (30f): 40.86 ms
+  [Step 8b: DDS Publish]         Current: 0.88 ms | Avg (30f): 1.43 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2357
+======================================================================
+[INFO] [1789233473.273646267] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 16.9 WORKER FPS) ================
+  Frames processed: 450 | Queue depth: 0
+  [Total Latency]                 Current: 43.20 ms | Avg (30f): 59.07 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.24 ms | Avg (30f): 1.94 ms
+  [Step 1: Mask Extraction]       Current: 0.55 ms | Avg (30f): 1.03 ms
+  [Step 3: Crop]                  Current: 0.58 ms | Avg (30f): 1.32 ms
+  [Step 5: Label Validation]      Current: 0.15 ms | Avg (30f): 0.30 ms
+  [Step 7: Point Extraction]      Current: 9.15 ms | Avg (30f): 9.80 ms
+  [Step 8a: Cloud Preparation]   Current: 32.12 ms | Avg (30f): 43.96 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.51 ms | Avg (30f): 0.76 ms
+    [8a.3 Projection/Serialize]   Current: 31.57 ms | Avg (30f): 43.15 ms
+  [Step 8b: DDS Publish]         Current: 0.26 ms | Avg (30f): 0.54 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2577
+======================================================================
+[INFO] [1789233476.778942006] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 17.5 WORKER FPS) ================
+  Frames processed: 480 | Queue depth: 0
+  [Total Latency]                 Current: 41.38 ms | Avg (30f): 57.23 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.89 ms | Avg (30f): 1.10 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 1.49 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.40 ms
+  [Step 5: Label Validation]      Current: 0.15 ms | Avg (30f): 0.29 ms
+  [Step 7: Point Extraction]      Current: 12.83 ms | Avg (30f): 12.39 ms
+  [Step 8a: Cloud Preparation]   Current: 26.53 ms | Avg (30f): 39.84 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.46 ms | Avg (30f): 0.61 ms
+    [8a.3 Projection/Serialize]   Current: 26.03 ms | Avg (30f): 39.19 ms
+  [Step 8b: DDS Publish]         Current: 0.27 ms | Avg (30f): 0.52 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.08 ms
+  [Cloud Points]                  Avg (30 clouds): 2207
+======================================================================
+[INFO] [1789233483.582373054] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 24.5 WORKER FPS) ================
+  Frames processed: 510 | Queue depth: 0
+  [Total Latency]                 Current: 39.68 ms | Avg (30f): 40.80 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.61 ms | Avg (30f): 0.57 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.54 ms
+  [Step 3: Crop]                  Current: 0.50 ms | Avg (30f): 0.71 ms
+  [Step 5: Label Validation]      Current: 0.12 ms | Avg (30f): 0.24 ms
+  [Step 7: Point Extraction]      Current: 5.64 ms | Avg (30f): 8.20 ms
+  [Step 8a: Cloud Preparation]   Current: 32.12 ms | Avg (30f): 29.87 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.46 ms | Avg (30f): 0.60 ms
+    [8a.3 Projection/Serialize]   Current: 31.62 ms | Avg (30f): 29.23 ms
+  [Step 8b: DDS Publish]         Current: 0.44 ms | Avg (30f): 0.50 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2202
+======================================================================
+[INFO] [1789233490.100325871] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 21.7 WORKER FPS) ================
+  Frames processed: 540 | Queue depth: 0
+  [Total Latency]                 Current: 39.76 ms | Avg (30f): 46.09 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.73 ms | Avg (30f): 0.93 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.68 ms
+  [Step 3: Crop]                  Current: 0.66 ms | Avg (30f): 0.84 ms
+  [Step 5: Label Validation]      Current: 0.17 ms | Avg (30f): 0.15 ms
+  [Step 7: Point Extraction]      Current: 12.33 ms | Avg (30f): 10.10 ms
+  [Step 8a: Cloud Preparation]   Current: 25.36 ms | Avg (30f): 32.63 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.02 ms
+    [8a.2 TF Lookup]              Current: 0.51 ms | Avg (30f): 0.58 ms
+    [8a.3 Projection/Serialize]   Current: 24.81 ms | Avg (30f): 32.00 ms
+  [Step 8b: DDS Publish]         Current: 0.27 ms | Avg (30f): 0.39 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.20 ms
+  [Cloud Points]                  Avg (30 clouds): 2264
+======================================================================
+[INFO] [1789233496.511694061] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 24.2 WORKER FPS) ================
+  Frames processed: 570 | Queue depth: 0
+  [Total Latency]                 Current: 58.29 ms | Avg (30f): 41.37 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.23 ms | Avg (30f): 0.71 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.32 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 0.55 ms
+  [Step 5: Label Validation]      Current: 0.16 ms | Avg (30f): 0.21 ms
+  [Step 7: Point Extraction]      Current: 5.73 ms | Avg (30f): 8.92 ms
+  [Step 8a: Cloud Preparation]   Current: 51.10 ms | Avg (30f): 30.00 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.52 ms | Avg (30f): 0.56 ms
+    [8a.3 Projection/Serialize]   Current: 50.53 ms | Avg (30f): 29.40 ms
+  [Step 8b: DDS Publish]         Current: 0.35 ms | Avg (30f): 0.50 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2192
+======================================================================
+[INFO] [1789233502.520031578] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 19.7 WORKER FPS) ================
+  Frames processed: 600 | Queue depth: 0
+  [Total Latency]                 Current: 30.44 ms | Avg (30f): 50.87 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.26 ms | Avg (30f): 0.90 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.50 ms
+  [Step 3: Crop]                  Current: 0.45 ms | Avg (30f): 1.09 ms
+  [Step 5: Label Validation]      Current: 0.14 ms | Avg (30f): 0.17 ms
+  [Step 7: Point Extraction]      Current: 7.04 ms | Avg (30f): 9.78 ms
+  [Step 8a: Cloud Preparation]   Current: 22.06 ms | Avg (30f): 37.69 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.49 ms | Avg (30f): 0.58 ms
+    [8a.3 Projection/Serialize]   Current: 21.52 ms | Avg (30f): 37.03 ms
+  [Step 8b: DDS Publish]         Current: 0.27 ms | Avg (30f): 0.53 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.07 ms
+  [Cloud Points]                  Avg (30 clouds): 2234
+======================================================================
+[INFO] [1789233508.215547237] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 18.2 WORKER FPS) ================
+  Frames processed: 630 | Queue depth: 0
+  [Total Latency]                 Current: 53.93 ms | Avg (30f): 54.90 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.23 ms | Avg (30f): 0.89 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 1.28 ms
+  [Step 3: Crop]                  Current: 0.65 ms | Avg (30f): 0.76 ms
+  [Step 5: Label Validation]      Current: 0.15 ms | Avg (30f): 0.56 ms
+  [Step 7: Point Extraction]      Current: 14.69 ms | Avg (30f): 10.34 ms
+  [Step 8a: Cloud Preparation]   Current: 31.49 ms | Avg (30f): 39.33 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.56 ms | Avg (30f): 0.61 ms
+    [8a.3 Projection/Serialize]   Current: 30.89 ms | Avg (30f): 38.67 ms
+  [Step 8b: DDS Publish]         Current: 6.47 ms | Avg (30f): 1.38 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.07 ms
+  [Cloud Points]                  Avg (30 clouds): 2207
+======================================================================
+[INFO] [1789233512.750192543] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 18.2 WORKER FPS) ================
+  Frames processed: 660 | Queue depth: 0
+  [Total Latency]                 Current: 38.58 ms | Avg (30f): 55.06 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.26 ms | Avg (30f): 1.32 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.23 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.09 ms
+  [Step 5: Label Validation]      Current: 0.20 ms | Avg (30f): 0.41 ms
+  [Step 7: Point Extraction]      Current: 13.19 ms | Avg (30f): 12.91 ms
+  [Step 8a: Cloud Preparation]   Current: 23.40 ms | Avg (30f): 38.02 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.61 ms | Avg (30f): 0.63 ms
+    [8a.3 Projection/Serialize]   Current: 22.75 ms | Avg (30f): 37.35 ms
+  [Step 8b: DDS Publish]         Current: 0.84 ms | Avg (30f): 0.85 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2212
+======================================================================
+[INFO] [1789233518.280510137] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 24.5 WORKER FPS) ================
+  Frames processed: 690 | Queue depth: 0
+  [Total Latency]                 Current: 39.33 ms | Avg (30f): 40.74 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.21 ms | Avg (30f): 0.62 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.33 ms
+  [Step 3: Crop]                  Current: 0.50 ms | Avg (30f): 0.66 ms
+  [Step 5: Label Validation]      Current: 0.15 ms | Avg (30f): 0.17 ms
+  [Step 7: Point Extraction]      Current: 7.18 ms | Avg (30f): 8.70 ms
+  [Step 8a: Cloud Preparation]   Current: 30.81 ms | Avg (30f): 29.44 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.03 ms
+    [8a.2 TF Lookup]              Current: 0.53 ms | Avg (30f): 0.53 ms
+    [8a.3 Projection/Serialize]   Current: 30.24 ms | Avg (30f): 28.61 ms
+  [Step 8b: DDS Publish]         Current: 0.26 ms | Avg (30f): 0.69 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2237
+======================================================================
+[INFO] [1789233523.655131684] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 22.4 WORKER FPS) ================
+  Frames processed: 720 | Queue depth: 0
+  [Total Latency]                 Current: 57.48 ms | Avg (30f): 44.59 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 3.37 ms | Avg (30f): 1.16 ms
+  [Step 1: Mask Extraction]       Current: 0.11 ms | Avg (30f): 1.12 ms
+  [Step 3: Crop]                  Current: 0.72 ms | Avg (30f): 0.77 ms
+  [Step 5: Label Validation]      Current: 0.16 ms | Avg (30f): 0.41 ms
+  [Step 7: Point Extraction]      Current: 11.64 ms | Avg (30f): 9.70 ms
+  [Step 8a: Cloud Preparation]   Current: 40.96 ms | Avg (30f): 30.46 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.50 ms | Avg (30f): 0.53 ms
+    [8a.3 Projection/Serialize]   Current: 40.41 ms | Avg (30f): 29.87 ms
+  [Step 8b: DDS Publish]         Current: 0.31 ms | Avg (30f): 0.72 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2234
+======================================================================
+[INFO] [1789233529.574064257] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 20.1 WORKER FPS) ================
+  Frames processed: 750 | Queue depth: 0
+  [Total Latency]                 Current: 35.42 ms | Avg (30f): 49.85 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.58 ms | Avg (30f): 0.81 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.21 ms
+  [Step 3: Crop]                  Current: 0.43 ms | Avg (30f): 0.82 ms
+  [Step 5: Label Validation]      Current: 0.11 ms | Avg (30f): 0.18 ms
+  [Step 7: Point Extraction]      Current: 7.26 ms | Avg (30f): 9.51 ms
+  [Step 8a: Cloud Preparation]   Current: 26.55 ms | Avg (30f): 36.69 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.51 ms | Avg (30f): 0.64 ms
+    [8a.3 Projection/Serialize]   Current: 26.01 ms | Avg (30f): 36.01 ms
+  [Step 8b: DDS Publish]         Current: 0.27 ms | Avg (30f): 1.12 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.38 ms
+  [Cloud Points]                  Avg (30 clouds): 2216
+======================================================================
+[INFO] [1789233534.411760457] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 25.4 WORKER FPS) ================
+  Frames processed: 780 | Queue depth: 0
+  [Total Latency]                 Current: 39.14 ms | Avg (30f): 39.42 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.24 ms | Avg (30f): 0.96 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.60 ms
+  [Step 3: Crop]                  Current: 0.46 ms | Avg (30f): 1.08 ms
+  [Step 5: Label Validation]      Current: 5.34 ms | Avg (30f): 0.37 ms
+  [Step 7: Point Extraction]      Current: 10.38 ms | Avg (30f): 8.33 ms
+  [Step 8a: Cloud Preparation]   Current: 22.24 ms | Avg (30f): 27.24 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.49 ms | Avg (30f): 0.53 ms
+    [8a.3 Projection/Serialize]   Current: 21.71 ms | Avg (30f): 26.67 ms
+  [Step 8b: DDS Publish]         Current: 0.26 ms | Avg (30f): 0.70 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.04 ms
+  [Cloud Points]                  Avg (30 clouds): 2236
+======================================================================
+[INFO] [1789233538.971990630] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 23.6 WORKER FPS) ================
+  Frames processed: 810 | Queue depth: 0
+  [Total Latency]                 Current: 43.06 ms | Avg (30f): 42.37 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.22 ms | Avg (30f): 1.08 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.88 ms
+  [Step 3: Crop]                  Current: 0.48 ms | Avg (30f): 1.10 ms
+  [Step 5: Label Validation]      Current: 0.16 ms | Avg (30f): 0.14 ms
+  [Step 7: Point Extraction]      Current: 9.32 ms | Avg (30f): 8.90 ms
+  [Step 8a: Cloud Preparation]   Current: 32.42 ms | Avg (30f): 29.63 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.51 ms | Avg (30f): 0.51 ms
+    [8a.3 Projection/Serialize]   Current: 31.88 ms | Avg (30f): 29.08 ms
+  [Step 8b: DDS Publish]         Current: 0.24 ms | Avg (30f): 0.43 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.09 ms
+  [Cloud Points]                  Avg (30 clouds): 2262
+======================================================================
+[INFO] [1789233544.787103107] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 25.2 WORKER FPS) ================
+  Frames processed: 840 | Queue depth: 0
+  [Total Latency]                 Current: 40.05 ms | Avg (30f): 39.63 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.30 ms | Avg (30f): 0.86 ms
+  [Step 1: Mask Extraction]       Current: 0.63 ms | Avg (30f): 0.68 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 0.55 ms
+  [Step 5: Label Validation]      Current: 0.16 ms | Avg (30f): 0.25 ms
+  [Step 7: Point Extraction]      Current: 9.31 ms | Avg (30f): 9.11 ms
+  [Step 8a: Cloud Preparation]   Current: 27.12 ms | Avg (30f): 27.29 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 1.48 ms | Avg (30f): 0.54 ms
+    [8a.3 Projection/Serialize]   Current: 25.60 ms | Avg (30f): 26.71 ms
+  [Step 8b: DDS Publish]         Current: 1.93 ms | Avg (30f): 0.70 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2235
+======================================================================
+[INFO] [1789233549.927843821] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 21.6 WORKER FPS) ================
+  Frames processed: 870 | Queue depth: 0
+  [Total Latency]                 Current: 53.18 ms | Avg (30f): 46.25 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.24 ms | Avg (30f): 0.96 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.73 ms
+  [Step 3: Crop]                  Current: 0.58 ms | Avg (30f): 0.81 ms
+  [Step 5: Label Validation]      Current: 0.14 ms | Avg (30f): 0.14 ms
+  [Step 7: Point Extraction]      Current: 10.45 ms | Avg (30f): 10.89 ms
+  [Step 8a: Cloud Preparation]   Current: 40.47 ms | Avg (30f): 32.07 ms
+    [8a.1 Lock/Read]              Current: 0.02 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.55 ms | Avg (30f): 0.52 ms
+    [8a.3 Projection/Serialize]   Current: 39.88 ms | Avg (30f): 31.51 ms
+  [Step 8b: DDS Publish]         Current: 1.03 ms | Avg (30f): 0.46 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2229
+======================================================================
+[INFO] [1789233555.436881454] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 11.2 WORKER FPS) ================
+  Frames processed: 900 | Queue depth: 1
+  [Total Latency]                 Current: 74.94 ms | Avg (30f): 89.24 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.15 ms | Avg (30f): 1.11 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.31 ms
+  [Step 3: Crop]                  Current: 0.44 ms | Avg (30f): 1.86 ms
+  [Step 5: Label Validation]      Current: 0.11 ms | Avg (30f): 0.21 ms
+  [Step 7: Point Extraction]      Current: 4.80 ms | Avg (30f): 12.40 ms
+  [Step 8a: Cloud Preparation]   Current: 68.88 ms | Avg (30f): 70.22 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.55 ms | Avg (30f): 0.79 ms
+    [8a.3 Projection/Serialize]   Current: 68.29 ms | Avg (30f): 69.37 ms
+  [Step 8b: DDS Publish]         Current: 0.32 ms | Avg (30f): 2.94 ms
+  [Step 9: Draw & Publish]        Current: 0.05 ms | Avg (30f): 0.05 ms
+  [Cloud Points]                  Avg (30 clouds): 2226
+======================================================================
+[INFO] [1789233559.639345692] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 9.9 WORKER FPS) ================
+  Frames processed: 930 | Queue depth: 0
+  [Total Latency]                 Current: 166.82 ms | Avg (30f): 100.75 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.24 ms | Avg (30f): 0.27 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.11 ms
+  [Step 3: Crop]                  Current: 0.45 ms | Avg (30f): 2.19 ms
+  [Step 5: Label Validation]      Current: 0.58 ms | Avg (30f): 0.17 ms
+  [Step 7: Point Extraction]      Current: 40.45 ms | Avg (30f): 15.53 ms
+  [Step 8a: Cloud Preparation]   Current: 124.55 ms | Avg (30f): 77.38 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.77 ms | Avg (30f): 1.50 ms
+    [8a.3 Projection/Serialize]   Current: 123.74 ms | Avg (30f): 75.83 ms
+  [Step 8b: DDS Publish]         Current: 0.29 ms | Avg (30f): 3.16 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.54 ms
+  [Cloud Points]                  Avg (30 clouds): 2235
+======================================================================
+[INFO] [1789233564.549047416] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 9.3 WORKER FPS) ================
+  Frames processed: 960 | Queue depth: 0
+  [Total Latency]                 Current: 72.21 ms | Avg (30f): 107.41 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.26 ms | Avg (30f): 1.91 ms
+  [Step 1: Mask Extraction]       Current: 0.10 ms | Avg (30f): 0.43 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 2.74 ms
+  [Step 5: Label Validation]      Current: 0.14 ms | Avg (30f): 1.13 ms
+  [Step 7: Point Extraction]      Current: 5.64 ms | Avg (30f): 19.71 ms
+  [Step 8a: Cloud Preparation]   Current: 65.17 ms | Avg (30f): 79.65 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.02 ms
+    [8a.2 TF Lookup]              Current: 0.56 ms | Avg (30f): 1.05 ms
+    [8a.3 Projection/Serialize]   Current: 64.57 ms | Avg (30f): 78.55 ms
+  [Step 8b: DDS Publish]         Current: 0.27 ms | Avg (30f): 1.52 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.15 ms
+  [Cloud Points]                  Avg (30 clouds): 2247
+======================================================================
+[INFO] [1789233572.783650478] [curb_detector]: 
+================ CURB DETECTOR PROFILE (320x120 @ 18.7 WORKER FPS) ================
+  Frames processed: 990 | Queue depth: 0
+  [Total Latency]                 Current: 43.29 ms | Avg (30f): 53.52 ms
+  -----------------------------------------------------------------
+  [Decompression]                 Current: 0.72 ms | Avg (30f): 0.81 ms
+  [Step 1: Mask Extraction]       Current: 0.09 ms | Avg (30f): 0.29 ms
+  [Step 3: Crop]                  Current: 0.47 ms | Avg (30f): 0.61 ms
+  [Step 5: Label Validation]      Current: 2.72 ms | Avg (30f): 0.25 ms
+  [Step 7: Point Extraction]      Current: 15.01 ms | Avg (30f): 12.11 ms
+  [Step 8a: Cloud Preparation]   Current: 23.25 ms | Avg (30f): 37.56 ms
+    [8a.1 Lock/Read]              Current: 0.01 ms | Avg (30f): 0.01 ms
+    [8a.2 TF Lookup]              Current: 0.47 ms | Avg (30f): 0.50 ms
+    [8a.3 Projection/Serialize]   Current: 22.74 ms | Avg (30f): 37.02 ms
+  [Step 8b: DDS Publish]         Current: 0.88 ms | Avg (30f): 1.71 ms
+  [Step 9: Draw & Publish]        Current: 0.04 ms | Avg (30f): 0.07 ms
+  [Cloud Points]                  Avg (30 clouds): 2230
+======================================================================
