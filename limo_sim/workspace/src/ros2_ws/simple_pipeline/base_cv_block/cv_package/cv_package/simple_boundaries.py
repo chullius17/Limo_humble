@@ -28,10 +28,10 @@ class CurbDetector(Node):
     LABEL_TURQUOISE = np.uint8(2)
     LABEL_BACKGROUND = np.uint8(3)
     CLOUD_DTYPE = np.dtype({
-        'names': ('x', 'y', 'class_id'),
-        'formats': ('<f4', '<f4', 'u1'),
-        'offsets': (0, 4, 8),
-        'itemsize': 9,
+        'names': ('x', 'y', 'z', 'class_id'),
+        'formats': ('<f4', '<f4', '<f4', 'u1'),
+        'offsets': (0, 4, 8, 12),
+        'itemsize': 16,
     })
     CLOUD_FIELDS = [
         PointField(
@@ -39,7 +39,9 @@ class CurbDetector(Node):
         PointField(
             name='y', offset=4, datatype=PointField.FLOAT32, count=1),
         PointField(
-            name='class_id', offset=8, datatype=PointField.UINT8, count=1),
+            name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        PointField(
+            name='class_id', offset=12, datatype=PointField.UINT8, count=1),
     ]
 
     def __init__(self):
@@ -127,7 +129,7 @@ class CurbDetector(Node):
             depth=1,
         )
         cloud_qos = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
@@ -631,6 +633,7 @@ class CurbDetector(Node):
         cloud_points = np.empty(len(rows), dtype=self.CLOUD_DTYPE)
         cloud_points['x'] = bev_points[:, 0]
         cloud_points['y'] = bev_points[:, 1]
+        cloud_points['z'] = 0.0
         cloud_points['class_id'] = class_ids
 
         cloud = PointCloud2()
