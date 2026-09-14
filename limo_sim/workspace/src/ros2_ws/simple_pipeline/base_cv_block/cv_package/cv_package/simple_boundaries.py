@@ -171,6 +171,11 @@ class CurbDetector(Node):
             'limo/cv_package/boundaries/lines_and_curbs/compressed',
             pipeline_qos,
         )
+        self.blue_filter_debug_pub = self.create_publisher(
+            CompressedImage,
+            'limo/cv_package/boundaries/blue_filter_debug/compressed',
+            pipeline_qos,
+        )
         self.pointcloud_pub = self.create_publisher(
             PointCloud2,
             self.get_parameter('pointcloud_topic').value,
@@ -407,6 +412,15 @@ class CurbDetector(Node):
         blue_mask = labels == self.LABEL_BLUE
         turquoise_mask = labels == self.LABEL_TURQUOISE
         background_mask = labels == self.LABEL_BACKGROUND
+        # Keep only blue pixels adjacent to white (background), including diagonals.
+        # Filter before the ROI so cropping does not affect class adjacency.
+        white_dilated = cv2.dilate(
+            background_mask.astype(np.uint8),
+            np.ones((3, 3), dtype=np.uint8),
+            borderType=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+        blue_mask &= white_dilated != 0
         t['step1_masks'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 3: OPTIONAL ADDITIONAL BOUNDARY ROI ---
@@ -490,6 +504,39 @@ class CurbDetector(Node):
             except Exception as e:
                 self.get_logger().error(
                     f"Failed to publish compressed debug image: {str(e)}")
+        if self.blue_filter_debug_pub.get_subscription_count() > 0:
+            # Compare blue pixels before and after filtering, before voxelization.
+            # Use the same ROI on both panels to isolate the adjacency filter.
+            original_blue_mask = (labels == self.LABEL_BLUE) & roi_mask
+            title_height = 24
+            filter_frame = np.zeros(
+                (height + title_height, width * 2, 3), dtype=np.uint8)
+            before = filter_frame[title_height:, :width]
+            after = filter_frame[title_height:, width:]
+            before[background_mask] = (255, 255, 255)
+            before[turquoise_mask] = (255, 255, 0)
+            after[:] = before
+            before[original_blue_mask] = (255, 0, 0)
+            after[blue_mask] = (255, 0, 0)
+            for offset, title, mask in (
+                    (0, 'Before', original_blue_mask),
+                    (width, 'After', blue_mask)):
+                cv2.putText(
+                    filter_frame,
+                    f'{title}: {np.count_nonzero(mask)} blue',
+                    (offset + 4, 17),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+            try:
+                self.blue_filter_debug_pub.publish(
+                    self.encode_debug_image(filter_frame, msg.header))
+            except Exception as e:
+                self.get_logger().error(
+                    f'Failed to publish blue filter debug image: {str(e)}')
         t['step9_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
 
         t['total'] = (time.perf_counter() - start_total) * 1000.0
