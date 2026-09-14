@@ -58,7 +58,6 @@ def generate_launch_description():
             'input_topic': '/depth_camera/depth/image_raw',
             'camera_info_topic': '/depth_camera/depth/camera_info',
             'enable_telemetry': False,
-            'debug_probe_interval_frames': 30,
         }],
     )
 

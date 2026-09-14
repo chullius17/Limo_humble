@@ -5,8 +5,8 @@ Optimized hot path: the crop happens before any dtype conversion (a
 zero-copy view over the raw message buffer, honoring row padding), the
 resize runs on the crop's native dtype so INTER_NEAREST only ever moves
 half-width samples, and the LUT fill happens in place in a single
-preallocated buffer. The two JET debug views are computed and published
-only when something is actually subscribed to them.
+preallocated buffer. Both JET debug views are published on every frame,
+including while calibration is waiting for CameraInfo, TF or valid depth.
 """
 
 import cv2
@@ -17,7 +17,7 @@ from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
-from sensor_msgs.msg import CameraInfo, Image
+from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from tf2_ros import Buffer, TransformException, TransformListener
 
 import time
@@ -46,10 +46,10 @@ class DepthCorrection(Node):
             'camera_info_topic', '/depth_camera/depth/camera_info')
         self.declare_parameter(
             'output_topic',
-            'limo/cv_package/depth_correction/image_jet/raw')
+            'limo/cv_package/depth_correction/image_jet/compressed')
         self.declare_parameter(
             'corrected_output_topic',
-            'limo/cv_package/depth_correction/image_jet_corrected/raw')
+            'limo/cv_package/depth_correction/image_jet_corrected/compressed')
         self.declare_parameter(
             'depth_output_topic',
             'limo/cv_package/depth_correction/depth_corrected/raw')
@@ -60,6 +60,7 @@ class DepthCorrection(Node):
         self.declare_parameter('max_depth_m', 5.0)
         self.declare_parameter('calibration_frames', 30)
         self.declare_parameter('calibration_rows', 10)
+        self.declare_parameter('debug_jpeg_quality', 80)
 
         input_topic = self.get_parameter('input_topic').value
         camera_info_topic = self.get_parameter('camera_info_topic').value
@@ -76,6 +77,8 @@ class DepthCorrection(Node):
             self.get_parameter('calibration_frames').value)
         self.calibration_rows = int(
             self.get_parameter('calibration_rows').value)
+        self.debug_jpeg_quality = int(
+            self.get_parameter('debug_jpeg_quality').value)
 
         if self.output_width <= 0 or self.output_height <= 0:
             raise ValueError('Output dimensions must be greater than zero')
@@ -85,14 +88,8 @@ class DepthCorrection(Node):
             raise ValueError('calibration_frames must be greater than zero')
         if self.calibration_rows <= 0:
             raise ValueError('calibration_rows must be greater than zero')
-
-        # How often (in frames) to refresh the cached subscriber-count check
-        # for the two JET debug topics, instead of querying it every frame.
-        self.declare_parameter('debug_probe_interval_frames', 30)
-        self.debug_probe_interval_frames = max(
-            1, int(self.get_parameter('debug_probe_interval_frames').value))
-        self._publish_raw_jet = False
-        self._publish_corrected_jet = False
+        if not 1 <= self.debug_jpeg_quality <= 100:
+            raise ValueError('debug_jpeg_quality must be between 1 and 100')
 
         # Telemetry control parameters, off by default: this node ran with
         # no visibility at all before this pass.
@@ -126,8 +123,6 @@ class DepthCorrection(Node):
         self.geometry_signature = None
         self.plane_height_samples = []
         self.depth_lut = None
-        self.lut_valid_u8 = None
-        self.lut_zero_filled = None
 
         self.last_logged_ingress_path = None
 
@@ -142,7 +137,6 @@ class DepthCorrection(Node):
         out_shape = (self.output_height, self.output_width)
         self._buf_resized_u16 = np.empty(out_shape, dtype=np.uint16)
         self.buf_resized = np.empty(out_shape, dtype=np.float32)
-        self._buf_fill_mask = np.empty(out_shape, dtype=np.uint8)
         self._buf_col_safe = np.empty(out_shape, dtype=np.float32)
         self._buf_col_u8 = np.empty(out_shape, dtype=np.uint8)
         self._buf_bgr = np.empty(
@@ -169,9 +163,9 @@ class DepthCorrection(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self.publisher = self.create_publisher(
-            Image, output_topic, output_qos)
+            CompressedImage, output_topic, output_qos)
         self.corrected_publisher = self.create_publisher(
-            Image, corrected_topic, output_qos)
+            CompressedImage, corrected_topic, output_qos)
         # Consumers of this topic (simple_boundaries.py, bev_and_clas.py)
         # already subscribe BEST_EFFORT; a reliable writer here can only
         # block on its single history slot for no benefit, and a stale
@@ -189,7 +183,8 @@ class DepthCorrection(Node):
 
         self.get_logger().info(
             f'Listening on {input_topic}; publishing metric depth on '
-            f'{depth_output_topic} and JET views on {output_topic} and '
+            f'{depth_output_topic} and compressed JET views on '
+            f'{output_topic} and '
             f'{corrected_topic} at {self.output_width}x{self.output_height}. '
             f'Waiting for {self.calibration_frames} calibration frames.')
 
@@ -345,6 +340,11 @@ class DepthCorrection(Node):
             + bottom_depth[valid] * bottom_denominator[valid]
         )
         self.plane_height_samples.append(float(np.median(plane_z)))
+        sample_count = len(self.plane_height_samples)
+        if sample_count == 1 or sample_count % 10 == 0:
+            self.get_logger().info(
+                f'LUT calibration: {sample_count}/{self.calibration_frames} '
+                'frames accepted.')
 
         if len(self.plane_height_samples) < self.calibration_frames:
             return
@@ -358,14 +358,8 @@ class DepthCorrection(Node):
         lut[(lut < self.min_depth_m) | (lut > self.max_depth_m)] = np.nan
 
         # Freeze the table: no plane fitting or ray intersection is performed
-        # again in the live processing path. The valid/zero-filled views are
-        # precomputed once here too, so the per-frame fill never recomputes
-        # `np.isfinite(self.depth_lut)`.
+        # again in the live processing path.
         self.depth_lut = lut
-        self.lut_valid_u8 = (
-            np.isfinite(lut).astype(np.uint8) * np.uint8(255))
-        self.lut_zero_filled = np.where(
-            np.isfinite(lut), lut, np.float32(0.0)).astype(np.float32)
         valid_entries = int(np.count_nonzero(np.isfinite(lut)))
         self.get_logger().info(
             f'Offline LUT frozen: plane z={plane_height:.4f} m in '
@@ -465,9 +459,19 @@ class DepthCorrection(Node):
         return out_bgr
 
     def publish_image(self, publisher, image, header):
-        """Publish one BGR visualization preserving the source header."""
-        output_msg = self.bridge.cv2_to_imgmsg(image, encoding='bgr8')
+        """Publish one JPEG-compressed BGR visualization."""
+        success, encoded = cv2.imencode(
+            '.jpg', image,
+            [cv2.IMWRITE_JPEG_QUALITY, self.debug_jpeg_quality])
+        if not success:
+            self.get_logger().error(
+                'Failed to JPEG-compress depth debug image',
+                throttle_duration_sec=2.0)
+            return
+        output_msg = CompressedImage()
         output_msg.header = header
+        output_msg.format = 'jpeg'
+        output_msg.data = encoded.tobytes()
         publisher.publish(output_msg)
 
     def publish_depth(self, depth, header):
@@ -477,21 +481,10 @@ class DepthCorrection(Node):
         self.depth_publisher.publish(output_msg)
 
     def _fill_from_lut(self, completed):
-        """Fill unfillable-free pixels of `completed` in place from the LUT."""
-        # `inRange` reproduces `isfinite(x) & (x > 0)` in one pass: NaN
-        # fails every comparison, and +inf is excluded by the FLT_MAX
-        # upper bound, matching the original's `~isfinite(...)` treatment
-        # of both NaN and +/-inf as missing.
-        cv2.inRange(
-            completed,
-            (float(np.nextafter(np.float32(0), np.float32(1))),),
-            (float(np.finfo(np.float32).max),),
-            dst=self._buf_fill_mask,
-        )
-        cv2.bitwise_not(self._buf_fill_mask, dst=self._buf_fill_mask)
-        cv2.bitwise_and(
-            self._buf_fill_mask, self.lut_valid_u8, dst=self._buf_fill_mask)
-        cv2.copyTo(self.lut_zero_filled, self._buf_fill_mask, completed)
+        """Fill missing depth wherever the LUT has a finite value."""
+        missing = ~np.isfinite(completed) | (completed <= 0.0)
+        fillable = missing & np.isfinite(self.depth_lut)
+        completed[fillable] = self.depth_lut[fillable]
 
     def depth_callback(self, msg):
         """Crop, resize, calibrate if needed, then publish both views."""
@@ -522,20 +515,16 @@ class DepthCorrection(Node):
             self.telemetry_stats['resize_convert'].append(
                 (time.perf_counter() - t0) * 1000.0)
 
-        if self.frame_counter % self.debug_probe_interval_frames == 0:
-            self._publish_raw_jet = (
-                self.publisher.get_subscription_count() > 0)
-            self._publish_corrected_jet = (
-                self.corrected_publisher.get_subscription_count() > 0)
-
-        if self._publish_raw_jet:
-            t0 = time.perf_counter() if self.debug_telemetry else 0.0
-            self.publish_image(
-                self.publisher, self._colorize_into(resized, self._buf_bgr),
-                msg.header)
-            if self.debug_telemetry:
-                self.telemetry_stats['raw_jet'].append(
-                    (time.perf_counter() - t0) * 1000.0)
+        # Publish before calibration, even if TF/CameraInfo are unavailable.
+        # Do not wait for a periodically sampled subscriber count: a viewer
+        # opened during startup must receive frames as soon as it connects.
+        t0 = time.perf_counter() if self.debug_telemetry else 0.0
+        self.publish_image(
+            self.publisher, self._colorize_into(resized, self._buf_bgr),
+            msg.header)
+        if self.debug_telemetry:
+            self.telemetry_stats['raw_jet'].append(
+                (time.perf_counter() - t0) * 1000.0)
 
         self.update_offline_calibration(
             resized, msg, depth_view.shape[0], depth_view.shape[1])
@@ -557,14 +546,14 @@ class DepthCorrection(Node):
             self.telemetry_stats['depth_publish'].append(
                 (time.perf_counter() - t0) * 1000.0)
 
-        if self._publish_corrected_jet:
-            t0 = time.perf_counter() if self.debug_telemetry else 0.0
-            self.publish_image(
-                self.corrected_publisher,
-                self._colorize_into(resized, self._buf_bgr), msg.header)
-            if self.debug_telemetry:
-                self.telemetry_stats['corrected_jet'].append(
-                    (time.perf_counter() - t0) * 1000.0)
+        # Before the LUT is ready this view equals the uncorrected depth.
+        t0 = time.perf_counter() if self.debug_telemetry else 0.0
+        self.publish_image(
+            self.corrected_publisher,
+            self._colorize_into(resized, self._buf_bgr), msg.header)
+        if self.debug_telemetry:
+            self.telemetry_stats['corrected_jet'].append(
+                (time.perf_counter() - t0) * 1000.0)
 
         self.frame_counter += 1
         if self.debug_telemetry:
@@ -612,8 +601,8 @@ class DepthCorrection(Node):
             f" Crop+resize+convert:        {avg('resize_convert'):.3f} ms\n"
             f" LUT fill:                   {avg('lut_fill'):.3f} ms\n"
             f" Depth publish:              {avg('depth_publish'):.3f} ms\n"
-            f" Raw JET (when subscribed):  {avg('raw_jet'):.3f} ms\n"
-            f" Corrected JET (when sub.):  {avg('corrected_jet'):.3f} ms\n"
+            f" Raw JET:                    {avg('raw_jet'):.3f} ms\n"
+            f" Corrected JET:              {avg('corrected_jet'):.3f} ms\n"
             "-----------------------------------------\n"
             f" TOTAL CALLBACK TIME:        {avg('total_callback'):.3f} ms\n"
             "=========================================\n"
