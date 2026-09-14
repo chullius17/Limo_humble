@@ -45,6 +45,12 @@ def generate_launch_description():
             'pointcloud_max_depth_m': 5.0,
             'blue_radius_min_m': 0.10,
             'blue_radius_max_m': 0.16,
+            # White points in the blue distance band seed class 4 (boardwalk).
+            # A second metric nearest-neighbor pass expands only from those seeds.
+            'enable_boardwalk': True,
+            'boardwalk_propagation_radius_m': 0.10,
+            'telemetry_window_size': 60,
+            'telemetry_log_interval_frames': 30,
         }]
     )
 

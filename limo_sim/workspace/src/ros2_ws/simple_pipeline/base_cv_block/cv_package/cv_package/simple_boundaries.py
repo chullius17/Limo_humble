@@ -19,6 +19,9 @@ import time
 import threading
 from queue import Queue, Empty
 from collections import deque
+from cv_package.boardwalk import (
+    BOARDWALK_COUNTS, BOARDWALK_TIMINGS, classify_boardwalk,
+)
 
 
 class CurbDetector(Node):
@@ -27,6 +30,7 @@ class CurbDetector(Node):
     LABEL_BLUE = np.uint8(1)
     LABEL_TURQUOISE = np.uint8(2)
     LABEL_BACKGROUND = np.uint8(3)
+    LABEL_BOARDWALK = np.uint8(4)
     CLOUD_DTYPE = np.dtype({
         'names': ('x', 'y', 'z', 'class_id'),
         'formats': ('<f4', '<f4', '<f4', 'u1'),
@@ -87,6 +91,8 @@ class CurbDetector(Node):
         self.declare_parameter('pointcloud_max_depth_m', 5.0)
         self.declare_parameter('blue_radius_min_m', 0.10)
         self.declare_parameter('blue_radius_max_m', 0.16)
+        self.declare_parameter('enable_boardwalk', True)
+        self.declare_parameter('boardwalk_propagation_radius_m', 0.10)
 
         self.input_crop_y_min = float(
             self.get_parameter('input_crop_y_min').value)
@@ -104,6 +110,10 @@ class CurbDetector(Node):
             self.get_parameter('blue_radius_min_m').value)
         self.blue_radius_max = float(
             self.get_parameter('blue_radius_max_m').value)
+        self.enable_boardwalk = bool(
+            self.get_parameter('enable_boardwalk').value)
+        self.boardwalk_propagation_radius = float(
+            self.get_parameter('boardwalk_propagation_radius_m').value)
         self.bev_frame = str(self.get_parameter('bev_frame').value)
         if not 0.0 <= self.input_crop_y_min < 1.0:
             raise ValueError('input_crop_y_min must be in [0, 1)')
@@ -113,8 +123,12 @@ class CurbDetector(Node):
             raise ValueError('corrected_depth_timeout_sec must be positive')
         if self.fallback_depth_width <= 0 or self.fallback_depth_height <= 0:
             raise ValueError('Fallback depth dimensions must be positive')
-        if not 0.0 <= self.blue_radius_min <= self.blue_radius_max:
+        if (not np.isfinite([self.blue_radius_min, self.blue_radius_max]).all()
+                or not 0.0 <= self.blue_radius_min <= self.blue_radius_max):
             raise ValueError('Blue point radii are invalid')
+        if (not np.isfinite(self.boardwalk_propagation_radius)
+                or self.boardwalk_propagation_radius < 0.0):
+            raise ValueError('Boardwalk propagation radius must be finite and non-negative')
         if not self.bev_frame:
             raise ValueError('bev_frame cannot be empty')
 
@@ -197,8 +211,14 @@ class CurbDetector(Node):
         # Telemetry & Diagnostics setup
         self.declare_parameter('enable_telemetry', True)
         self.debug_telemetry = self.get_parameter('enable_telemetry').value
+        self.declare_parameter('telemetry_window_size', 60)
+        self.declare_parameter('telemetry_log_interval_frames', 30)
         self.frame_count = 0
-        self.window_size = 30
+        self.window_size = int(self.get_parameter('telemetry_window_size').value)
+        self.telemetry_log_interval = int(
+            self.get_parameter('telemetry_log_interval_frames').value)
+        if self.window_size <= 0 or self.telemetry_log_interval <= 0:
+            raise ValueError('Telemetry window and log interval must be positive')
         self.telemetry_stats = {
             'decomp': deque(maxlen=self.window_size),
             'step1_masks': deque(maxlen=self.window_size),
@@ -214,6 +234,10 @@ class CurbDetector(Node):
             'point_count': deque(maxlen=self.window_size),
             'total': deque(maxlen=self.window_size),
         }
+        self.telemetry_stats.update({
+            key: deque(maxlen=self.window_size)
+            for key, _ in BOARDWALK_TIMINGS + BOARDWALK_COUNTS
+        })
 
         # Start background worker thread
         self.worker_thread = threading.Thread(target=self._processing_worker, daemon=True)
@@ -221,6 +245,12 @@ class CurbDetector(Node):
         self.get_logger().info(
             f'CurbDetector initialized: compact 2D cloud in '
             f'{self.bev_frame}.')
+        self.get_logger().info(
+            f'Boardwalk classification {"enabled" if self.enable_boardwalk else "disabled"}: '
+            f'class_id={int(self.LABEL_BOARDWALK)}, '
+            f'blue distance ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m, '
+            f'propagation < {self.boardwalk_propagation_radius:.3f} m; '
+            f'exact 2D cKDTree queries, single worker.')
 
     def voxelize_points(self, raw_points, image_width):
         """Replace all points in each 2D cell with their centroid."""
@@ -388,6 +418,9 @@ class CurbDetector(Node):
             'point_count': float('nan'),
             'total': 0.0,
         }
+        # Missing depth/TF and disabled classification must not contribute
+        # artificial zero-duration samples to the boardwalk statistics.
+        t.update({key: float('nan') for key, _ in BOARDWALK_TIMINGS + BOARDWALK_COUNTS})
 
         # Decode the compact class-label image.
         try:
@@ -458,7 +491,7 @@ class CurbDetector(Node):
 
         # --- STEP 8: METRIC 2D BEV POINT CLOUD ---
         (point_count, prepare_ms, publish_ms,
-         lock_ms, tf_ms, math_ms) = self.publish_pointcloud(
+         lock_ms, tf_ms, math_ms, boardwalk_stats) = self.publish_pointcloud(
             raw_points_blue,
             raw_points_turquoise,
             raw_points_white,
@@ -471,6 +504,7 @@ class CurbDetector(Node):
         t['step8_tf'] = tf_ms
         t['step8_math'] = math_ms
         t['step8_cloud_publish'] = publish_ms
+        t.update(boardwalk_stats)
         if point_count is not None:
             t['point_count'] = point_count
 
@@ -548,7 +582,7 @@ class CurbDetector(Node):
                 self.telemetry_stats[key].append(val)
 
         self.frame_count += 1
-        if self.frame_count % 30 == 0 and self.debug_telemetry:
+        if self.frame_count % self.telemetry_log_interval == 0 and self.debug_telemetry:
             avg = {
                 key: float(np.mean(self.telemetry_stats[key])) if len(self.telemetry_stats[key]) > 0 else 0.0
                 for key in self.telemetry_stats
@@ -577,8 +611,40 @@ class CurbDetector(Node):
                 f"  [Step 8b: DDS Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
                 f"  [Step 9: Draw & Publish]        Current: {t['step9_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step9_draw_publish']:.2f} ms\n"
                 f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg}\n"
+                f"{self.boardwalk_diagnostics(t)}"
                 f"======================================================================"
             )
+
+    def boardwalk_diagnostics(self, current):
+        """Report classification cost and workload over evaluated clouds only."""
+        if not self.enable_boardwalk:
+            return '  [Boardwalk class 4]             Disabled\n'
+        samples = self.telemetry_stats['boardwalk_total_ms']
+        if not samples:
+            return '  [Boardwalk class 4]             Waiting for a valid BEV cloud\n'
+
+        def value(key, decimals):
+            number = current[key]
+            return f'{number:.{decimals}f}' if np.isfinite(number) else 'n/a'
+
+        lines = [
+            f'  [Boardwalk class 4: cKDTree]     Rolling window: {len(samples)} clouds\n',
+            f'    Blue band: ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m | '
+            f'Propagation: < {self.boardwalk_propagation_radius:.3f} m\n',
+        ]
+        for key, title in BOARDWALK_TIMINGS:
+            values = self.telemetry_stats[key]
+            lines.append(
+                f'    {title:<28} Current: {value(key, 3)} ms | '
+                f'Avg: {np.mean(values):.3f} ms\n')
+        lines.append(
+            f'    Total latency spread         P95: {np.percentile(samples, 95):.3f} ms | '
+            f'Max: {np.max(samples):.3f} ms\n')
+        for key, title in BOARDWALK_COUNTS:
+            lines.append(
+                f'    {title:<28} Current: {value(key, 0)} | '
+                f'Avg: {np.mean(self.telemetry_stats[key]):.1f}\n')
+        return ''.join(lines)
 
     def publish_pointcloud(
             self, blue_points, turquoise_points, background_points,
@@ -588,11 +654,12 @@ class CurbDetector(Node):
         lock_ms = 0.0
         tf_ms = 0.0
         math_ms = 0.0
+        boardwalk_stats = {}
 
         def skipped_result():
             prepare_ms = (
                 time.perf_counter() - prepare_started_at) * 1000.0
-            return None, prepare_ms, 0.0, lock_ms, tf_ms, math_ms
+            return None, prepare_ms, 0.0, lock_ms, tf_ms, math_ms, boardwalk_stats
 
         lock_started_at = time.perf_counter()
         with self.sensor_lock:
@@ -700,7 +767,20 @@ class CurbDetector(Node):
             transform.transform.translation.x,
             transform.transform.translation.y,
         ], dtype=np.float32)
+        math_ms += (time.perf_counter() - math_started_at) * 1000.0
 
+        # Apply the two distance passes to observed metric BEV points before
+        # serialization. Only white labels can become boardwalk; coordinates,
+        # point order and the existing PointCloud2 layout remain unchanged.
+        # Time classification separately so projection timings stay comparable.
+        if self.enable_boardwalk:
+            boardwalk_stats = classify_boardwalk(
+                bev_points, class_ids,
+                self.blue_radius_min, self.blue_radius_max,
+                self.boardwalk_propagation_radius,
+                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK)
+
+        math_started_at = time.perf_counter()
         cloud_points = np.empty(len(rows), dtype=self.CLOUD_DTYPE)
         cloud_points['x'] = bev_points[:, 0]
         cloud_points['y'] = bev_points[:, 1]
@@ -727,7 +807,7 @@ class CurbDetector(Node):
             time.perf_counter() - publish_started_at) * 1000.0
         return (
             len(cloud_points), prepare_ms, publish_ms,
-            lock_ms, tf_ms, math_ms,
+            lock_ms, tf_ms, math_ms, boardwalk_stats,
         )
 
     def encode_debug_image(self, frame, header):
