@@ -11,7 +11,7 @@ pytest.importorskip('rclpy')
 from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import Header
 
-from cv_package.boardwalk import BOARDWALK_COUNTS, BOARDWALK_TIMINGS
+from cv_package.boardwalk import BOARDWALK_COUNTS, BOARDWALK_TIMINGS, BoardwalkClassifier
 from cv_package.simple_boundaries import CurbDetector
 
 
@@ -32,9 +32,12 @@ def detector_stub(enabled=True):
         blue_radius_min=0.10,
         blue_radius_max=0.16,
         boardwalk_propagation_radius=0.10,
+        boardwalk_classifier=BoardwalkClassifier(),
         tf_buffer=SimpleNamespace(lookup_transform=lambda *args: transform),
         quaternion_to_rotation=CurbDetector.quaternion_to_rotation,
         pointcloud_pub=SimpleNamespace(publish=published.append),
+        boardwalk_grid_debug_pub=SimpleNamespace(
+            get_subscription_count=lambda: 0, publish=lambda msg: None),
         get_logger=lambda: SimpleNamespace(warning=lambda *args, **kwargs: None),
     )
     for name in ('LABEL_BLUE', 'LABEL_TURQUOISE', 'LABEL_BACKGROUND',
@@ -90,7 +93,7 @@ def test_empty_cloud_is_published_with_zero_workload():
         detector, empty, empty, empty, 4, 1, Header(frame_id='camera'))
     assert published[0].width == 0
     assert result[-1]['boardwalk_final_count'] == 0
-    assert result[-1]['boardwalk_blue_build_ms'] == 0
+    assert result[-1]['boardwalk_blue_dt_ms'] == 0
 
 
 def test_telemetry_reports_distribution_counts_and_missing_current_sample():
@@ -105,3 +108,31 @@ def test_telemetry_reports_distribution_counts_and_missing_current_sample():
     assert 'Current: n/a' in output
     assert 'First-pass seeds' in output
     assert 'Added by second pass' in output
+    assert 'Grid cells' in output
+    assert 'Distance from blue' in output
+    assert 'Distance from seeds' in output
+
+
+def test_grid_debug_publishes_a_jpeg_with_the_bev_header_on_demand():
+    from turbojpeg import TurboJPEG
+
+    detector, clouds = detector_stub()
+    images = []
+    detector.boardwalk_grid_debug_pub.get_subscription_count = lambda: 1
+    detector.boardwalk_grid_debug_pub.publish = images.append
+    detector.jpeg = TurboJPEG()
+    detector.debug_jpeg_quality = 85
+    detector.encode_debug_image = lambda frame, header: CurbDetector.encode_debug_image(
+        detector, frame, header)
+    header = Header(frame_id='camera')
+    header.stamp.sec = 42
+    result = CurbDetector.publish_pointcloud(
+        detector, np.array([[0, 0]]), np.array([[0, 3]]),
+        np.array([[0, 1], [0, 2]]), 4, 1, header)
+    assert len(images) == len(clouds) == 1
+    assert images[0].header == clouds[0].header
+    assert images[0].header.frame_id == 'base_link'
+    assert images[0].format == 'bgr8; jpeg compressed bgr8'
+    decoded = detector.jpeg.decode(bytes(images[0].data))
+    assert decoded.shape == detector.boardwalk_classifier.debug_image.shape
+    assert result[-1]['boardwalk_debug_publish_ms'] > 0

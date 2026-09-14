@@ -31,6 +31,8 @@ def generate_launch_description():
             'roi_y_min': 0.0,
             'roi_y_max': 1.0,
             'point_voxel_size': 5,
+            # 7x7 keeps an approximately three-pixel-wide inner blue boundary.
+            'blue_boundary_kernel_size': 7,
             'camera_info_topic': '/rgb/camera_info',
             'depth_topic': (
                 'limo/cv_package/depth_correction/depth_corrected/raw'
@@ -46,9 +48,14 @@ def generate_launch_description():
             'blue_radius_min_m': 0.10,
             'blue_radius_max_m': 0.16,
             # White points in the blue distance band seed class 4 (boardwalk).
-            # A second metric nearest-neighbor pass expands only from those seeds.
+            # Two distance transforms classify a metric grid, then relabel points.
             'enable_boardwalk': True,
             'boardwalk_propagation_radius_m': 0.10,
+            'boardwalk_grid_resolution_m': 0.01,
+            'boardwalk_grid_max_cells': 1000000,
+            # Auto keeps both EDT passes on CUDA, with a logged CPU fallback.
+            # Set cpu to compare timings, or cuda to require CUDA explicitly.
+            'boardwalk_backend': 'auto',
             'telemetry_window_size': 60,
             'telemetry_log_interval_frames': 30,
         }]

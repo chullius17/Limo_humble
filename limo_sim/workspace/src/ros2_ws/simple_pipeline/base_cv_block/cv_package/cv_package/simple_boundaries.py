@@ -20,7 +20,7 @@ import threading
 from queue import Queue, Empty
 from collections import deque
 from cv_package.boardwalk import (
-    BOARDWALK_COUNTS, BOARDWALK_TIMINGS, classify_boardwalk,
+    BOARDWALK_COUNTS, BOARDWALK_TIMINGS, BoardwalkClassifier,
 )
 
 
@@ -68,10 +68,22 @@ class CurbDetector(Node):
             raise ValueError(
                 'roi_y_min and roi_y_max must define a range in [0, 1]')
         self.declare_parameter('point_voxel_size', 3)
+        self.declare_parameter('blue_boundary_kernel_size', 7)
         self.point_voxel_size = int(
             self.get_parameter('point_voxel_size').value)
+        self.blue_boundary_kernel_size = int(
+            self.get_parameter('blue_boundary_kernel_size').value)
         if self.point_voxel_size <= 0:
             raise ValueError('point_voxel_size must be positive')
+        if (self.blue_boundary_kernel_size <= 0
+                or self.blue_boundary_kernel_size % 2 == 0):
+            raise ValueError(
+                'blue_boundary_kernel_size must be a positive odd integer')
+        self.blue_boundary_kernel = np.ones(
+            (self.blue_boundary_kernel_size,
+             self.blue_boundary_kernel_size),
+            dtype=np.uint8,
+        )
 
         self.declare_parameter(
             'camera_info_topic', '/rgb/camera_info')
@@ -93,6 +105,9 @@ class CurbDetector(Node):
         self.declare_parameter('blue_radius_max_m', 0.16)
         self.declare_parameter('enable_boardwalk', True)
         self.declare_parameter('boardwalk_propagation_radius_m', 0.10)
+        self.declare_parameter('boardwalk_grid_resolution_m', 0.01)
+        self.declare_parameter('boardwalk_grid_max_cells', 1000000)
+        self.declare_parameter('boardwalk_backend', 'auto')
 
         self.input_crop_y_min = float(
             self.get_parameter('input_crop_y_min').value)
@@ -114,6 +129,10 @@ class CurbDetector(Node):
             self.get_parameter('enable_boardwalk').value)
         self.boardwalk_propagation_radius = float(
             self.get_parameter('boardwalk_propagation_radius_m').value)
+        self.boardwalk_classifier = BoardwalkClassifier(
+            resolution=float(self.get_parameter('boardwalk_grid_resolution_m').value),
+            max_cells=int(self.get_parameter('boardwalk_grid_max_cells').value),
+            backend=str(self.get_parameter('boardwalk_backend').value))
         self.bev_frame = str(self.get_parameter('bev_frame').value)
         if not 0.0 <= self.input_crop_y_min < 1.0:
             raise ValueError('input_crop_y_min must be in [0, 1)')
@@ -190,6 +209,11 @@ class CurbDetector(Node):
             'limo/cv_package/boundaries/blue_filter_debug/compressed',
             pipeline_qos,
         )
+        self.boardwalk_grid_debug_pub = self.create_publisher(
+            CompressedImage,
+            'limo/cv_package/boundaries/boardwalk_grid_debug/compressed',
+            pipeline_qos,
+        )
         self.pointcloud_pub = self.create_publisher(
             PointCloud2,
             self.get_parameter('pointcloud_topic').value,
@@ -250,7 +274,9 @@ class CurbDetector(Node):
             f'class_id={int(self.LABEL_BOARDWALK)}, '
             f'blue distance ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m, '
             f'propagation < {self.boardwalk_propagation_radius:.3f} m; '
-            f'exact 2D cKDTree queries, single worker.')
+            f'BEV grid {self.boardwalk_classifier.resolution:.3f} m/cell, '
+            f'limit {self.boardwalk_classifier.max_cells} cells; '
+            f'backend={self.boardwalk_classifier.backend}; two Euclidean EDT passes.')
 
     def voxelize_points(self, raw_points, image_width):
         """Replace all points in each 2D cell with their centroid."""
@@ -392,14 +418,18 @@ class CurbDetector(Node):
 
     def _processing_worker(self):
         """Worker Thread executing image processing pipeline asynchronously."""
-        while self.is_running and rclpy.ok():
-            try:
-                msg = self.frame_queue.get(timeout=0.1)
-            except Empty:
-                continue
+        try:
+            while self.is_running and rclpy.ok():
+                try:
+                    msg = self.frame_queue.get(timeout=0.1)
+                except Empty:
+                    continue
 
-            self.process_image(msg)
-            self.frame_queue.task_done()
+                self.process_image(msg)
+                self.frame_queue.task_done()
+        finally:
+            # Free device buffers only after this worker stops using them.
+            self.boardwalk_classifier.close()
 
     def process_image(self, msg):
         start_total = time.perf_counter()
@@ -445,11 +475,13 @@ class CurbDetector(Node):
         blue_mask = labels == self.LABEL_BLUE
         turquoise_mask = labels == self.LABEL_TURQUOISE
         background_mask = labels == self.LABEL_BACKGROUND
-        # Keep only blue pixels adjacent to white (background), including diagonals.
+        # Dilating white before intersecting it with blue selects an inner blue
+        # boundary band. A larger odd kernel keeps a thicker blue band, while
+        # the original class map and the white region remain unchanged.
         # Filter before the ROI so cropping does not affect class adjacency.
         white_dilated = cv2.dilate(
             background_mask.astype(np.uint8),
-            np.ones((3, 3), dtype=np.uint8),
+            self.blue_boundary_kernel,
             borderType=cv2.BORDER_CONSTANT,
             borderValue=0,
         )
@@ -628,7 +660,11 @@ class CurbDetector(Node):
             return f'{number:.{decimals}f}' if np.isfinite(number) else 'n/a'
 
         lines = [
-            f'  [Boardwalk class 4: cKDTree]     Rolling window: {len(samples)} clouds\n',
+            f'  [Boardwalk class 4: BEV grid]    Rolling window: {len(samples)} clouds\n',
+            f'    Backend: {self.boardwalk_classifier.active_backend} | '
+            f'Requested: {self.boardwalk_classifier.backend}\n',
+            f'    Resolution: {self.boardwalk_classifier.resolution:.3f} m/cell | '
+            f'Grid limit: {self.boardwalk_classifier.max_cells} cells\n',
             f'    Blue band: ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m | '
             f'Propagation: < {self.boardwalk_propagation_radius:.3f} m\n',
         ]
@@ -769,16 +805,28 @@ class CurbDetector(Node):
         ], dtype=np.float32)
         math_ms += (time.perf_counter() - math_started_at) * 1000.0
 
-        # Apply the two distance passes to observed metric BEV points before
+        # Rasterize metric BEV points and apply two distance transforms before
         # serialization. Only white labels can become boardwalk; coordinates,
         # point order and the existing PointCloud2 layout remain unchanged.
         # Time classification separately so projection timings stay comparable.
         if self.enable_boardwalk:
-            boardwalk_stats = classify_boardwalk(
+            publish_grid_debug = self.boardwalk_grid_debug_pub.get_subscription_count() > 0
+            boardwalk_stats = self.boardwalk_classifier.classify(
                 bev_points, class_ids,
                 self.blue_radius_min, self.blue_radius_max,
                 self.boardwalk_propagation_radius,
-                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK)
+                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK,
+                debug=publish_grid_debug)
+            if boardwalk_stats['boardwalk_grid_skipped']:
+                self.get_logger().warning(
+                    'Boardwalk grid exceeds the configured cell limit; '
+                    'publishing this cloud with its original labels.',
+                    throttle_duration_sec=2.0)
+            if self.boardwalk_classifier.gpu_error:
+                self.get_logger().warning(
+                    f'Boardwalk CUDA unavailable; using CPU: '
+                    f'{self.boardwalk_classifier.gpu_error}',
+                    throttle_duration_sec=10.0)
 
         math_started_at = time.perf_counter()
         cloud_points = np.empty(len(rows), dtype=self.CLOUD_DTYPE)
@@ -805,6 +853,18 @@ class CurbDetector(Node):
         self.pointcloud_pub.publish(cloud)
         publish_ms = (
             time.perf_counter() - publish_started_at) * 1000.0
+        # Encode the grid only on demand and after publishing the point cloud.
+        # Its header identifies the metric BEV frame and the same input stamp.
+        if self.enable_boardwalk and publish_grid_debug:
+            debug_started_at = time.perf_counter()
+            try:
+                self.boardwalk_grid_debug_pub.publish(self.encode_debug_image(
+                    self.boardwalk_classifier.debug_image, cloud.header))
+            except Exception as error:
+                self.get_logger().error(
+                    f'Failed to publish boardwalk grid debug image: {error}')
+            boardwalk_stats['boardwalk_debug_publish_ms'] = (
+                time.perf_counter() - debug_started_at) * 1000.0
         return (
             len(cloud_points), prepare_ms, publish_ms,
             lock_ms, tf_ms, math_ms, boardwalk_stats,
