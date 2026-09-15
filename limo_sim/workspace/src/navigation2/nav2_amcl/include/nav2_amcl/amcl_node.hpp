@@ -22,30 +22,25 @@
 #define NAV2_AMCL__AMCL_NODE_HPP_
 
 #include <atomic>
-#include <deque>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "builtin_interfaces/msg/time.hpp"
+#include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "message_filters/subscriber.h"
 #include "nav2_util/lifecycle_node.hpp"
 #include "nav2_amcl/motion_model/motion_model.hpp"
-#include "nav2_amcl/sensors/cv/cv_likelihood_model.hpp"
 #include "nav2_amcl/sensors/laser/laser.hpp"
 #include "nav2_msgs/msg/particle.hpp"
 #include "nav2_msgs/msg/particle_cloud.hpp"
-#include "nav2_msgs/srv/set_initial_pose.hpp"
 #include "nav_msgs/srv/set_map.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_srvs/srv/empty.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
-#include "pluginlib/class_loader.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -57,64 +52,24 @@
 
 namespace nav2_amcl
 {
-/*
- * @class AmclNode
- * @brief ROS wrapper for AMCL
- */
+
 class AmclNode : public nav2_util::LifecycleNode
 {
 public:
-  /*
-   * @brief AMCL constructor
-   * @param options Additional options to control creation of the node.
-   */
-  explicit AmclNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
-  /*
-   * @brief AMCL destructor
-   */
+  AmclNode();
   ~AmclNode();
 
 protected:
-  /*
-   * @brief Lifecycle configure
-   */
+  // Implement the lifecycle interface
   nav2_util::CallbackReturn on_configure(const rclcpp_lifecycle::State & state) override;
-  /*
-   * @brief Lifecycle activate
-   */
   nav2_util::CallbackReturn on_activate(const rclcpp_lifecycle::State & state) override;
-  /*
-   * @brief Lifecycle deactivate
-   */
   nav2_util::CallbackReturn on_deactivate(const rclcpp_lifecycle::State & state) override;
-  /*
-   * @brief Lifecycle cleanup
-   */
   nav2_util::CallbackReturn on_cleanup(const rclcpp_lifecycle::State & state) override;
-  /*
-   * @brief Lifecycle shutdown
-   */
   nav2_util::CallbackReturn on_shutdown(const rclcpp_lifecycle::State & state) override;
-
-  /**
-   * @brief Callback executed when a parameter change is detected
-   * @param event ParameterEvent message
-   */
-  rcl_interfaces::msg::SetParametersResult
-  dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
-
-  // Dynamic parameters handler
-  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 
   // Since the sensor data from gazebo or the robot is not lifecycle enabled, we won't
   // respond until we're in the active state
   std::atomic<bool> active_{false};
-
-  // Dedicated callback group and executor for services and subscriptions in AmclNode,
-  // in order to isolate TF timer used in message filter.
-  rclcpp::CallbackGroup::SharedPtr callback_group_;
-  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
-  std::unique_ptr<nav2_util::NodeThread> executor_thread_;
 
   // Pose hypothesis
   typedef struct
@@ -125,44 +80,22 @@ protected:
   } amcl_hyp_t;
 
   // Map-related
-  /*
-   * @brief Get new map from ROS topic to localize in
-   * @param msg Map message
-   */
   void mapReceived(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-  /*
-   * @brief Handle a new map message
-   * @param msg Map message
-   */
   void handleMapMessage(const nav_msgs::msg::OccupancyGrid & msg);
-  /*
-   * @brief Creates lookup table of free cells in map
-   */
   void createFreeSpaceVector();
-  /*
-   * @brief Frees allocated map related memory
-   */
   void freeMapDependentMemory();
   map_t * map_{nullptr};
-  /*
-   * @brief Convert an occupancy grid map to an AMCL map
-   * @param map_msg Map message
-   * @return pointer to map for AMCL to use
-   */
   map_t * convertMap(const nav_msgs::msg::OccupancyGrid & map_msg);
   bool first_map_only_{true};
   std::atomic<bool> first_map_received_{false};
   amcl_hyp_t * initial_pose_hyp_;
-  std::recursive_mutex mutex_;
+  std::recursive_mutex configuration_mutex_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr map_sub_;
 #if NEW_UNIFORM_SAMPLING
   static std::vector<std::pair<int, int>> free_space_indices;
 #endif
 
   // Transforms
-  /*
-   * @brief Initialize required ROS transformations
-   */
   void initTransforms();
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -170,104 +103,36 @@ protected:
   bool sent_first_transform_{false};
   bool latest_tf_valid_{false};
   tf2::Transform latest_tf_;
+  void waitForTransforms();
 
   // Message filters
-  /*
-   * @brief Initialize incoming data message subscribers and filters
-   */
   void initMessageFilters();
-  std::unique_ptr<message_filters::Subscriber<sensor_msgs::msg::LaserScan,
-    rclcpp_lifecycle::LifecycleNode>> laser_scan_sub_;
+  std::unique_ptr<message_filters::Subscriber<sensor_msgs::msg::LaserScan>> laser_scan_sub_;
   std::unique_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::LaserScan>> laser_scan_filter_;
   message_filters::Connection laser_scan_connection_;
 
   // Publishers and subscribers
-  /*
-   * @brief Initialize pub subs of AMCL
-   */
   void initPubSub();
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::ConstSharedPtr
     initial_pose_sub_;
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     pose_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PoseArray>::SharedPtr particlecloud_pub_;
   rclcpp_lifecycle::LifecyclePublisher<nav2_msgs::msg::ParticleCloud>::SharedPtr
     particle_cloud_pub_;
-  /*
-   * @brief Handle with an initial pose estimate is received
-   */
   void initialPoseReceived(geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
-  /*
-   * @brief Handle when a laser scan is received
-   */
   void laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan);
 
-  // CV semantic-map input and SAD fusion
-  /** @brief Receive the static obstacle semantic map. */
-  void cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-  /** @brief Buffer one robot-local obstacle occupancy template. */
-  void cvObstacleGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg);
-  /** @brief Buffer one robot-local street occupancy template. */
-  void cvStreetGridReceived(nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg);
-  /** @brief Receive the static street semantic map. */
-  void cvStreetMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
-  /** @brief Find the buffered local CV grid closest to a laser timestamp. */
-  nav_msgs::msg::OccupancyGrid::ConstSharedPtr findClosestCvGrid(
-    const builtin_interfaces::msg::Time & stamp, double & time_error, bool street);
-  /** @brief Downsample and motion-compensate a local grid to laser time. */
-  std::vector<CvTemplateCell2D> transformCvGridToLaserTime(
-    const nav_msgs::msg::OccupancyGrid & grid,
-    const builtin_interfaces::msg::Time & laser_stamp);
-  /**
-   * @brief Fuse laser weights and normalized CV SAD in logarithmic space.
-   * @return true when a synchronized grid was successfully applied.
-   */
-  bool applyCvFusion(
-    pf_sample_set_t * set,
-    const builtin_interfaces::msg::Time & laser_stamp);
-
-  /// CV inputs exist only when cv_enabled_ is true during configuration.
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_map_sub_;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_obstacle_grid_sub_;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_street_map_sub_;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::ConstSharedPtr cv_street_grid_sub_;
-  /// Own the obstacle and street semantic maps and their SAD scoring code.
-  std::unique_ptr<CvLikelihoodModel> cv_likelihood_model_;
-  std::unique_ptr<CvLikelihoodModel> cv_street_likelihood_model_;
-  /// Small time-ordered history used for nearest-timestamp synchronization.
-  std::deque<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> cv_obstacle_grid_buffer_;
-  std::deque<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> cv_street_grid_buffer_;
-  /// Protects the buffer and CV model from the dedicated laser executor thread.
-  std::mutex cv_mutex_;
-
   // Services and service callbacks
-  /*
-   * @brief Initialize state services
-   */
   void initServices();
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr global_loc_srv_;
-  /*
-   * @brief Service callback for a global relocalization request
-   */
   void globalLocalizationCallback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<std_srvs::srv::Empty::Request> request,
     std::shared_ptr<std_srvs::srv::Empty::Response> response);
 
-  // service server for providing an initial pose guess
-  rclcpp::Service<nav2_msgs::srv::SetInitialPose>::SharedPtr initial_guess_srv_;
-  /*
-   * @brief Service callback for an initial pose guess request
-   */
-  void initialPoseReceivedSrv(
-    const std::shared_ptr<rmw_request_id_t> request_header,
-    const std::shared_ptr<nav2_msgs::srv::SetInitialPose::Request> request,
-    std::shared_ptr<nav2_msgs::srv::SetInitialPose::Response> response);
-
   // Let amcl update samples without requiring motion
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr nomotion_update_srv_;
-  /*
-   * @brief Request an AMCL update even though the robot hasn't moved
-   */
   void nomotionUpdateCallback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<std_srvs::srv::Empty::Request> request,
@@ -277,20 +142,12 @@ protected:
   std::atomic<bool> force_update_{false};
 
   // Odometry
-  /*
-   * @brief Initialize odometry
-   */
   void initOdometry();
-  std::shared_ptr<nav2_amcl::MotionModel> motion_model_;
+  std::unique_ptr<nav2_amcl::MotionModel> motion_model_;
   geometry_msgs::msg::PoseStamped latest_odom_pose_;
   geometry_msgs::msg::PoseWithCovarianceStamped last_published_pose_;
   double init_pose_[3];  // Initial robot pose
   double init_cov_[3];
-  pluginlib::ClassLoader<nav2_amcl::MotionModel> plugin_loader_{"nav2_amcl",
-    "nav2_amcl::MotionModel"};
-  /*
-   * @brief Get robot pose in odom frame using TF
-   */
   bool getOdomPose(
     // Helper to get odometric pose from transform system
     geometry_msgs::msg::PoseStamped & pose,
@@ -299,88 +156,51 @@ protected:
   std::atomic<bool> first_pose_sent_;
 
   // Particle filter
-  /*
-   * @brief Initialize particle filter
-   */
   void initParticleFilter();
-  /*
-   * @brief Pose-generating function used to uniformly distribute particles over the map
-   */
+  // Pose-generating function used to uniformly distribute particles over the map
   static pf_vector_t uniformPoseGenerator(void * arg);
   pf_t * pf_{nullptr};
+  std::mutex pf_mutex_;
   bool pf_init_;
   pf_vector_t pf_odom_pose_;
   int resample_count_{0};
 
   // Laser scan related
-  /*
-   * @brief Initialize laser scan
-   */
   void initLaserScan();
-  /*
-   * @brief Create a laser object
-   */
   nav2_amcl::Laser * createLaserObject();
   int scan_error_count_{0};
   std::vector<nav2_amcl::Laser *> lasers_;
   std::vector<bool> lasers_update_;
   std::map<std::string, int> frame_to_laser_;
   rclcpp::Time last_laser_received_ts_;
+  void checkLaserReceived();
+  std::chrono::seconds laser_check_interval_;  // TODO(mjeronimo): not initialized
 
-  /*
-   * @brief Check if sufficient time has elapsed to get an update
-   */
   bool checkElapsedTime(std::chrono::seconds check_interval, rclcpp::Time last_time);
   rclcpp::Time last_time_printed_msg_;
-  /*
-   * @brief Add a new laser scanner if a new one is received in the laser scallbacks
-   */
+
   bool addNewScanner(
     int & laser_index,
     const sensor_msgs::msg::LaserScan::ConstSharedPtr & laser_scan,
     const std::string & laser_scan_frame_id,
     geometry_msgs::msg::PoseStamped & laser_pose);
-  /*
-   * @brief Whether the pf needs to be updated
-   */
   bool shouldUpdateFilter(const pf_vector_t pose, pf_vector_t & delta);
-  /*
-   * @brief Update the PF
-   */
   bool updateFilter(
     const int & laser_index,
     const sensor_msgs::msg::LaserScan::ConstSharedPtr & laser_scan,
     const pf_vector_t & pose);
-  /*
-   * @brief Publish particle cloud
-   */
   void publishParticleCloud(const pf_sample_set_t * set);
-  /*
-   * @brief Get the current state estimat hypothesis from the particle cloud
-   */
   bool getMaxWeightHyp(
     std::vector<amcl_hyp_t> & hyps, amcl_hyp_t & max_weight_hyps,
     int & max_weight_hyp);
-  /*
-   * @brief Publish robot pose in map frame from AMCL
-   */
   void publishAmclPose(
     const sensor_msgs::msg::LaserScan::ConstSharedPtr & laser_scan,
     const std::vector<amcl_hyp_t> & hyps, const int & max_weight_hyp);
-  /*
-   * @brief Determine TF transformation from map to odom
-   */
   void calculateMaptoOdomTransform(
     const sensor_msgs::msg::LaserScan::ConstSharedPtr & laser_scan,
     const std::vector<amcl_hyp_t> & hyps,
     const int & max_weight_hyp);
-  /*
-   * @brief Publish TF transformation from map to odom
-   */
   void sendMapToOdomTransform(const tf2::TimePoint & transform_expiration);
-  /*
-   * @brief Handle a new pose estimate callback
-   */
   void handleInitialPose(geometry_msgs::msg::PoseWithCovarianceStamped & msg);
   bool init_pose_received_on_inactive{false};
   bool initial_pose_is_known_{false};
@@ -391,9 +211,7 @@ protected:
   double initial_pose_z_;
   double initial_pose_yaw_;
 
-  /*
-   * @brief Get ROS parameters for node
-   */
+  // Node parameters (initialized via initParameters)
   void initParameters();
   double alpha1_;
   double alpha2_;
@@ -433,38 +251,6 @@ protected:
   double z_rand_;
   std::string scan_topic_{"scan"};
   std::string map_topic_{"map"};
-
-  // CV synchronization and log-space sensor-fusion parameters. CV support is
-  // disabled by default in the generic AMCL node and enabled by the LIMO launch.
-  bool cv_enabled_{false};
-  std::string cv_map_topic_;
-  std::string cv_obstacle_grid_topic_;
-  std::string cv_street_map_topic_;
-  std::string cv_street_grid_topic_;
-  /// Maximum absolute timestamp error accepted between CV and laser data.
-  double cv_sync_tolerance_;
-  /// Maximum number of local OccupancyGrid messages retained for matching.
-  int cv_buffer_size_;
-  /// Factors applied to normalized laser weights and CV SAD likelihoods.
-  double laser_weight_factor_;
-  double cv_weight_factor_;
-  double cv_obstacle_weight_factor_;
-  double cv_street_weight_factor_;
-  /// Positive floor that makes logarithms safe for zero or denormal values.
-  double minimum_likelihood_;
-
-  // Grid-SAD model used by the online CV fusion path.
-  double cv_sad_gain_;
-  double cv_sad_cell_size_;
-  /// Minimum positive fraction retained in a downsampled local CV cell.
-  double cv_sad_min_cell_occupancy_;
-  /// Minimum foreground mass required for a semantic SAD channel to vote.
-  double cv_sad_min_positive_mass_;
-
-  // Occupancy threshold shared by local and static semantic grids.
-  int cv_occupied_threshold_;
-  /// Publish throttled particle, laser and CV workload counters.
-  bool workload_logging_enabled_{true};
 };
 
 }  // namespace nav2_amcl
