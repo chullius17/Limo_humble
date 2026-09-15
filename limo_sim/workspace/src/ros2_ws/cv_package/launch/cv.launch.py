@@ -1,10 +1,14 @@
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
 from launch.event_handlers import OnProcessStart
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    publish_blue_points = LaunchConfiguration('publish_blue_points')
+
     lane_node = Node(
             package='cv_package',
             executable='lane_detector',
@@ -53,9 +57,11 @@ def generate_launch_description():
             'fallback_depth_width': 320,
             'fallback_depth_height': 120,
             'pointcloud_topic': 'limo/cv_package/visual_ptcld/points',
+            'publish_blue_points': ParameterValue(
+                publish_blue_points, value_type=bool),
             'input_crop_y_min': 0.5,
             'pointcloud_min_depth_m': 0.1,
-            'pointcloud_max_depth_m': 5.0,
+            'pointcloud_max_depth_m': 2.0,
             'blue_radius_min_m': 0.10,
             'blue_radius_max_m': 0.16,
             # White points in the blue distance band seed class 4 (boardwalk).
@@ -89,7 +95,12 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'publish_blue_points',
+            default_value='false',
+            description='Include class_id 1 (blue) points in the output cloud.',
+        ),
         lane_node,
-        depth_correction_node,
+        # depth_correction_node,
         boundary_trigger,
     ])

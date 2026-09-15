@@ -22,4 +22,3 @@ semantic_mapper:
     max_input_points: 100000
     max_cells: 2000000
     max_output_cells: 4000000
-    mapping_enabled: true

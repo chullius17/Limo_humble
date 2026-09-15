@@ -71,13 +71,6 @@ def generate_launch_description():
         output='screen',
         parameters=[{'enable_telemetry': False}],
     )
-    mapping_control = Node(
-        package='offline_map_package',
-        executable='mapping_control',
-        name='mapping_control',
-        output='screen',
-        parameters=[{'mapping_enabled': True}],
-    )
     filtering_nodes = [
         Node(
             package='offline_map_package',
@@ -197,7 +190,6 @@ def generate_launch_description():
     )
 
     mapping_nodes = [
-        mapping_control,
         offline_metric_bev,
         *filtering_nodes,
         cv_map_display,

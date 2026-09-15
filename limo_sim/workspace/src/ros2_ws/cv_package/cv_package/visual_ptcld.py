@@ -137,10 +137,11 @@ class VisualPtcld(Node):
         self.declare_parameter('fallback_depth_height', 120)
         self.declare_parameter(
             'pointcloud_topic', 'limo/cv_package/visual_ptcld/points')
+        self.declare_parameter('publish_blue_points', False)
         self.declare_parameter('bev_frame', 'base_link')
         self.declare_parameter('input_crop_y_min', 0.5)
         self.declare_parameter('pointcloud_min_depth_m', 0.1)
-        self.declare_parameter('pointcloud_max_depth_m', 5.0)
+        self.declare_parameter('pointcloud_max_depth_m', 2.0)
         self.declare_parameter('blue_radius_min_m', 0.10)
         self.declare_parameter('blue_radius_max_m', 1.00)
         self.declare_parameter('enable_boardwalk', True)
@@ -166,6 +167,8 @@ class VisualPtcld(Node):
             self.get_parameter('enable_boardwalk').value)
         self.boardwalk_propagation_radius = float(
             self.get_parameter('boardwalk_propagation_radius_m').value)
+        self.publish_blue_points = bool(
+            self.get_parameter('publish_blue_points').value)
         self.boardwalk_classifier = BoardwalkClassifier()
         self.bev_frame = str(self.get_parameter('bev_frame').value)
         if not 0.0 <= self.input_crop_y_min < 1.0:
@@ -304,7 +307,9 @@ class VisualPtcld(Node):
         self.get_logger().info(
             f'VisualPtcld initialized: compact 2D cloud in '
             f'{self.bev_frame}; debug publications '
-            f'{"enabled" if self.enable_debug_publications else "disabled"}.')
+            f'{"enabled" if self.enable_debug_publications else "disabled"}; '
+            f'blue point publication '
+            f'{"enabled" if self.publish_blue_points else "disabled"}.')
         self.get_logger().info(
             f'Boardwalk classification {"enabled" if self.enable_boardwalk else "disabled"}: '
             f'class_id={int(self.LABEL_BOARDWALK)}, '
@@ -910,9 +915,17 @@ class VisualPtcld(Node):
                 self.boardwalk_propagation_radius,
                 self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK)
 
+        # Blue geometry is required by the boardwalk classifier above, but it
+        # is omitted from the outgoing cloud by default. This keeps the
+        # classification behavior unchanged while reducing the published data.
+        if not self.publish_blue_points:
+            publish_mask = class_ids != self.LABEL_BLUE
+            bev_points = bev_points[publish_mask]
+            class_ids = class_ids[publish_mask]
+
         # Downsample only the outgoing cloud. The full-resolution points above
-        # remain available to both cKDTree passes, and blue geometry is kept
-        # exactly as observed. Other classes use separate 2D metric voxel keys.
+        # remains available to both cKDTree passes. Classes use separate 2D
+        # metric voxel keys; optional blue points pass through unchanged.
         point_count_before_voxel = len(bev_points)
         voxel_started_at = time.perf_counter()
         bev_points, class_ids = self.voxelize_bev_cloud(

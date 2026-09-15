@@ -8,7 +8,7 @@ Panels:
         - /TF1
         - /LaserScan1
         - /Map1
-        - /Camera RGB1
+        - /CV Semantic Points1
       Splitter Ratio: 0.5
     Tree Height: 611
   - Class: rviz_common/Views
@@ -54,20 +54,22 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /limo/map_package/offline/map/combined_grid
-    - Class: rviz_default_plugins/Image
+    - Alpha: 1
+      Class: rviz_default_plugins/PointCloud2
       Enabled: true
-      Image Topic:
+      Name: CV Semantic Points
+      Position Transformer: XYZ
+      Color Transformer: FlatColor
+      Color: 0; 255; 0
+      Size (m): 0.03
+      Style: Points
+      Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Best Effort
-        Value: /rgb/image_raw
-      Max Value: 1.0
-      Median window: 5
-      Min Value: 0.0
-      Name: Camera RGB
-      Normalize Range: true
-      Transport Hint: raw
+        Reliability Policy: Reliable
+        Value: /limo/cv_package/visual_ptcld/points
+      Use Fixed Frame: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

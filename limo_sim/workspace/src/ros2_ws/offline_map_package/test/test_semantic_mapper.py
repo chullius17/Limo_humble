@@ -1,4 +1,4 @@
-"""Exercise ROS messages, timestamped TF, controls and exact map snapshots."""
+"""Exercise ROS messages, timestamped TF and exact map snapshots."""
 
 from array import array
 from types import SimpleNamespace
@@ -9,7 +9,7 @@ import pytest
 rclpy = pytest.importorskip('rclpy')
 from geometry_msgs.msg import Pose, TransformStamped
 from sensor_msgs.msg import PointCloud2, PointField
-from std_srvs.srv import SetBool, Trigger
+from std_srvs.srv import Trigger
 
 from offline_map_package.semantic_mapper import SemanticMapper
 
@@ -81,12 +81,8 @@ def test_missing_tf_is_retried_without_integration(node):
     assert node.pending is None
 
 
-def test_pause_reset_and_save_exact_costs(node, tmp_path):
+def test_reset_and_save_exact_costs(node, tmp_path):
     transform(node, 1)
-    node.set_enabled(SetBool.Request(data=False), SetBool.Response())
-    node.cloud_callback(cloud())
-    assert node.grid.sequence == 0
-    node.set_enabled(SetBool.Request(data=True), SetBool.Response())
     node.cloud_callback(cloud())
     node.config['save_directory'] = str(tmp_path)
     result = node.save_map(Trigger.Request(), Trigger.Response())

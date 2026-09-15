@@ -15,8 +15,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import PointCloud2
-from std_msgs.msg import Bool, String
-from std_srvs.srv import SetBool, Trigger
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from offline_map_package.semantic_grid import (
@@ -60,7 +60,7 @@ class SemanticMapper(Node):
             'max_cells': 2000000, 'max_output_cells': 4000000,
             'max_input_points': 100000, 'publish_rate_hz': 1.0,
             'tf_wait_sec': 0.5, 'submap_max_age_sec': 2.0,
-            'mapping_enabled': True, 'save_directory': '',
+            'save_directory': '',
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
@@ -82,7 +82,6 @@ class SemanticMapper(Node):
         self.last_stamp = -1
         self.submaps = {}
         self.submap_stamp = None
-        self.mapping_enabled = bool(self.config['mapping_enabled'])
         self.dirty = False
         self.map_qos = QoSProfile(
             depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -113,16 +112,12 @@ class SemanticMapper(Node):
             OccupancyGrid, prefix + '/map/combined_grid', self.map_qos)
         self.status_pub = self.create_publisher(
             String, prefix + '/map_saver/status', self.map_qos)
-        self.enabled_pub = self.create_publisher(Bool, prefix + '/mapping_enabled', self.map_qos)
-        self.enable_service = self.create_service(
-            SetBool, prefix + '/set_mapping_enabled', self.set_enabled)
         self.reset_service = self.create_service(Trigger, prefix + '/reset_map', self.reset_map)
         self.save_service = self.create_service(
             Trigger, prefix + '/map_saver/save_map', self.save_map)
         self.retry_timer = self.create_timer(0.05, self.consume_pending)
         self.publish_timer = self.create_timer(
             1.0 / self.config['publish_rate_hz'], self.publish_maps)
-        self.enabled_pub.publish(Bool(data=self.mapping_enabled))
         costs = ', '.join(name + '=' + str(int(cost))
                           for name, cost in zip(CLASS_NAMES, self.grid.costs))
         self.status('Ready: blue ignored; ' + costs + '; pose_source=' + self.pose_source)
@@ -148,8 +143,6 @@ class SemanticMapper(Node):
         self.get_logger().info(message)
 
     def cloud_callback(self, msg):
-        if not self.mapping_enabled:
-            return
         stamp = stamp_ns(msg.header.stamp)
         if stamp <= 0 or not msg.header.frame_id:
             self.get_logger().warning('Cloud requires nonzero sensor stamp and frame_id',
@@ -293,15 +286,6 @@ class SemanticMapper(Node):
             self.outputs[name].publish(self.message(layer, geometry, stamp))
         self.combined_pub.publish(self.message(combined, geometry, stamp))
         self.dirty = False
-
-    def set_enabled(self, request, response):
-        self.mapping_enabled = request.data
-        self.pending = None
-        self.enabled_pub.publish(Bool(data=self.mapping_enabled))
-        response.success = True
-        response.message = 'Semantic mapping ' + ('enabled' if request.data else 'paused')
-        self.status(response.message)
-        return response
 
     def reset_map(self, _request, response):
         # Clear the retained maps, including the last latched view.

@@ -31,7 +31,6 @@ setup(
             'map = offline_map_package.map:main',
             'map_saver = offline_map_package.map_saver:main',
             'map_save_gui = offline_map_package.map_save_gui:main',
-            'mapping_control = offline_map_package.mapping_control:main',
         ],
     },
 )

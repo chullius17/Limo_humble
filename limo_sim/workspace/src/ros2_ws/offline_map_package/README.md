@@ -42,7 +42,10 @@ Nel container `limo_sim`, dopo la build e il source di `/workspace/install/setup
 ros2 launch offline_map_package map.launch.py
 ```
 
-Avvia CV, lo SLAM Toolbox esistente, mapping semantico, RViz e GUI salva/pausa.
+Avvia CV, lo SLAM Toolbox esistente, mapping semantico, RViz e GUI di salvataggio.
+La cloud CV non include i punti blu per default; usare
+`publish_blue_points:=true` per pubblicarli mantenendoli comunque disponibili
+internamente alla classificazione boardwalk.
 Con CV e SLAM già attivi:
 
 ```bash
@@ -110,11 +113,10 @@ Tutti sono `nav_msgs/OccupancyGrid`, QoS reliable/transient-local. Il contenuto
 consumatori AMCL/Nav2 devono interpretarlo esplicitamente. I vecchi topic binari
 `cv_map`/`street_map` non sono prodotti da questa pipeline.
 
-La GUI esistente usa gli stessi servizi:
+Servizi disponibili:
 
 ```bash
 ros2 service call /limo/map_package/offline/map_saver/save_map std_srvs/srv/Trigger '{}'
-ros2 service call /limo/map_package/offline/set_mapping_enabled std_srvs/srv/SetBool '{data: false}'
 ros2 service call /limo/map_package/offline/reset_map std_srvs/srv/Trigger '{}'
 ```
 

@@ -16,7 +16,7 @@ from cv_package.visual_ptcld import VisualPtcld
 from cv_package.cloud_cpu import RayCache
 
 
-def detector_stub(enabled=True):
+def detector_stub(enabled=True, publish_blue_points=False):
     """Provide deterministic depth and TF to the real publishing method."""
     transform = TransformStamped()
     transform.transform.rotation.w = 1.0
@@ -26,10 +26,11 @@ def detector_stub(enabled=True):
         depth_image=np.ones((1, 4), dtype=np.float32),
         camera_intrinsics=(8.0, 8.0, 0.0, 0.0, 4, 1),
         cloud_min_depth=0.1,
-        cloud_max_depth=5.0,
+        cloud_max_depth=2.0,
         input_crop_y_min=0.0,
         bev_frame='base_link',
         enable_boardwalk=enabled,
+        publish_blue_points=publish_blue_points,
         enable_debug_publications=False,
         blue_radius_min=0.10,
         blue_radius_max=0.16,
@@ -88,15 +89,15 @@ def test_projected_cloud_preserves_geometry_and_serializes_class_four(enabled):
     assert len(published) == 1
     cloud = published[0]
     points = np.frombuffer(cloud.data, dtype=VisualPtcld.CLOUD_DTYPE)
-    np.testing.assert_array_equal(points['class_id'], [1, 2, 4 if enabled else 3, 3])
-    np.testing.assert_array_equal(points['x'], [0.0, 0.375, 0.125, 0.25])
-    np.testing.assert_array_equal(points['y'], np.zeros(4))
-    np.testing.assert_array_equal(points['z'], np.zeros(4))
+    np.testing.assert_array_equal(points['class_id'], [2, 4 if enabled else 3, 3])
+    np.testing.assert_array_equal(points['x'], [0.375, 0.125, 0.25])
+    np.testing.assert_array_equal(points['y'], np.zeros(3))
+    np.testing.assert_array_equal(points['z'], np.zeros(3))
     assert cloud.header.frame_id == 'base_link'
     assert cloud.header.stamp == header.stamp
-    assert cloud.width == result[0] == 4
+    assert cloud.width == result[0] == 3
     assert cloud.point_step == 16
-    assert cloud.row_step == len(cloud.data) == 64
+    assert cloud.row_step == len(cloud.data) == 48
     stats = result[-1]
     if enabled:
         assert stats['boardwalk_final_count'] == 1
@@ -104,10 +105,22 @@ def test_projected_cloud_preserves_geometry_and_serializes_class_four(enabled):
         assert result[1] >= result[3] + result[4] + result[5] + stats['boardwalk_total_ms']
     else:
         assert 'boardwalk_final_count' not in stats
-    assert stats['published_blue_count'] == 1
+    assert stats['published_blue_count'] == 0
     assert stats['published_turquoise_count'] == 1
     assert stats['published_background_count'] == (1 if enabled else 2)
     assert stats['published_boardwalk_count'] == (1 if enabled else 0)
+
+
+def test_blue_points_can_be_enabled_for_output():
+    detector, published = detector_stub(publish_blue_points=True)
+    header = Header(frame_id='camera')
+    VisualPtcld.publish_pointcloud(
+        detector, np.array([[0, 0]]), np.empty((0, 2), dtype=np.int32),
+        np.empty((0, 2), dtype=np.int32), 4, 1, header)
+
+    points = np.frombuffer(
+        published[0].data, dtype=VisualPtcld.CLOUD_DTYPE)
+    np.testing.assert_array_equal(points['class_id'], [1])
 
 
 def test_missing_depth_does_not_record_a_zero_classification_sample():
@@ -186,7 +199,7 @@ def test_image_flag_gates_all_images_but_always_publishes_cloud(debug_enabled):
     assert len(clouds) == 1
     assert len(images) == (3 if debug_enabled else 0)
     points = np.frombuffer(clouds[0].data, dtype=VisualPtcld.CLOUD_DTYPE)
-    np.testing.assert_array_equal(points['class_id'], [1, 2, 4, 3])
+    np.testing.assert_array_equal(points['class_id'], [2, 4, 3])
     assert timings[0]['boardwalk_final_count'] == 1
     assert timings[0]['worker_cpu_ms'] >= 0.0
     assert timings[0]['outside_worker_ms'] >= 0.0
