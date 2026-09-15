@@ -57,6 +57,8 @@ Usare `use_sim_time:=false` con un robot reale.
 Il nodo non pubblica TF. Un TF mancante viene atteso fino a `tf_wait_sec`, poi la
 cloud viene scartata; non si ripiega sulla posa più recente. Timestamp duplicati
 o fuori ordine vengono ignorati. Prima di riavvolgere un bag usare `reset_map`.
+Al salvataggio, `save_median_kernel: 3` rimuove le celle boardwalk nere isolate
+con una mediana 3x3; la mappa pubblicata live non viene modificata.
 
 Se `/map` è disponibile, le quattro uscite hanno esattamente la sua geometria
 (risoluzione, dimensioni, origine e rotazione); i punti esterni a questa vista
@@ -120,13 +122,17 @@ ros2 service call /limo/map_package/offline/map_saver/save_map std_srvs/srv/Trig
 ros2 service call /limo/map_package/offline/reset_map std_srvs/srv/Trigger '{}'
 ```
 
-Il salvataggio genera un nuovo `semantic_*.npz` in
-`/workspace/ros2_maps/semantic` (o `save_directory`). Contiene i tre livelli,
-`combined`, costi, class_id, risoluzione, origine, frame e timestamp. Preserva i
-numeri esatti e unknown; non usa le soglie del vecchio map saver di Nav2.
-È una fotografia numerica della mappa, non un file YAML/PGM Nav2, un `.pbstream`
-o un checkpoint per riprendere l'accumulo. Salvare separatamente stato Cartographer
-e bag se serve un successivo riallineamento/replay.
+Il salvataggio genera `limo_map.pgm` e `limo_map.yaml` in
+`/workspace/ros2_maps/semantic` (o `save_directory`); il nome base si cambia con
+`save_map_name`. Il YAML usa `mode: raw`, quindi il PGM conserva esattamente i
+costi 30/60/90 e rappresenta le celle unknown con 255. L'orientamento delle righe
+segue la convenzione del map saver Nav2 e la coppia può essere caricata da
+`nav2_map_server`. Un salvataggio successivo sostituisce la coppia precedente.
+Non viene più prodotto alcun `.npz`.
+
+Questa è una fotografia della mappa combinata, non un `.pbstream` o un checkpoint
+per riprendere l'accumulo. Salvare separatamente stato Cartographer e bag se serve
+un successivo riallineamento/replay.
 
 ## Verifica e risorse
 

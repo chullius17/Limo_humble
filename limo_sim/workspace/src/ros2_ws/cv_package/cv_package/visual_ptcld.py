@@ -141,11 +141,11 @@ class VisualPtcld(Node):
         self.declare_parameter('bev_frame', 'base_link')
         self.declare_parameter('input_crop_y_min', 0.5)
         self.declare_parameter('pointcloud_min_depth_m', 0.1)
-        self.declare_parameter('pointcloud_max_depth_m', 2.0)
-        self.declare_parameter('blue_radius_min_m', 0.10)
-        self.declare_parameter('blue_radius_max_m', 1.00)
+        self.declare_parameter('pointcloud_max_depth_m', 2.5)
+        self.declare_parameter('blue_radius_min_m', 0.15)
+        self.declare_parameter('blue_radius_max_m', 0.25)
         self.declare_parameter('enable_boardwalk', True)
-        self.declare_parameter('boardwalk_propagation_radius_m', 0.10)
+        self.declare_parameter('boardwalk_propagation_radius_m', 0.15)
 
         self.input_crop_y_min = float(
             self.get_parameter('input_crop_y_min').value)

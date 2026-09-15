@@ -20,7 +20,7 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from offline_map_package.semantic_grid import (
-    CLASS_IDS, CLASS_NAMES, Geometry, SemanticGrid, read_class_cloud, transform_xy,
+    CLASS_NAMES, Geometry, SemanticGrid, read_class_cloud, transform_xy,
 )
 
 
@@ -45,8 +45,37 @@ def stamp_ns(stamp):
     return int(stamp.sec) * 1000000000 + int(stamp.nanosec)
 
 
+def raw_pgm(values):
+    """Encode an OccupancyGrid array as a Nav2 raw-mode binary PGM."""
+    if values.ndim != 2:
+        raise ValueError('Saved map must be a two-dimensional array')
+    known = values >= 0
+    if np.any(values[known] > 100):
+        raise ValueError('Raw map costs must be between 0 and 100')
+    pixels = np.full(values.shape, 255, dtype=np.uint8)
+    pixels[known] = values[known].astype(np.uint8)
+    # OccupancyGrid starts at the lower-left; image rows start at the upper-left.
+    pixels = np.flipud(pixels)
+    header = 'P5\n# CREATOR: offline_map_package semantic_mapper\n{} {}\n255\n'.format(
+        values.shape[1], values.shape[0])
+    return header.encode('ascii') + pixels.tobytes()
+
+
+def map_yaml(image_name, geometry):
+    """Create metadata accepted by the Foxy/Humble Nav2 map server."""
+    return (
+        'image: {}\n'
+        'mode: raw\n'
+        'resolution: {:.17g}\n'
+        'origin: [{:.17g}, {:.17g}, {:.17g}]\n'
+        'negate: 0\n'
+        'occupied_thresh: 0.65\n'
+        'free_thresh: 0.25\n'
+    ).format(image_name, geometry.resolution, *geometry.origin)
+
+
 class SemanticMapper(Node):
-    """Fuse endpoint classes; expose cost grids and exact numeric snapshots."""
+    """Fuse endpoint classes; expose cost grids and Nav2 map files."""
 
     def __init__(self):
         super().__init__('semantic_mapper')
@@ -58,9 +87,10 @@ class SemanticMapper(Node):
             'boardwalk_cost': 90, 'hit_log_odds': 0.85, 'miss_log_odds': 0.4,
             'log_odds_limit': 3.0, 'min_evidence': 0.5,
             'max_cells': 2000000, 'max_output_cells': 4000000,
-            'max_input_points': 100000, 'publish_rate_hz': 1.0,
+            'max_input_points': 100000, 'publish_rate_hz': 4.0,
             'tf_wait_sec': 0.5, 'submap_max_age_sec': 2.0,
-            'save_directory': '',
+            'save_directory': '', 'save_map_name': 'limo_map',
+            'save_median_kernel': 3,
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
@@ -73,6 +103,10 @@ class SemanticMapper(Node):
                 raise ValueError(name + ' must be finite and positive')
         if self.config['max_input_points'] < 1:
             raise ValueError('max_input_points must be positive')
+        median_kernel = self.config['save_median_kernel']
+        if (not isinstance(median_kernel, int) or median_kernel < 1
+                or median_kernel % 2 == 0):
+            raise ValueError('save_median_kernel must be a positive odd integer')
         if not self.config['map_frame'] or not self.config['odom_frame']:
             raise ValueError('Map and odom frames must be nonempty')
         self.grid = self.make_grid()
@@ -304,12 +338,13 @@ class SemanticMapper(Node):
         return response
 
     def save_map(self, _request, response):
-        temporary = None
+        temporary_files = []
         try:
             rendered = self.grid.render(self.reference_geometry)
             if rendered is None or not self.grid.sequence:
                 raise ValueError('No semantic observations to save')
-            geometry, layers, combined = rendered
+            geometry, _layers, combined = rendered
+            saved_combined = self.filter_saved_black_points(combined)
             if self.config['save_directory']:
                 directory = Path(self.config['save_directory']).expanduser()
             else:
@@ -319,28 +354,62 @@ class SemanticMapper(Node):
                     raise ValueError('Set save_directory explicitly')
                 directory = root / 'ros2_maps' / 'semantic'
             directory.mkdir(parents=True, exist_ok=True)
-            fd, temporary = tempfile.mkstemp(
-                prefix='semantic_', suffix='.partial', dir=str(directory))
-            with os.fdopen(fd, 'wb') as stream:
-                # Preserve the actual costs and unknown values without image thresholds.
-                np.savez_compressed(
-                    stream, format_version=1, frame_id=self.config['map_frame'],
-                    resolution=geometry.resolution, origin=geometry.origin,
-                    class_ids=CLASS_IDS, costs=self.grid.costs,
-                    turquoise=layers[0], white=layers[1], boardwalk=layers[2],
-                    combined=combined, sensor_stamp_ns=self.last_stamp,
-                    pose_source=self.pose_source)
-            destination = str(Path(temporary).with_suffix('.npz'))
-            os.rename(temporary, destination)
-            temporary = None
-            response.success, response.message = True, 'Saved semantic snapshot: ' + destination
+            map_name = str(self.config['save_map_name']).strip()
+            if (not map_name or Path(map_name).name != map_name
+                    or map_name in ('.', '..')
+                    or map_name.endswith(('.pgm', '.yaml'))):
+                raise ValueError('save_map_name must be a filename stem without a path or suffix')
+
+            pgm_path = directory / (map_name + '.pgm')
+            yaml_path = directory / (map_name + '.yaml')
+            pgm_fd, pgm_temporary = tempfile.mkstemp(
+                prefix='.' + map_name + '_', suffix='.pgm.partial', dir=str(directory))
+            temporary_files.append(pgm_temporary)
+            with os.fdopen(pgm_fd, 'wb') as stream:
+                stream.write(raw_pgm(saved_combined))
+
+            yaml_fd, yaml_temporary = tempfile.mkstemp(
+                prefix='.' + map_name + '_', suffix='.yaml.partial', dir=str(directory))
+            temporary_files.append(yaml_temporary)
+            with os.fdopen(yaml_fd, 'w', encoding='utf-8') as stream:
+                stream.write(map_yaml(pgm_path.name, geometry))
+
+            os.replace(pgm_temporary, pgm_path)
+            temporary_files.remove(pgm_temporary)
+            os.replace(yaml_temporary, yaml_path)
+            temporary_files.remove(yaml_temporary)
+            response.success = True
+            response.message = 'Saved semantic map: {}, {}'.format(pgm_path, yaml_path)
         except (OSError, ValueError, MemoryError) as error:
             response.success, response.message = False, str(error)
         finally:
-            if temporary is not None:
-                os.unlink(temporary)
+            for temporary in temporary_files:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
         self.status(response.message)
         return response
+
+    def filter_saved_black_points(self, combined):
+        """Median-filter isolated highest-cost cells in a saved snapshot."""
+        kernel = self.config['save_median_kernel']
+        if kernel == 1 or not combined.size:
+            return combined.copy()
+        radius = kernel // 2
+        padded = np.pad(combined, radius, mode='edge')
+        height, width = combined.shape
+        neighborhoods = np.stack([
+            padded[y:y + height, x:x + width]
+            for y in range(kernel) for x in range(kernel)
+        ])
+        middle = neighborhoods.shape[0] // 2
+        median = np.partition(neighborhoods, middle, axis=0)[middle]
+        filtered = combined.copy()
+        black_cost = int(self.grid.costs.max())
+        isolated = (combined == black_cost) & (median != black_cost)
+        filtered[isolated] = median[isolated]
+        return filtered
 
 
 def main(args=None):

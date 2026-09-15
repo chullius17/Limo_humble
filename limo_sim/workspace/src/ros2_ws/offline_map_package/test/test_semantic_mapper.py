@@ -12,6 +12,7 @@ from sensor_msgs.msg import PointCloud2, PointField
 from std_srvs.srv import Trigger
 
 from offline_map_package.semantic_mapper import SemanticMapper
+from offline_map_package.semantic_grid import Geometry
 
 
 @pytest.fixture
@@ -53,6 +54,15 @@ def cloud(sec=1, labels=(1, 2, 3, 4)):
     return msg
 
 
+def read_pgm(path):
+    with path.open('rb') as stream:
+        assert stream.readline() == b'P5\n'
+        assert stream.readline().startswith(b'# CREATOR:')
+        width, height = (int(value) for value in stream.readline().split())
+        assert stream.readline() == b'255\n'
+        return np.frombuffer(stream.read(), dtype=np.uint8).reshape(height, width)
+
+
 def test_uses_sensor_tf_not_latest_and_deduplicates(node):
     transform(node, 1, 2.0)
     transform(node, 2, 10.0)
@@ -87,17 +97,36 @@ def test_reset_and_save_exact_costs(node, tmp_path):
     node.config['save_directory'] = str(tmp_path)
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
-    snapshots = list(tmp_path.glob('*.npz'))
-    assert len(snapshots) == 1
-    with np.load(str(snapshots[0]), allow_pickle=False) as saved:
-        assert saved['combined'].tolist() == [[60, 30, 90]]
-        assert saved['costs'].tolist() == [60, 30, 90]
-        assert saved['boardwalk'].tolist() == [[0, 0, 90]]
+    assert read_pgm(tmp_path / 'limo_map.pgm').tolist() == [[60, 30, 90]]
+    metadata = (tmp_path / 'limo_map.yaml').read_text(encoding='utf-8')
+    assert 'image: limo_map.pgm\n' in metadata
+    assert 'mode: raw\n' in metadata
+    assert 'resolution: 1\n' in metadata
+    assert 'origin: [1, 0, 0]\n' in metadata
+    assert not list(tmp_path.glob('*.npz'))
     node.publish_maps()
     node.reset_map(Trigger.Request(), Trigger.Response())
     assert node.grid.sequence == 0
     assert node.last_stamp == -1
     assert node.pending is None
+
+
+def test_save_median_removes_isolated_black_without_changing_live_map(
+        node, tmp_path):
+    node.reference_geometry = Geometry(1.0, 3, 3, (0.0, 0.0, 0.0))
+    node.grid.update(np.array([[1.1, 1.1]]), np.array([4]))
+    node.config['save_directory'] = str(tmp_path)
+
+    live_before = node.grid.render(node.reference_geometry)[2]
+    assert live_before[1, 1] == 90
+    result = node.save_map(Trigger.Request(), Trigger.Response())
+    assert result.success, result.message
+
+    saved = read_pgm(tmp_path / 'limo_map.pgm')
+    assert saved[1, 1] == 255
+    assert (tmp_path / 'limo_map.yaml').is_file()
+    assert not list(tmp_path.glob('*.npz'))
+    assert node.grid.render(node.reference_geometry)[2][1, 1] == 90
 
 
 def test_cartographer_pose_updates_reposition_old_evidence(node):

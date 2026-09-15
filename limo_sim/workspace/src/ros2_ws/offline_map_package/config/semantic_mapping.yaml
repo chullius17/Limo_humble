@@ -16,7 +16,9 @@ semantic_mapper:
     miss_log_odds: 0.4
     log_odds_limit: 3.0
     min_evidence: 0.5
-    publish_rate_hz: 1.0
+    publish_rate_hz: 4.0
+    save_map_name: limo_map
+    save_median_kernel: 3
     tf_wait_sec: 0.5
     submap_max_age_sec: 2.0
     max_input_points: 100000

@@ -61,13 +61,13 @@ def generate_launch_description():
                 publish_blue_points, value_type=bool),
             'input_crop_y_min': 0.5,
             'pointcloud_min_depth_m': 0.1,
-            'pointcloud_max_depth_m': 2.0,
-            'blue_radius_min_m': 0.10,
-            'blue_radius_max_m': 0.16,
+            'pointcloud_max_depth_m': 2.5,
+            'blue_radius_min_m': 0.15,
+            'blue_radius_max_m': 0.25,
             # White points in the blue distance band seed class 4 (boardwalk).
             # Restore exact metric point distances: blue neighbors, then seed neighbors.
             'enable_boardwalk': True,
-            'boardwalk_propagation_radius_m': 0.10,
+            'boardwalk_propagation_radius_m': 0.15,
             # OpenCV applies the 7x7 blue filter; cKDTree runs both point passes.
             'telemetry_window_size': 60,
             'telemetry_log_interval_frames': 30,
@@ -101,6 +101,6 @@ def generate_launch_description():
             description='Include class_id 1 (blue) points in the output cloud.',
         ),
         lane_node,
-        # depth_correction_node,
+        depth_correction_node,
         boundary_trigger,
     ])
