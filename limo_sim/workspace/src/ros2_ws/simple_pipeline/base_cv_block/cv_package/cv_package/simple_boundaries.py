@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+import os
+
+# Set before ROS/NumPy/SciPy imports can initialize a BLAS thread pool.
+# Explicit environment overrides still work for controlled A/B comparisons.
+for _thread_variable in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS',
+                         'MKL_NUM_THREADS', 'BLIS_NUM_THREADS'):
+    os.environ.setdefault(_thread_variable, '1')
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -21,6 +29,22 @@ from queue import Queue, Empty
 from collections import deque
 from cv_package.boardwalk import (
     BOARDWALK_COUNTS, BOARDWALK_TIMINGS, BoardwalkClassifier,
+)
+from cv_package.cloud_cpu import RayCache, transform_xy, voxel_groups
+from array import array
+
+
+CPU_PROFILE_FIELDS = (
+    'worker_cpu_ms', 'outside_worker_ms', 'step8_projection',
+    'step8_transform', 'step8_serialize',
+)
+
+
+PUBLISHED_CLASS_COUNTS = (
+    ('published_blue_count', 'blue'),
+    ('published_turquoise_count', 'turquoise'),
+    ('published_background_count', 'white'),
+    ('published_boardwalk_count', 'boardwalk'),
 )
 
 
@@ -50,6 +74,12 @@ class CurbDetector(Node):
 
     def __init__(self):
         super().__init__('curb_detector')
+        self.declare_parameter('opencv_num_threads', 1)
+        opencv_threads = int(self.get_parameter('opencv_num_threads').value)
+        if opencv_threads < 1:
+            raise ValueError('opencv_num_threads must be positive')
+        cv2.setNumThreads(opencv_threads)
+        self.ray_cache = RayCache()
         self.bridge = CvBridge()
         self.declare_parameter('enable_debug_publications', False)
         self.enable_debug_publications = bool(
@@ -112,7 +142,7 @@ class CurbDetector(Node):
         self.declare_parameter('pointcloud_min_depth_m', 0.1)
         self.declare_parameter('pointcloud_max_depth_m', 5.0)
         self.declare_parameter('blue_radius_min_m', 0.10)
-        self.declare_parameter('blue_radius_max_m', 0.16)
+        self.declare_parameter('blue_radius_max_m', 1.00)
         self.declare_parameter('enable_boardwalk', True)
         self.declare_parameter('boardwalk_propagation_radius_m', 0.10)
 
@@ -261,7 +291,11 @@ class CurbDetector(Node):
         }
         self.telemetry_stats.update({
             key: deque(maxlen=self.window_size)
-            for key, _ in BOARDWALK_TIMINGS + BOARDWALK_COUNTS
+            for key, _ in (
+                BOARDWALK_TIMINGS + BOARDWALK_COUNTS + PUBLISHED_CLASS_COUNTS)
+        })
+        self.telemetry_stats.update({
+            key: deque(maxlen=self.window_size) for key in CPU_PROFILE_FIELDS
         })
 
         # Start background worker thread
@@ -313,44 +347,27 @@ class CurbDetector(Node):
 
         finite = np.isfinite(points).all(axis=1)
         passthrough = (class_ids == self.LABEL_BLUE) | ~finite
-        passthrough_indices = np.flatnonzero(passthrough)
         reduced_indices = np.flatnonzero(~passthrough)
         if not len(reduced_indices):
             return points, class_ids
 
-        voxel_xy = np.floor(
-            points[reduced_indices].astype(np.float64)
-            / self.pointcloud_voxel_size
-        ).astype(np.int64)
-        keys = np.column_stack((
-            class_ids[reduced_indices].astype(np.int64),
-            voxel_xy,
-        ))
-        _, first, inverse = np.unique(
-            keys, axis=0, return_index=True, return_inverse=True)
+        reduced_points = points[reduced_indices]
+        first, inverse = voxel_groups(
+            reduced_points, class_ids[reduced_indices],
+            self.pointcloud_voxel_size)
         counts = np.bincount(inverse)
         centroids = np.column_stack((
-            np.bincount(inverse, weights=points[reduced_indices, 0]) / counts,
-            np.bincount(inverse, weights=points[reduced_indices, 1]) / counts,
+            np.bincount(inverse, weights=reduced_points[:, 0]) / counts,
+            np.bincount(inverse, weights=reduced_points[:, 1]) / counts,
         )).astype(points.dtype, copy=False)
-        reduced_labels = class_ids[reduced_indices[first]]
-
-        # Place each centroid at its voxel's first observation. This preserves
-        # deterministic class ordering while leaving every blue point intact.
-        order_keys = np.concatenate((
-            passthrough_indices,
-            reduced_indices[first],
-        ))
-        output_points = np.concatenate((
-            points[passthrough_indices],
-            centroids,
-        ))
-        output_labels = np.concatenate((
-            class_ids[passthrough_indices],
-            reduced_labels,
-        ))
-        order = np.argsort(order_keys, kind='stable')
-        return output_points[order], output_labels[order]
+        # Boolean selection preserves first-observation order without sorting
+        # or concatenating a second time. Never mutate the caller's points.
+        representatives = reduced_indices[first]
+        keep = passthrough.copy()
+        keep[representatives] = True
+        output_points = points.copy()
+        output_points[representatives] = centroids
+        return output_points[keep], class_ids[keep]
 
     @staticmethod
     def quaternion_to_rotation(quaternion):
@@ -485,6 +502,7 @@ class CurbDetector(Node):
 
     def process_image(self, msg):
         start_total = time.perf_counter()
+        start_cpu = time.thread_time()
         t = {
             'decomp': 0.0,
             'step1_masks': 0.0,
@@ -505,6 +523,8 @@ class CurbDetector(Node):
         # Missing depth/TF and disabled classification must not contribute
         # artificial zero-duration samples to the boardwalk statistics.
         t.update({key: float('nan') for key, _ in BOARDWALK_TIMINGS + BOARDWALK_COUNTS})
+        t.update({key: float('nan') for key, _ in PUBLISHED_CLASS_COUNTS})
+        t.update({key: float('nan') for key in CPU_PROFILE_FIELDS})
 
         # Decode the compact class-label image.
         try:
@@ -663,6 +683,10 @@ class CurbDetector(Node):
         t['step9_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
 
         t['total'] = (time.perf_counter() - start_total) * 1000.0
+        t['worker_cpu_ms'] = (time.thread_time() - start_cpu) * 1000.0
+        # Includes scheduling, GIL, blocking calls and work delegated to other
+        # threads; it is NOT a measurement of CPU scheduling delays alone.
+        t['outside_worker_ms'] = max(0.0, t['total'] - t['worker_cpu_ms'])
         self.log_diagnostics(width, height, t)
 
     def log_diagnostics(self, w, h, t):
@@ -685,12 +709,22 @@ class CurbDetector(Node):
                 f'{avg["point_count_before_voxel"]:.0f}'
                 if self.telemetry_stats['point_count_before_voxel'] else 'n/a'
             )
+            class_counts_current = ' | '.join(
+                f'{name}={t[key]:.0f}' if np.isfinite(t[key]) else f'{name}=n/a'
+                for key, name in PUBLISHED_CLASS_COUNTS
+            )
+            class_counts_avg = ' | '.join(
+                f'{name}={avg[key]:.1f}' if self.telemetry_stats[key] else f'{name}=n/a'
+                for key, name in PUBLISHED_CLASS_COUNTS
+            )
 
             self.get_logger().info(
                 f"\n"
                 f"================ CURB DETECTOR PROFILE ({w}x{h} @ {fps:.1f} WORKER FPS) ================\n"
                 f"  Frames processed: {self.frame_count} | Queue depth: {self.frame_queue.qsize()}\n"
                 f"  [Total Latency]                 Current: {t['total']:.2f} ms | Avg ({self.window_size}f): {avg['total']:.2f} ms\n"
+                f"  [Worker CPU]                    Current: {t['worker_cpu_ms']:.2f} ms | Avg: {avg['worker_cpu_ms']:.2f} ms\n"
+                f"  [Wall minus worker CPU]         Current: {t['outside_worker_ms']:.2f} ms | Avg: {avg['outside_worker_ms']:.2f} ms (waits/other threads)\n"
                 f"  -----------------------------------------------------------------\n"
                 f"  [Decompression]                 Current: {t['decomp']:.2f} ms | Avg ({self.window_size}f): {avg['decomp']:.2f} ms\n"
                 f"  [Step 1: Mask Extraction]       Current: {t['step1_masks']:.2f} ms | Avg ({self.window_size}f): {avg['step1_masks']:.2f} ms\n"
@@ -701,10 +735,15 @@ class CurbDetector(Node):
                 f"    [8a.1 Lock/Read]              Current: {t['step8_lock']:.2f} ms | Avg ({self.window_size}f): {avg['step8_lock']:.2f} ms\n"
                 f"    [8a.2 TF Lookup]              Current: {t['step8_tf']:.2f} ms | Avg ({self.window_size}f): {avg['step8_tf']:.2f} ms\n"
                 f"    [8a.3 Projection/Serialize]   Current: {t['step8_math']:.2f} ms | Avg ({self.window_size}f): {avg['step8_math']:.2f} ms\n"
+                f"      Projection/filter          Current: {t['step8_projection']:.2f} ms | Avg: {avg['step8_projection']:.2f} ms\n"
+                f"      BEV transform              Current: {t['step8_transform']:.2f} ms | Avg: {avg['step8_transform']:.2f} ms\n"
+                f"      Cloud serialization        Current: {t['step8_serialize']:.2f} ms | Avg: {avg['step8_serialize']:.2f} ms\n"
                 f"    [8a.4 Metric Voxelization]    Current: {t['step8_voxel']:.2f} ms | Avg ({self.window_size}f): {avg['step8_voxel']:.2f} ms\n"
                 f"  [Step 8b: DDS Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
                 f"  [Step 9: Draw & Publish]        Current: {t['step9_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step9_draw_publish']:.2f} ms\n"
                 f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg} published | {point_count_before_voxel_avg} before voxel\n"
+                f"  [Published points by class]     Current: {class_counts_current}\n"
+                f"                                   Avg ({self.window_size} clouds): {class_counts_avg}\n"
                 f"{self.boardwalk_diagnostics(t)}"
                 f"======================================================================"
             )
@@ -819,16 +858,12 @@ class CurbDetector(Node):
         z = z[valid].astype(np.float32, copy=False)
         class_ids = class_ids[valid]
 
-        crop_start = int(info_height * self.input_crop_y_min)
-        crop_height = info_height - crop_start
-        source_cols = (
-            (cols.astype(np.float32) + 0.5) * info_width / width - 0.5)
-        source_rows = (
-            crop_start
-            + (rows.astype(np.float32) + 0.5) * crop_height / height
-            - 0.5
-        )
-        math_ms += (time.perf_counter() - math_started_at) * 1000.0
+        ray_x, ray_y = self.ray_cache.get(
+            intrinsics, width, height, self.input_crop_y_min)
+        x = ray_x[cols] * z
+        y = ray_y[rows] * z
+        projection_ms = (time.perf_counter() - math_started_at) * 1000.0
+        math_ms += projection_ms
 
         if not header.frame_id:
             self.get_logger().warning(
@@ -857,17 +892,12 @@ class CurbDetector(Node):
         tf_ms = (time.perf_counter() - tf_started_at) * 1000.0
 
         math_started_at = time.perf_counter()
-        camera_points = np.column_stack((
-            (source_cols - cx_raw) * z / fx_raw,
-            (source_rows - cy_raw) * z / fy_raw,
-            z,
-        )).astype(np.float32, copy=False)
-        bev_points = camera_points @ rotation[:2, :].T
-        bev_points += np.array([
+        bev_points = transform_xy(x, y, z, rotation, (
             transform.transform.translation.x,
             transform.transform.translation.y,
-        ], dtype=np.float32)
-        math_ms += (time.perf_counter() - math_started_at) * 1000.0
+        ))
+        transform_ms = (time.perf_counter() - math_started_at) * 1000.0
+        math_ms += transform_ms
 
         # Query metric BEV points directly in two nearest-neighbor passes before
         # serialization. Only white labels can become boardwalk; coordinates,
@@ -888,6 +918,15 @@ class CurbDetector(Node):
         bev_points, class_ids = self.voxelize_bev_cloud(
             bev_points, class_ids)
         voxel_ms = (time.perf_counter() - voxel_started_at) * 1000.0
+        boardwalk_stats.update({
+            key: int(np.count_nonzero(class_ids == label))
+            for key, label in (
+                ('published_blue_count', self.LABEL_BLUE),
+                ('published_turquoise_count', self.LABEL_TURQUOISE),
+                ('published_background_count', self.LABEL_BACKGROUND),
+                ('published_boardwalk_count', self.LABEL_BOARDWALK),
+            )
+        })
 
         math_started_at = time.perf_counter()
         cloud_points = np.empty(len(bev_points), dtype=self.CLOUD_DTYPE)
@@ -905,9 +944,16 @@ class CurbDetector(Node):
         cloud.is_bigendian = False
         cloud.point_step = self.CLOUD_DTYPE.itemsize
         cloud.row_step = cloud.point_step * cloud.width
-        cloud.data = cloud_points.tobytes()
+        
+        cloud.data = array('B', cloud_points.tobytes())
         cloud.is_dense = True
-        math_ms += (time.perf_counter() - math_started_at) * 1000.0
+        serialize_ms = (time.perf_counter() - math_started_at) * 1000.0
+        math_ms += serialize_ms
+        boardwalk_stats.update({
+            'step8_projection': projection_ms,
+            'step8_transform': transform_ms,
+            'step8_serialize': serialize_ms,
+        })
         prepare_ms = (
             time.perf_counter() - prepare_started_at) * 1000.0
         publish_started_at = time.perf_counter()

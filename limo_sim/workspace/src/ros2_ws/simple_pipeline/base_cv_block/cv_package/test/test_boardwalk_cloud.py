@@ -13,6 +13,7 @@ from std_msgs.msg import Header
 
 from cv_package.boardwalk import BOARDWALK_COUNTS, BOARDWALK_TIMINGS, BoardwalkClassifier
 from cv_package.simple_boundaries import CurbDetector
+from cv_package.cloud_cpu import RayCache
 
 
 def detector_stub(enabled=True):
@@ -34,6 +35,7 @@ def detector_stub(enabled=True):
         blue_radius_max=0.16,
         boardwalk_propagation_radius=0.10,
         pointcloud_voxel_size=0.02,
+        ray_cache=RayCache(),
         boardwalk_classifier=BoardwalkClassifier(),
         tf_buffer=SimpleNamespace(lookup_transform=lambda *args: transform),
         quaternion_to_rotation=CurbDetector.quaternion_to_rotation,
@@ -101,7 +103,11 @@ def test_projected_cloud_preserves_geometry_and_serializes_class_four(enabled):
         # Preparation includes classification; projection/serialization does not.
         assert result[1] >= result[3] + result[4] + result[5] + stats['boardwalk_total_ms']
     else:
-        assert stats == {}
+        assert 'boardwalk_final_count' not in stats
+    assert stats['published_blue_count'] == 1
+    assert stats['published_turquoise_count'] == 1
+    assert stats['published_background_count'] == (1 if enabled else 2)
+    assert stats['published_boardwalk_count'] == (1 if enabled else 0)
 
 
 def test_missing_depth_does_not_record_a_zero_classification_sample():
@@ -182,7 +188,27 @@ def test_image_flag_gates_all_images_but_always_publishes_cloud(debug_enabled):
     points = np.frombuffer(clouds[0].data, dtype=CurbDetector.CLOUD_DTYPE)
     np.testing.assert_array_equal(points['class_id'], [1, 2, 4, 3])
     assert timings[0]['boardwalk_final_count'] == 1
+    assert timings[0]['worker_cpu_ms'] >= 0.0
+    assert timings[0]['outside_worker_ms'] >= 0.0
+    for key in ('step8_projection', 'step8_transform', 'step8_serialize'):
+        assert np.isfinite(timings[0][key])
     for msg in images:
         assert msg.header == header
         assert msg.format == 'bgr8; jpeg compressed bgr8'
         assert detector.jpeg.decode(bytes(msg.data)).size > 0
+
+
+def test_cloud_voxels_preserve_input_order_classes_and_nonfinite_points():
+    detector, _ = detector_stub()
+    points = np.array([
+        [0.002, 0.003], [-0.002, -0.003], [0.003, 0.004],
+        [0.004, 0.005], [-0.003, -0.004], [np.nan, 0.0],
+        [0.002, 0.003], [0.002, 0.003],
+    ], dtype=np.float32)
+    labels = np.array([3, 2, 1, 3, 2, 3, 4, 1], dtype=np.uint8)
+    original = points.copy()
+    output, output_labels = detector.voxelize_bev_cloud(points, labels)
+    np.testing.assert_array_equal(output_labels, [3, 2, 1, 3, 4, 1])
+    np.testing.assert_allclose(output[:2], [[0.003, 0.004], [-0.0025, -0.0035]])
+    np.testing.assert_array_equal(output[2:], points[[2, 5, 6, 7]])
+    np.testing.assert_array_equal(points, original)
