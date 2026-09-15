@@ -29,21 +29,50 @@ def detector_stub(enabled=True):
         input_crop_y_min=0.0,
         bev_frame='base_link',
         enable_boardwalk=enabled,
+        enable_debug_publications=False,
         blue_radius_min=0.10,
         blue_radius_max=0.16,
         boardwalk_propagation_radius=0.10,
+        pointcloud_voxel_size=0.02,
         boardwalk_classifier=BoardwalkClassifier(),
         tf_buffer=SimpleNamespace(lookup_transform=lambda *args: transform),
         quaternion_to_rotation=CurbDetector.quaternion_to_rotation,
         pointcloud_pub=SimpleNamespace(publish=published.append),
-        boardwalk_grid_debug_pub=SimpleNamespace(
-            get_subscription_count=lambda: 0, publish=lambda msg: None),
         get_logger=lambda: SimpleNamespace(warning=lambda *args, **kwargs: None),
     )
     for name in ('LABEL_BLUE', 'LABEL_TURQUOISE', 'LABEL_BACKGROUND',
                  'LABEL_BOARDWALK', 'CLOUD_DTYPE', 'CLOUD_FIELDS'):
         setattr(detector, name, getattr(CurbDetector, name))
+    detector.voxelize_bev_cloud = (
+        lambda points, class_ids: CurbDetector.voxelize_bev_cloud(
+            detector, points, class_ids))
     return detector, published
+
+
+def test_metric_voxelization_keeps_blue_and_separates_other_classes():
+    detector = SimpleNamespace(
+        LABEL_BLUE=CurbDetector.LABEL_BLUE,
+        pointcloud_voxel_size=0.02,
+    )
+    points = np.array([
+        [0.001, 0.001],
+        [0.002, 0.002],
+        [0.011, 0.011],
+        [0.019, 0.019],
+        [0.012, 0.012],
+        [-0.001, -0.001],
+        [-0.019, -0.019],
+    ], dtype=np.float32)
+    labels = np.array([1, 1, 3, 3, 4, 2, 2], dtype=np.uint8)
+
+    output, output_labels = CurbDetector.voxelize_bev_cloud(
+        detector, points, labels)
+
+    np.testing.assert_array_equal(output_labels, [1, 1, 3, 4, 2])
+    np.testing.assert_array_equal(output[:2], points[:2])
+    np.testing.assert_allclose(output[2], [0.015, 0.015])
+    np.testing.assert_allclose(output[3], [0.012, 0.012])
+    np.testing.assert_allclose(output[4], [-0.010, -0.010])
 
 
 @pytest.mark.parametrize('enabled', [True, False])
@@ -93,7 +122,7 @@ def test_empty_cloud_is_published_with_zero_workload():
         detector, empty, empty, empty, 4, 1, Header(frame_id='camera'))
     assert published[0].width == 0
     assert result[-1]['boardwalk_final_count'] == 0
-    assert result[-1]['boardwalk_blue_dt_ms'] == 0
+    assert result[-1]['boardwalk_blue_query_ms'] == 0
 
 
 def test_telemetry_reports_distribution_counts_and_missing_current_sample():
@@ -108,31 +137,52 @@ def test_telemetry_reports_distribution_counts_and_missing_current_sample():
     assert 'Current: n/a' in output
     assert 'First-pass seeds' in output
     assert 'Added by second pass' in output
-    assert 'Grid cells' in output
-    assert 'Distance from blue' in output
-    assert 'Distance from seeds' in output
+    assert 'direct points' in output
+    assert 'White -> blue query' in output
+    assert 'White -> seed query' in output
+    assert 'Blue filter: OpenCV CPU' in output
 
 
-def test_grid_debug_publishes_a_jpeg_with_the_bev_header_on_demand():
+@pytest.mark.parametrize('debug_enabled', [False, True])
+def test_image_flag_gates_all_images_but_always_publishes_cloud(debug_enabled):
     from turbojpeg import TurboJPEG
 
     detector, clouds = detector_stub()
     images = []
-    detector.boardwalk_grid_debug_pub.get_subscription_count = lambda: 1
-    detector.boardwalk_grid_debug_pub.publish = images.append
-    detector.jpeg = TurboJPEG()
+    detector.enable_debug_publications = debug_enabled
+    detector.bridge = SimpleNamespace(
+        imgmsg_to_cv2=lambda *args, **kwargs: np.array([[1, 3, 3, 2]], dtype=np.uint8))
+    detector.blue_boundary_kernel = np.ones((7, 7), dtype=np.uint8)
+    detector.roi_y_min = 0.0
+    detector.roi_y_max = 1.0
+    detector.point_voxel_size = 1
+    detector.voxelize_points = lambda points, width: CurbDetector.voxelize_points(
+        detector, points, width)
+    detector.publish_pointcloud = lambda *args: CurbDetector.publish_pointcloud(
+        detector, *args)
+    timings = []
+    detector.log_diagnostics = lambda width, height, stats: timings.append(stats)
+    for name in ('debug_pub', 'lines_pub', 'blue_filter_debug_pub'):
+        # Subscribers cannot override the explicit publication flag.
+        setattr(detector, name, SimpleNamespace(
+            get_subscription_count=lambda: 1, publish=images.append))
+    detector.jpeg = TurboJPEG() if debug_enabled else None
     detector.debug_jpeg_quality = 85
-    detector.encode_debug_image = lambda frame, header: CurbDetector.encode_debug_image(
-        detector, frame, header)
+    def encode(frame, header):
+        assert debug_enabled, 'JPEG encoding must not run with debug disabled'
+        return CurbDetector.encode_debug_image(detector, frame, header)
+    detector.encode_debug_image = encode
     header = Header(frame_id='camera')
     header.stamp.sec = 42
-    result = CurbDetector.publish_pointcloud(
-        detector, np.array([[0, 0]]), np.array([[0, 3]]),
-        np.array([[0, 1], [0, 2]]), 4, 1, header)
-    assert len(images) == len(clouds) == 1
-    assert images[0].header == clouds[0].header
-    assert images[0].header.frame_id == 'base_link'
-    assert images[0].format == 'bgr8; jpeg compressed bgr8'
-    decoded = detector.jpeg.decode(bytes(images[0].data))
-    assert decoded.shape == detector.boardwalk_classifier.debug_image.shape
-    assert result[-1]['boardwalk_debug_publish_ms'] > 0
+
+    CurbDetector.process_image(detector, SimpleNamespace(header=header))
+
+    assert len(clouds) == 1
+    assert len(images) == (3 if debug_enabled else 0)
+    points = np.frombuffer(clouds[0].data, dtype=CurbDetector.CLOUD_DTYPE)
+    np.testing.assert_array_equal(points['class_id'], [1, 2, 4, 3])
+    assert timings[0]['boardwalk_final_count'] == 1
+    for msg in images:
+        assert msg.header == header
+        assert msg.format == 'bgr8; jpeg compressed bgr8'
+        assert detector.jpeg.decode(bytes(msg.data)).size > 0

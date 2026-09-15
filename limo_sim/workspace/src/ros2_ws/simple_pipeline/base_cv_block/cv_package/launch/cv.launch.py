@@ -30,7 +30,11 @@ def generate_launch_description():
             'enable_telemetry': True,
             'roi_y_min': 0.0,
             'roi_y_max': 1.0,
+            # Optional images are disabled; PointCloud2 is always published.
+            'enable_debug_publications': False,
             'point_voxel_size': 5,
+            # Downsample published non-blue BEV points in class-aware 2 cm cells.
+            'pointcloud_voxel_size_m': 0.02,
             # 7x7 keeps an approximately three-pixel-wide inner blue boundary.
             'blue_boundary_kernel_size': 7,
             'camera_info_topic': '/rgb/camera_info',
@@ -48,14 +52,10 @@ def generate_launch_description():
             'blue_radius_min_m': 0.10,
             'blue_radius_max_m': 0.16,
             # White points in the blue distance band seed class 4 (boardwalk).
-            # Two distance transforms classify a metric grid, then relabel points.
+            # Restore exact metric point distances: blue neighbors, then seed neighbors.
             'enable_boardwalk': True,
             'boardwalk_propagation_radius_m': 0.10,
-            'boardwalk_grid_resolution_m': 0.01,
-            'boardwalk_grid_max_cells': 1000000,
-            # Auto keeps both EDT passes on CUDA, with a logged CPU fallback.
-            # Set cpu to compare timings, or cuda to require CUDA explicitly.
-            'boardwalk_backend': 'auto',
+            # OpenCV applies the 7x7 blue filter; cKDTree runs both point passes.
             'telemetry_window_size': 60,
             'telemetry_log_interval_frames': 30,
         }]

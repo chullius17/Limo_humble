@@ -51,7 +51,11 @@ class CurbDetector(Node):
     def __init__(self):
         super().__init__('curb_detector')
         self.bridge = CvBridge()
-        self.jpeg = TurboJPEG()
+        self.declare_parameter('enable_debug_publications', False)
+        self.enable_debug_publications = bool(
+            self.get_parameter('enable_debug_publications').value)
+        # The point-cloud pipeline does not need a JPEG encoder.
+        self.jpeg = TurboJPEG() if self.enable_debug_publications else None
 
         self.declare_parameter('debug_jpeg_quality', 85)
         self.debug_jpeg_quality = int(
@@ -68,13 +72,19 @@ class CurbDetector(Node):
             raise ValueError(
                 'roi_y_min and roi_y_max must define a range in [0, 1]')
         self.declare_parameter('point_voxel_size', 3)
+        self.declare_parameter('pointcloud_voxel_size_m', 0.02)
         self.declare_parameter('blue_boundary_kernel_size', 7)
         self.point_voxel_size = int(
             self.get_parameter('point_voxel_size').value)
+        self.pointcloud_voxel_size = float(
+            self.get_parameter('pointcloud_voxel_size_m').value)
         self.blue_boundary_kernel_size = int(
             self.get_parameter('blue_boundary_kernel_size').value)
         if self.point_voxel_size <= 0:
             raise ValueError('point_voxel_size must be positive')
+        if (not np.isfinite(self.pointcloud_voxel_size)
+                or self.pointcloud_voxel_size <= 0.0):
+            raise ValueError('pointcloud_voxel_size_m must be finite and positive')
         if (self.blue_boundary_kernel_size <= 0
                 or self.blue_boundary_kernel_size % 2 == 0):
             raise ValueError(
@@ -105,9 +115,6 @@ class CurbDetector(Node):
         self.declare_parameter('blue_radius_max_m', 0.16)
         self.declare_parameter('enable_boardwalk', True)
         self.declare_parameter('boardwalk_propagation_radius_m', 0.10)
-        self.declare_parameter('boardwalk_grid_resolution_m', 0.01)
-        self.declare_parameter('boardwalk_grid_max_cells', 1000000)
-        self.declare_parameter('boardwalk_backend', 'auto')
 
         self.input_crop_y_min = float(
             self.get_parameter('input_crop_y_min').value)
@@ -129,10 +136,7 @@ class CurbDetector(Node):
             self.get_parameter('enable_boardwalk').value)
         self.boardwalk_propagation_radius = float(
             self.get_parameter('boardwalk_propagation_radius_m').value)
-        self.boardwalk_classifier = BoardwalkClassifier(
-            resolution=float(self.get_parameter('boardwalk_grid_resolution_m').value),
-            max_cells=int(self.get_parameter('boardwalk_grid_max_cells').value),
-            backend=str(self.get_parameter('boardwalk_backend').value))
+        self.boardwalk_classifier = BoardwalkClassifier()
         self.bev_frame = str(self.get_parameter('bev_frame').value)
         if not 0.0 <= self.input_crop_y_min < 1.0:
             raise ValueError('input_crop_y_min must be in [0, 1)')
@@ -209,11 +213,6 @@ class CurbDetector(Node):
             'limo/cv_package/boundaries/blue_filter_debug/compressed',
             pipeline_qos,
         )
-        self.boardwalk_grid_debug_pub = self.create_publisher(
-            CompressedImage,
-            'limo/cv_package/boundaries/boardwalk_grid_debug/compressed',
-            pipeline_qos,
-        )
         self.pointcloud_pub = self.create_publisher(
             PointCloud2,
             self.get_parameter('pointcloud_topic').value,
@@ -253,9 +252,11 @@ class CurbDetector(Node):
             'step8_lock': deque(maxlen=self.window_size),
             'step8_tf': deque(maxlen=self.window_size),
             'step8_math': deque(maxlen=self.window_size),
+            'step8_voxel': deque(maxlen=self.window_size),
             'step8_cloud_publish': deque(maxlen=self.window_size),
             'step9_draw_publish': deque(maxlen=self.window_size),
             'point_count': deque(maxlen=self.window_size),
+            'point_count_before_voxel': deque(maxlen=self.window_size),
             'total': deque(maxlen=self.window_size),
         }
         self.telemetry_stats.update({
@@ -268,15 +269,15 @@ class CurbDetector(Node):
         self.worker_thread.start()
         self.get_logger().info(
             f'CurbDetector initialized: compact 2D cloud in '
-            f'{self.bev_frame}.')
+            f'{self.bev_frame}; debug publications '
+            f'{"enabled" if self.enable_debug_publications else "disabled"}.')
         self.get_logger().info(
             f'Boardwalk classification {"enabled" if self.enable_boardwalk else "disabled"}: '
             f'class_id={int(self.LABEL_BOARDWALK)}, '
             f'blue distance ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m, '
             f'propagation < {self.boardwalk_propagation_radius:.3f} m; '
-            f'BEV grid {self.boardwalk_classifier.resolution:.3f} m/cell, '
-            f'limit {self.boardwalk_classifier.max_cells} cells; '
-            f'backend={self.boardwalk_classifier.backend}; two Euclidean EDT passes.')
+            f'CPU cKDTree; two exact point neighbor passes; '
+            f'blue boundary kernel={self.blue_boundary_kernel_size}x{self.blue_boundary_kernel_size}.')
 
     def voxelize_points(self, raw_points, image_width):
         """Replace all points in each 2D cell with their centroid."""
@@ -299,6 +300,57 @@ class CurbDetector(Node):
         centroids_x = np.rint(
             sum_x[occupied] / counts[occupied]).astype(np.int32)
         return np.column_stack((centroids_y, centroids_x))
+
+    def voxelize_bev_cloud(self, points, class_ids):
+        """Downsample non-blue BEV points independently for every class.
+
+        Blue observations pass through unchanged. Keeping the class identifier
+        in the voxel key prevents turquoise, white and boardwalk points from
+        being averaged together when they occupy the same metric cell.
+        """
+        if len(points) == 0:
+            return points, class_ids
+
+        finite = np.isfinite(points).all(axis=1)
+        passthrough = (class_ids == self.LABEL_BLUE) | ~finite
+        passthrough_indices = np.flatnonzero(passthrough)
+        reduced_indices = np.flatnonzero(~passthrough)
+        if not len(reduced_indices):
+            return points, class_ids
+
+        voxel_xy = np.floor(
+            points[reduced_indices].astype(np.float64)
+            / self.pointcloud_voxel_size
+        ).astype(np.int64)
+        keys = np.column_stack((
+            class_ids[reduced_indices].astype(np.int64),
+            voxel_xy,
+        ))
+        _, first, inverse = np.unique(
+            keys, axis=0, return_index=True, return_inverse=True)
+        counts = np.bincount(inverse)
+        centroids = np.column_stack((
+            np.bincount(inverse, weights=points[reduced_indices, 0]) / counts,
+            np.bincount(inverse, weights=points[reduced_indices, 1]) / counts,
+        )).astype(points.dtype, copy=False)
+        reduced_labels = class_ids[reduced_indices[first]]
+
+        # Place each centroid at its voxel's first observation. This preserves
+        # deterministic class ordering while leaving every blue point intact.
+        order_keys = np.concatenate((
+            passthrough_indices,
+            reduced_indices[first],
+        ))
+        output_points = np.concatenate((
+            points[passthrough_indices],
+            centroids,
+        ))
+        output_labels = np.concatenate((
+            class_ids[passthrough_indices],
+            reduced_labels,
+        ))
+        order = np.argsort(order_keys, kind='stable')
+        return output_points[order], output_labels[order]
 
     @staticmethod
     def quaternion_to_rotation(quaternion):
@@ -428,7 +480,7 @@ class CurbDetector(Node):
                 self.process_image(msg)
                 self.frame_queue.task_done()
         finally:
-            # Free device buffers only after this worker stops using them.
+            # Keep classifier cleanup tied to the processing worker lifecycle.
             self.boardwalk_classifier.close()
 
     def process_image(self, msg):
@@ -443,9 +495,11 @@ class CurbDetector(Node):
             'step8_lock': 0.0,
             'step8_tf': 0.0,
             'step8_math': 0.0,
+            'step8_voxel': 0.0,
             'step8_cloud_publish': 0.0,
             'step9_draw_publish': 0.0,
             'point_count': float('nan'),
+            'point_count_before_voxel': float('nan'),
             'total': 0.0,
         }
         # Missing depth/TF and disabled classification must not contribute
@@ -472,20 +526,16 @@ class CurbDetector(Node):
 
         # --- STEP 1: DIRECT LABEL MASKS ---
         t_start = time.perf_counter()
-        blue_mask = labels == self.LABEL_BLUE
         turquoise_mask = labels == self.LABEL_TURQUOISE
         background_mask = labels == self.LABEL_BACKGROUND
         # Dilating white before intersecting it with blue selects an inner blue
         # boundary band. A larger odd kernel keeps a thicker blue band, while
         # the original class map and the white region remain unchanged.
         # Filter before the ROI so cropping does not affect class adjacency.
-        white_dilated = cv2.dilate(
-            background_mask.astype(np.uint8),
-            self.blue_boundary_kernel,
-            borderType=cv2.BORDER_CONSTANT,
-            borderValue=0,
-        )
-        blue_mask &= white_dilated != 0
+        # OpenCV applies the 7x7 white dilation before the blue intersection.
+        blue_mask = self.boardwalk_classifier.filter_blue(
+            labels, self.blue_boundary_kernel,
+            self.LABEL_BLUE, self.LABEL_BACKGROUND)
         t['step1_masks'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 3: OPTIONAL ADDITIONAL BOUNDARY ROI ---
@@ -523,7 +573,8 @@ class CurbDetector(Node):
 
         # --- STEP 8: METRIC 2D BEV POINT CLOUD ---
         (point_count, prepare_ms, publish_ms,
-         lock_ms, tf_ms, math_ms, boardwalk_stats) = self.publish_pointcloud(
+         lock_ms, tf_ms, math_ms, voxel_ms,
+         point_count_before_voxel, boardwalk_stats) = self.publish_pointcloud(
             raw_points_blue,
             raw_points_turquoise,
             raw_points_white,
@@ -535,15 +586,20 @@ class CurbDetector(Node):
         t['step8_lock'] = lock_ms
         t['step8_tf'] = tf_ms
         t['step8_math'] = math_ms
+        t['step8_voxel'] = voxel_ms
         t['step8_cloud_publish'] = publish_ms
         t.update(boardwalk_stats)
         if point_count is not None:
             t['point_count'] = point_count
+            t['point_count_before_voxel'] = point_count_before_voxel
 
         # --- STEP 9: DRAW AND PUBLISH COMPATIBILITY IMAGE ---
         t_start = time.perf_counter()
-        publish_debug = self.debug_pub.get_subscription_count() > 0
-        publish_lines = self.lines_pub.get_subscription_count() > 0
+        # Skip drawing and JPEG work even when viewers remain subscribed.
+        publish_debug = (self.enable_debug_publications
+                         and self.debug_pub.get_subscription_count() > 0)
+        publish_lines = (self.enable_debug_publications
+                         and self.lines_pub.get_subscription_count() > 0)
         if publish_debug or publish_lines:
             only_lines_frame = np.zeros(
                 (height, width, 3), dtype=np.uint8)
@@ -570,7 +626,8 @@ class CurbDetector(Node):
             except Exception as e:
                 self.get_logger().error(
                     f"Failed to publish compressed debug image: {str(e)}")
-        if self.blue_filter_debug_pub.get_subscription_count() > 0:
+        if (self.enable_debug_publications
+                and self.blue_filter_debug_pub.get_subscription_count() > 0):
             # Compare blue pixels before and after filtering, before voxelization.
             # Use the same ROI on both panels to isolate the adjacency filter.
             original_blue_mask = (labels == self.LABEL_BLUE) & roi_mask
@@ -624,6 +681,10 @@ class CurbDetector(Node):
                 f'{avg["point_count"]:.0f}'
                 if self.telemetry_stats['point_count'] else 'n/a'
             )
+            point_count_before_voxel_avg = (
+                f'{avg["point_count_before_voxel"]:.0f}'
+                if self.telemetry_stats['point_count_before_voxel'] else 'n/a'
+            )
 
             self.get_logger().info(
                 f"\n"
@@ -640,9 +701,10 @@ class CurbDetector(Node):
                 f"    [8a.1 Lock/Read]              Current: {t['step8_lock']:.2f} ms | Avg ({self.window_size}f): {avg['step8_lock']:.2f} ms\n"
                 f"    [8a.2 TF Lookup]              Current: {t['step8_tf']:.2f} ms | Avg ({self.window_size}f): {avg['step8_tf']:.2f} ms\n"
                 f"    [8a.3 Projection/Serialize]   Current: {t['step8_math']:.2f} ms | Avg ({self.window_size}f): {avg['step8_math']:.2f} ms\n"
+                f"    [8a.4 Metric Voxelization]    Current: {t['step8_voxel']:.2f} ms | Avg ({self.window_size}f): {avg['step8_voxel']:.2f} ms\n"
                 f"  [Step 8b: DDS Publish]         Current: {t['step8_cloud_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step8_cloud_publish']:.2f} ms\n"
                 f"  [Step 9: Draw & Publish]        Current: {t['step9_draw_publish']:.2f} ms | Avg ({self.window_size}f): {avg['step9_draw_publish']:.2f} ms\n"
-                f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg}\n"
+                f"  [Cloud Points]                  Avg ({self.window_size} clouds): {point_count_avg} published | {point_count_before_voxel_avg} before voxel\n"
                 f"{self.boardwalk_diagnostics(t)}"
                 f"======================================================================"
             )
@@ -660,11 +722,8 @@ class CurbDetector(Node):
             return f'{number:.{decimals}f}' if np.isfinite(number) else 'n/a'
 
         lines = [
-            f'  [Boardwalk class 4: BEV grid]    Rolling window: {len(samples)} clouds\n',
-            f'    Backend: {self.boardwalk_classifier.active_backend} | '
-            f'Requested: {self.boardwalk_classifier.backend}\n',
-            f'    Resolution: {self.boardwalk_classifier.resolution:.3f} m/cell | '
-            f'Grid limit: {self.boardwalk_classifier.max_cells} cells\n',
+            f'  [Boardwalk class 4: direct points]    Rolling window: {len(samples)} clouds\n',
+            f'    Backend: CPU cKDTree | Blue filter: OpenCV CPU\n',
             f'    Blue band: ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m | '
             f'Propagation: < {self.boardwalk_propagation_radius:.3f} m\n',
         ]
@@ -690,12 +749,17 @@ class CurbDetector(Node):
         lock_ms = 0.0
         tf_ms = 0.0
         math_ms = 0.0
+        voxel_ms = 0.0
+        point_count_before_voxel = None
         boardwalk_stats = {}
 
         def skipped_result():
             prepare_ms = (
                 time.perf_counter() - prepare_started_at) * 1000.0
-            return None, prepare_ms, 0.0, lock_ms, tf_ms, math_ms, boardwalk_stats
+            return (
+                None, prepare_ms, 0.0, lock_ms, tf_ms, math_ms,
+                voxel_ms, point_count_before_voxel, boardwalk_stats,
+            )
 
         lock_started_at = time.perf_counter()
         with self.sensor_lock:
@@ -805,31 +869,28 @@ class CurbDetector(Node):
         ], dtype=np.float32)
         math_ms += (time.perf_counter() - math_started_at) * 1000.0
 
-        # Rasterize metric BEV points and apply two distance transforms before
+        # Query metric BEV points directly in two nearest-neighbor passes before
         # serialization. Only white labels can become boardwalk; coordinates,
         # point order and the existing PointCloud2 layout remain unchanged.
         # Time classification separately so projection timings stay comparable.
         if self.enable_boardwalk:
-            publish_grid_debug = self.boardwalk_grid_debug_pub.get_subscription_count() > 0
             boardwalk_stats = self.boardwalk_classifier.classify(
                 bev_points, class_ids,
                 self.blue_radius_min, self.blue_radius_max,
                 self.boardwalk_propagation_radius,
-                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK,
-                debug=publish_grid_debug)
-            if boardwalk_stats['boardwalk_grid_skipped']:
-                self.get_logger().warning(
-                    'Boardwalk grid exceeds the configured cell limit; '
-                    'publishing this cloud with its original labels.',
-                    throttle_duration_sec=2.0)
-            if self.boardwalk_classifier.gpu_error:
-                self.get_logger().warning(
-                    f'Boardwalk CUDA unavailable; using CPU: '
-                    f'{self.boardwalk_classifier.gpu_error}',
-                    throttle_duration_sec=10.0)
+                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK)
+
+        # Downsample only the outgoing cloud. The full-resolution points above
+        # remain available to both cKDTree passes, and blue geometry is kept
+        # exactly as observed. Other classes use separate 2D metric voxel keys.
+        point_count_before_voxel = len(bev_points)
+        voxel_started_at = time.perf_counter()
+        bev_points, class_ids = self.voxelize_bev_cloud(
+            bev_points, class_ids)
+        voxel_ms = (time.perf_counter() - voxel_started_at) * 1000.0
 
         math_started_at = time.perf_counter()
-        cloud_points = np.empty(len(rows), dtype=self.CLOUD_DTYPE)
+        cloud_points = np.empty(len(bev_points), dtype=self.CLOUD_DTYPE)
         cloud_points['x'] = bev_points[:, 0]
         cloud_points['y'] = bev_points[:, 1]
         cloud_points['z'] = 0.0
@@ -853,21 +914,10 @@ class CurbDetector(Node):
         self.pointcloud_pub.publish(cloud)
         publish_ms = (
             time.perf_counter() - publish_started_at) * 1000.0
-        # Encode the grid only on demand and after publishing the point cloud.
-        # Its header identifies the metric BEV frame and the same input stamp.
-        if self.enable_boardwalk and publish_grid_debug:
-            debug_started_at = time.perf_counter()
-            try:
-                self.boardwalk_grid_debug_pub.publish(self.encode_debug_image(
-                    self.boardwalk_classifier.debug_image, cloud.header))
-            except Exception as error:
-                self.get_logger().error(
-                    f'Failed to publish boardwalk grid debug image: {error}')
-            boardwalk_stats['boardwalk_debug_publish_ms'] = (
-                time.perf_counter() - debug_started_at) * 1000.0
         return (
             len(cloud_points), prepare_ms, publish_ms,
-            lock_ms, tf_ms, math_ms, boardwalk_stats,
+            lock_ms, tf_ms, math_ms, voxel_ms,
+            point_count_before_voxel, boardwalk_stats,
         )
 
     def encode_debug_image(self, frame, header):
