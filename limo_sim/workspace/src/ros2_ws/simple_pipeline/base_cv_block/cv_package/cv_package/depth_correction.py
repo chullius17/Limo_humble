@@ -166,7 +166,7 @@ class DepthCorrection(Node):
             CompressedImage, output_topic, output_qos)
         self.corrected_publisher = self.create_publisher(
             CompressedImage, corrected_topic, output_qos)
-        # Consumers of this topic (simple_boundaries.py, bev_and_clas.py)
+        # Consumers of this topic (visual_ptcld.py, bev_and_clas.py)
         # already subscribe BEST_EFFORT; a reliable writer here can only
         # block on its single history slot for no benefit, and a stale
         # depth frame is worth less than a dropped one on a sensor stream.

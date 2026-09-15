@@ -12,7 +12,7 @@ from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import Header
 
 from cv_package.boardwalk import BOARDWALK_COUNTS, BOARDWALK_TIMINGS, BoardwalkClassifier
-from cv_package.simple_boundaries import CurbDetector
+from cv_package.visual_ptcld import CurbDetector
 from cv_package.cloud_cpu import RayCache
 
 
