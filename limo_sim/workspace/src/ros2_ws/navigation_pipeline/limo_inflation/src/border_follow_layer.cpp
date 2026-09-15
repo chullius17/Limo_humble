@@ -14,7 +14,7 @@ namespace limo_inflation
 
 void BorderFollowLayer::onInitialize()
 {
-  auto node = node_.lock();
+  auto node = node_;
   if (!node) {
     throw std::runtime_error("Unable to lock lifecycle node");
   }
@@ -84,7 +84,7 @@ void BorderFollowLayer::onInitialize()
   current_ = true;
 
   RCLCPP_INFO(
-    logger_,
+    node->get_logger(),
     "Border-follow layer: source=%s threshold=%d lanes=%.3f/%.3f +/- %.3f m "
     "costs=near:%u inter-lane:%u far:%u slope:%.1f",
     source_topic_.c_str(), obstacle_threshold_, profile_.target_distance,
@@ -144,7 +144,7 @@ void BorderFollowLayer::updateCosts(
   if (!source || !geometryMatches(*source, master_grid)) {
     if (source) {
       RCLCPP_WARN_THROTTLE(
-        logger_, *clock_, 2000,
+        node_->get_logger(), *node_->get_clock(), 2000,
         "Ignoring source map whose geometry differs from the master costmap");
     }
     return;
