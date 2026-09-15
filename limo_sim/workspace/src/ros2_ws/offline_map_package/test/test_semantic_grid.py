@@ -1,0 +1,148 @@
+"""Regression tests for semantic costs, correction and submap reprojection."""
+
+from array import array
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from offline_map_package.semantic_grid import Geometry, SemanticGrid, read_class_cloud
+
+
+def mapper():
+    grid = SemanticGrid(resolution=1.0)
+    grid.set_pose((0, 0), (0.0, 0.0, 0.0))
+    return grid
+
+
+def test_costs_and_ignored_blue():
+    grid = mapper()
+    grid.update(np.array([[0.1, 0.1], [1.1, 0.1], [2.1, 0.1], [3.1, 0.1]]),
+                np.array([1, 2, 3, 4]))
+    _, layers, combined = grid.render(Geometry(1.0, 4, 1, (0, 0, 0)))
+    assert combined.tolist() == [[-1, 60, 30, 90]]
+    assert layers[:, 0].tolist() == [[-1, 60, 0, 0], [-1, 0, 30, 0], [-1, 0, 0, 90]]
+
+
+def test_repeated_white_corrects_saturated_boardwalk():
+    grid = mapper()
+    xy = np.array([[0.1, 0.1]])
+    for _ in range(30):
+        grid.update(xy, np.array([4]))
+    assert grid.render()[2][0, 0] == 90
+    grid.update(xy, np.array([3]))
+    assert grid.render()[2][0, 0] == 90
+    for _ in range(15):
+        grid.update(xy, np.array([3]))
+    assert grid.render()[2][0, 0] == 30
+    assert grid.render()[1][2, 0, 0] == 0
+
+
+def test_density_does_not_multiply_confidence():
+    single, dense = mapper(), mapper()
+    single.update(np.array([[0.1, 0.1]]), np.array([2]))
+    dense.update(np.full((10000, 2), 0.1), np.full(10000, 2))
+    for one, many in zip(single.tiles.values(), dense.tiles.values()):
+        np.testing.assert_allclose(one[0], many[0])
+
+
+def test_no_free_rays_or_blue_clearing():
+    grid = mapper()
+    grid.update(np.array([[4.1, 0.1]]), np.array([2]))
+    for _ in range(20):
+        assert not grid.update(np.array([[4.1, 0.1]]), np.array([1]))
+    _, _, combined = grid.render(Geometry(1.0, 5, 1, (0, 0, 0)))
+    assert combined.tolist() == [[-1, -1, -1, -1, 60]]
+
+
+def test_negative_coordinates_use_floor():
+    grid = mapper()
+    grid.update(np.array([[-0.1, -0.1], [0.1, 0.1]]), np.array([2, 3]))
+    geometry, _, combined = grid.render()
+    assert geometry.origin == (-1.0, -1.0, 0.0)
+    assert combined.tolist() == [[60, -1], [-1, 30]]
+
+
+def test_submaps_move_independently_without_ghosts():
+    grid = mapper()
+    grid.set_pose((0, 1), (2, 0, 0))
+    grid.update(np.array([[0.1, 0.1]]), np.array([2]), (0, 0))
+    grid.update(np.array([[0.1, 0.1]]), np.array([4]), (0, 1))
+    geometry = Geometry(1.0, 5, 2, (0, 0, 0))
+    assert grid.render(geometry)[2][0].tolist() == [60, -1, 90, -1, -1]
+    grid.set_pose((0, 0), (2, 0, np.pi / 2))
+    grid.set_pose((0, 1), (4, 1, 0))
+    assert grid.render(geometry)[2].tolist() == [
+        [-1, 60, -1, -1, -1], [-1, -1, -1, -1, 90]]
+
+
+def test_newer_overlapping_submap_can_replace_higher_cost():
+    grid = mapper()
+    grid.set_pose((0, 1), (0, 0, 0))
+    grid.update(np.array([[0.1, 0.1]]), np.array([4]), (0, 0))
+    grid.update(np.array([[0.1, 0.1]]), np.array([3]), (0, 1))
+    assert grid.render()[2].tolist() == [[30]]
+    grid.visible = {(0, 0)}
+    assert grid.render()[2].tolist() == [[90]]
+
+
+def test_rotated_reference_grid_and_crop():
+    grid = mapper()
+    grid.update(np.array([[-0.5, 0.5], [5.5, 0.5]]), np.array([2, 3]))
+    geometry = Geometry(1.0, 1, 1, (0, 0, np.pi / 2))
+    assert grid.render(geometry)[2].tolist() == [[60]]
+
+
+def test_equal_class_evidence_stays_unknown():
+    grid = mapper()
+    for _ in range(20):
+        grid.update(np.array([[0.1, 0.1], [0.2, 0.2]]), np.array([2, 4]))
+    assert grid.render()[2].tolist() == [[-1]]
+
+
+def test_memory_limit_rejects_entire_update():
+    grid = SemanticGrid(resolution=1.0, max_cells=1024)
+    grid.set_pose((0, 0), (0, 0, 0))
+    grid.update(np.array([[0.1, 0.1]]), np.array([2]))
+    with pytest.raises(MemoryError):
+        grid.update(np.array([[0.1, 0.1], [40, 0]]), np.array([4, 4]))
+    assert grid.render()[2].tolist() == [[60]]
+    assert grid.sequence == 1
+
+
+def cloud(endian='<', width=2, height=2):
+    layout = [('x', 4, 7), ('y', 8, 7), ('z', 12, 7), ('class_id', 0, 2)]
+    fields = [SimpleNamespace(name=name, offset=offset, datatype=datatype, count=1)
+              for name, offset, datatype in layout]
+    data = array('B', bytes(height * (width * 20 + 8)))
+    dtype = np.dtype({'names': ['x', 'y', 'z', 'class_id'],
+                      'formats': [endian + 'f4'] * 3 + ['u1'],
+                      'offsets': [4, 8, 12, 0], 'itemsize': 20})
+    points = np.ndarray((height, width), dtype=dtype, buffer=data,
+                        strides=(width * 20 + 8, 20))
+    points['x'], points['y'], points['z'], points['class_id'] = 1, 2, 0, 3
+    return SimpleNamespace(fields=fields, data=data, width=width, height=height,
+                           row_step=width * 20 + 8, point_step=20,
+                           is_bigendian=endian == '>'), points
+
+
+@pytest.mark.parametrize('endian', ['<', '>'])
+def test_cloud_layout_and_invalid_points(endian):
+    msg, points = cloud(endian)
+    points['x'][0, 0] = np.nan
+    points['class_id'][1, 0] = 1
+    points['class_id'][1, 1] = 4
+    xy, labels = read_class_cloud(msg)
+    assert xy.tolist() == [[1, 2], [1, 2]]
+    assert labels.tolist() == [3, 4]
+
+
+def test_cloud_rejects_bad_schema_and_truncated_buffer():
+    msg, _ = cloud()
+    msg.fields[-1].datatype = 7
+    with pytest.raises(ValueError, match='field'):
+        read_class_cloud(msg)
+    msg, _ = cloud()
+    msg.data = msg.data[:-1]
+    with pytest.raises(ValueError, match='Truncated'):
+        read_class_cloud(msg)

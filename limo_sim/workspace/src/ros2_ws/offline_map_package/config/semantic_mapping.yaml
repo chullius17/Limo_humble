@@ -1,0 +1,25 @@
+semantic_mapper:
+  ros__parameters:
+    cloud_topic: /limo/cv_package/visual_ptcld/points
+    reference_map_topic: /map
+    map_frame: map
+    odom_frame: odom
+    pose_source: tf
+    submap_topic: /submap_list
+    trajectory_id: 0
+    resolution: 0.05
+    # Fixed output COSTS, not probabilities. Blue (class 1) is ignored.
+    turquoise_cost: 60  # class_id 2
+    white_cost: 30      # class_id 3
+    boardwalk_cost: 90  # class_id 4
+    hit_log_odds: 0.85
+    miss_log_odds: 0.4
+    log_odds_limit: 3.0
+    min_evidence: 0.5
+    publish_rate_hz: 1.0
+    tf_wait_sec: 0.5
+    submap_max_age_sec: 2.0
+    max_input_points: 100000
+    max_cells: 2000000
+    max_output_cells: 4000000
+    mapping_enabled: true
