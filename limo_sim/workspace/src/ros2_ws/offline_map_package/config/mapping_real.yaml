@@ -1,0 +1,57 @@
+# Read by map.launch.py; this is not a ROS --params-file.
+# Robot: wall clock, EKF publishes odom -> base_link; GUI runs on the PC.
+launch:
+  use_sim_time: false
+  start_slam: true
+  start_mapper: true
+  start_rviz: false
+  start_gui: false
+  rviz_config: offline_map.rviz  # Relative to limo_rviz/config, or an absolute path.
+  fixed_frame: map
+
+slam_toolbox:
+  odom_frame: odom
+  map_frame: map
+  base_frame: base_link
+  scan_topic: /scan
+  mode: mapping
+  transform_timeout: 0.2
+  tf_buffer_duration: 30.0
+  scan_queue_size: 1
+  throttle_scans: 1
+  minimum_time_interval: 0.1
+  map_update_interval: 2.0
+  resolution: 0.05
+  max_laser_range: 8.0
+
+semantic_mapper:
+  cloud_topic: /limo/cv_package/visual_ptcld/points
+  scan_topic: /scan
+  reference_map_topic: /map
+  map_frame: map
+  odom_frame: odom
+  pose_source: tf
+  submap_topic: /submap_list
+  trajectory_id: 0
+  resolution: 0.05
+  # Fixed costs: blue boundary/interior = 0, lidar = 100.
+  turquoise_cost: 60
+  white_cost: 30
+  boardwalk_cost: 90
+  hit_log_odds: 0.85
+  miss_log_odds: 0.4
+  log_odds_limit: 3.0
+  min_evidence: 0.5
+  publish_rate_hz: 4.0
+  save_directory: ''  # ros2_maps/semantic in the workspace running the mapper.
+  save_map_name: limo_map
+  save_median_kernel: 3
+  tf_wait_sec: 0.5
+  submap_max_age_sec: 2.0
+  max_input_points: 100000
+  max_cells: 2000000
+  max_output_cells: 4000000
+
+map_save_gui:
+  save_service: /limo/map_package/offline/map_saver/save_map
+  status_topic: /limo/map_package/offline/map_saver/status

@@ -28,11 +28,14 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>cv_package</exec_depend>
   <exec_depend>limo_rviz</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>rviz2</exec_depend>
 
   <!-- Python dependencies -->
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-pyqt5</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <!-- Needed for get_package_share_directory -->
   <exec_depend>ament_index_python</exec_depend>

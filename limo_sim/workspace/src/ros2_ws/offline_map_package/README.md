@@ -5,7 +5,6 @@ Il launch `map.launch.py` consuma direttamente
 `class_id` UINT8, coordinate metriche in `base_link`, timestamp del sensore.
 Consuma inoltre `/scan`: ogni endpoint lidar valido viene trasformato nel frame
 `map`, accumulato e salvato con costo 100.
-La pipeline precedente è disponibile in `legacy_map.launch.py`.
 
 | class_id | Classe | Costo |
 | --- | --- | --- |
@@ -26,7 +25,10 @@ metrica da `pointcloud_voxel_size_m` (2 cm nel launch) e pubblicate nella cloud.
 Il nodo non usa immagini, OpenCV o proiezioni BEV. Legge il buffer della cloud
 con NumPy, trasforma i punti al timestamp del sensore e aggiorna tile sparse.
 Le mappe dense vengono generate a 1 Hz, solo quando cambiano i dati o le pose.
-I parametri sono in `config/semantic_mapping.yaml`.
+I parametri sono nei due profili `config/mapping_sim.yaml` e
+`config/mapping_real.yaml`. Ciascun file contiene le sezioni `launch`,
+`slam_toolbox`, `semantic_mapper` e `map_save_gui`. Sono profili letti dal
+launch principale, non file da passare direttamente a ROS con `--params-file`.
 
 ## Evidenza e correzioni
 
@@ -56,10 +58,12 @@ da una correzione della posa; non si applica decadimento temporale indiscriminat
 Nel container `limo_sim`, dopo la build e il source di `/workspace/install/setup.bash`:
 
 ```bash
-ros2 launch offline_map_package map.launch.py
+ros2 launch offline_map_package map_sim.launch.py
 ```
 
-Avvia lo SLAM Toolbox esistente, mapping semantico, RViz e GUI di salvataggio.
+Il wrapper seleziona `mapping_sim.yaml` e include il launch principale
+`map.launch.py`: avvia SLAM Toolbox, mapping semantico, RViz e GUI di salvataggio
+con il tempo simulato. I valori di tuning sono quelli del precedente launch.
 La computer vision deve essere già attiva; la cloud pubblicata da `visual_ptcld`
 include sempre i punti blu con `class_id=1`.
 Con lo SLAM già attivo:
@@ -68,8 +72,50 @@ Con lo SLAM già attivo:
 ros2 launch offline_map_package map.launch.py start_slam:=false
 ```
 
-Per un replay/headless aggiungere `start_gui:=false start_rviz:=false`.
-Usare `use_sim_time:=false` con un robot reale.
+Per un replay/headless aggiungere `mode:=backend`.
+
+Sul robot reale (sensori, EKF e computer vision già attivi):
+
+```bash
+ros2 launch offline_map_package map_real.launch.py
+```
+
+Questo secondo wrapper usa `mapping_real.yaml`: tempo reale, `base_link`,
+stessi topic del bringup fisico e nessuna finestra sul robot. Il tuning
+semantico/SLAM resta quello esistente; i due YAML permettono di modificarlo
+indipendentemente dopo le prove sul robot.
+
+Sul PC, nel container Foxy con i pacchetti aggiornati, le sole interfacce:
+
+```bash
+ros2 launch offline_map_package map_real.launch.py mode:=desktop
+```
+
+Oppure dal terminale grafico del PC, nella directory `workspace/src` di questo
+checkout: `bash scripts/limo_gui.sh`. Lo script usa lo stesso launch principale
+e il profilo reale, anche se il container monta una copia diversa del workspace.
+Per il profilo simulato: `bash scripts/limo_gui.sh --profile sim`.
+`mode:=desktop` non avvia SLAM o mapper; apre RViz e Save Map, collegati al robot.
+I file salvati restano sulla macchina dove gira il mapper.
+
+`map.launch.py` senza argomenti mantiene il profilo simulato. Per un file proprio:
+
+```bash
+ros2 launch offline_map_package map.launch.py config_file:=/percorso/mapping.yaml
+```
+
+Gli override CLI `start_slam`, `start_mapper`, `start_rviz`, `start_gui`,
+`use_sim_time`, `rviz_config`, `fixed_frame`, `pose_source`, `trajectory_id`,
+`resolution` e `save_directory` restano disponibili. Il valore vuoto usa il YAML;
+`resolution` sovrascrive sia SLAM sia mapper, `use_sim_time` tutti i nodi.
+`mode:=backend` forza le GUI spente; `mode:=desktop` forza SLAM/mapper spenti
+e permette di disabilitare singole finestre con `start_rviz`/`start_gui`.
+I percorsi RViz relativi si riferiscono a `limo_rviz/config`.
+
+SLAM viene avviato direttamente con i parametri del profilo, quindi non serve
+più il workaround Foxy `params_file:=...` e non si usano i default con
+`base_footprint`. `desktop.launch.py` resta un alias compatibile per le GUI reali.
+
 Il nodo non pubblica TF. Un TF mancante viene atteso fino a `tf_wait_sec`, poi la
 cloud viene scartata; non si ripiega sulla posa più recente. Timestamp duplicati
 o fuori ordine vengono ignorati. Prima di riavvolgere un bag usare `reset_map`.
@@ -172,6 +218,7 @@ un successivo riallineamento/replay.
 ```bash
 colcon build --symlink-install --packages-select offline_map_package
 python3 -m pytest src/ros2_ws/offline_map_package/test/test_semantic_grid.py src/ros2_ws/offline_map_package/test/test_semantic_mapper.py
+python3 -m pytest src/ros2_ws/offline_map_package/test/test_mapping_launch.py
 ```
 
 `max_cells` limita le tile allocate (circa 20 byte/cella più overhead);
