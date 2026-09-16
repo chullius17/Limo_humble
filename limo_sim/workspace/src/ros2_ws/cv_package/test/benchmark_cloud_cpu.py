@@ -60,7 +60,7 @@ def main():
                                     320, 120, 0.5, rotation, translation)
 
     np.testing.assert_allclose(projected(), reference(), rtol=2e-6, atol=2e-6)
-    print('Synthetic: 2700 projected points; 1700 non-blue voxel inputs')
+    print('Synthetic: 2700 projected points; 1700 voxel inputs')
     for title, function in [('voxel grouping before', old_groups),
                             ('voxel grouping after', new_groups),
                             ('projection before', reference),

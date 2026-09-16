@@ -1,6 +1,7 @@
 semantic_mapper:
   ros__parameters:
     cloud_topic: /limo/cv_package/visual_ptcld/points
+    scan_topic: /scan
     reference_map_topic: /map
     map_frame: map
     odom_frame: odom
@@ -8,7 +9,8 @@ semantic_mapper:
     submap_topic: /submap_list
     trajectory_id: 0
     resolution: 0.05
-    # Fixed output COSTS, not probabilities. Blue (class 1) is ignored.
+    # Fixed output COSTS, not probabilities. Boundary blue (1) and interior
+    # blue (5) share observed-road evidence with fixed cost 0.
     turquoise_cost: 60  # class_id 2
     white_cost: 30      # class_id 3
     boardwalk_cost: 90  # class_id 4

@@ -1,14 +1,10 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import RegisterEventHandler
 from launch.event_handlers import OnProcessStart
-from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    publish_blue_points = LaunchConfiguration('publish_blue_points')
-
     lane_node = Node(
             package='cv_package',
             executable='lane_detector',
@@ -44,7 +40,7 @@ def generate_launch_description():
             # Optional images are disabled; PointCloud2 is always published.
             'enable_debug_publications': False,
             'point_voxel_size': 5,
-            # Downsample published non-blue BEV points in class-aware 2 cm cells.
+            # Downsample all published BEV classes in class-aware 2 cm cells.
             'pointcloud_voxel_size_m': 0.02,
             # 7x7 keeps an approximately three-pixel-wide inner blue boundary.
             'blue_boundary_kernel_size': 7,
@@ -57,8 +53,6 @@ def generate_launch_description():
             'fallback_depth_width': 320,
             'fallback_depth_height': 120,
             'pointcloud_topic': 'limo/cv_package/visual_ptcld/points',
-            'publish_blue_points': ParameterValue(
-                publish_blue_points, value_type=bool),
             'input_crop_y_min': 0.5,
             'pointcloud_min_depth_m': 0.1,
             'pointcloud_max_depth_m': 2.5,
@@ -95,11 +89,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'publish_blue_points',
-            default_value='false',
-            description='Include class_id 1 (blue) points in the output cloud.',
-        ),
         lane_node,
         depth_correction_node,
         boundary_trigger,

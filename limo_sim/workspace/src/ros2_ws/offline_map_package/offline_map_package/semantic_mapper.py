@@ -12,15 +12,18 @@ import rclpy
 from nav_msgs.msg import OccupancyGrid
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data,
+)
 from rclpy.time import Time
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import LaserScan, PointCloud2
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from offline_map_package.semantic_grid import (
-    CLASS_NAMES, Geometry, SemanticGrid, read_class_cloud, transform_xy,
+    CLASS_NAMES, Geometry, LaserEndpointGrid, SemanticGrid,
+    read_class_cloud, transform_xy,
 )
 
 
@@ -45,15 +48,27 @@ def stamp_ns(stamp):
     return int(stamp.sec) * 1000000000 + int(stamp.nanosec)
 
 
-def raw_pgm(values):
-    """Encode an OccupancyGrid array as a Nav2 raw-mode binary PGM."""
+def map_pgm(values, mode):
+    """Encode costs as a Nav2 scale- or trinary-mode binary PGM."""
     if values.ndim != 2:
         raise ValueError('Saved map must be a two-dimensional array')
     known = values >= 0
     if np.any(values[known] > 100):
-        raise ValueError('Raw map costs must be between 0 and 100')
-    pixels = np.full(values.shape, 255, dtype=np.uint8)
-    pixels[known] = values[known].astype(np.uint8)
+        raise ValueError('Map costs must be between 0 and 100')
+    if mode == 'scale':
+        # A grayscale PGM has no alpha channel. The complete snapshot is fully
+        # known because the laser layer supplies cost 0 to every output cell.
+        if not np.all(known):
+            raise ValueError('Scale PGM cannot encode unknown cells')
+        pixels = np.rint(
+            (100.0 - values.astype(np.float64)) * (255.0 / 100.0)
+        ).astype(np.uint8)
+    elif mode == 'trinary':
+        pixels = np.full(values.shape, 205, dtype=np.uint8)
+        pixels[known & (values <= 25)] = 254
+        pixels[known & (values >= 65)] = 0
+    else:
+        raise ValueError('Map mode must be scale or trinary')
     # OccupancyGrid starts at the lower-left; image rows start at the upper-left.
     pixels = np.flipud(pixels)
     header = 'P5\n# CREATOR: offline_map_package semantic_mapper\n{} {}\n255\n'.format(
@@ -61,17 +76,65 @@ def raw_pgm(values):
     return header.encode('ascii') + pixels.tobytes()
 
 
-def map_yaml(image_name, geometry):
+def map_yaml(image_name, geometry, mode):
     """Create metadata accepted by the Foxy/Humble Nav2 map server."""
+    if mode == 'scale':
+        # With the full [0, 1] interval, Nav2 scale loading reconstructs the
+        # semantic costs instead of stretching only the default [0.25, 0.65].
+        occupied_thresh, free_thresh = '1.0', '0.0'
+    elif mode == 'trinary':
+        # These thresholds separate the conventional 0/205/254 PGM pixels.
+        occupied_thresh, free_thresh = '0.65', '0.196'
+    else:
+        raise ValueError('Map mode must be scale or trinary')
     return (
         'image: {}\n'
-        'mode: raw\n'
+        'mode: {}\n'
         'resolution: {:.17g}\n'
         'origin: [{:.17g}, {:.17g}, {:.17g}]\n'
         'negate: 0\n'
-        'occupied_thresh: 0.65\n'
-        'free_thresh: 0.25\n'
-    ).format(image_name, geometry.resolution, *geometry.origin)
+        'occupied_thresh: {}\n'
+        'free_thresh: {}\n'
+    ).format(image_name, mode, geometry.resolution, *geometry.origin,
+             occupied_thresh, free_thresh)
+
+
+def combine_semantic_and_laser(semantic, laser):
+    """Overlay semantic evidence while preserving laser obstacles at cost 100."""
+    if semantic.shape != laser.shape:
+        raise ValueError('Semantic and laser map geometry differs')
+    complete = laser.copy()
+    semantic_known = semantic >= 0
+    complete[semantic_known] = semantic[semantic_known]
+    complete[laser == 100] = 100
+    return complete
+
+
+def cv_obstacle_map(complete):
+    """Convert semantic costs to a CV-only trinary obstacle map."""
+    output = np.full(complete.shape, -1, dtype=np.int8)
+    output[(complete >= 0) & (complete < 10)] = 0
+    output[(complete >= 10) & (complete <= 95)] = 100
+    return output
+
+
+def union_axis_aligned_geometries(geometries, resolution):
+    """Return one unrotated geometry covering every supplied geometry."""
+    geometries = [geometry for geometry in geometries if geometry is not None]
+    if not geometries:
+        return None
+    if any(abs(geometry.resolution - resolution) > 1e-9
+           or abs(geometry.origin[2]) > 1e-9 for geometry in geometries):
+        raise ValueError('Dynamic map geometries must share resolution and zero yaw')
+    low = np.floor(np.min([
+        geometry.origin[:2] for geometry in geometries], axis=0) / resolution)
+    high = np.ceil(np.max([
+        (geometry.origin[0] + geometry.width * resolution,
+         geometry.origin[1] + geometry.height * resolution)
+        for geometry in geometries], axis=0) / resolution)
+    width, height = (high - low).astype(int)
+    return Geometry(resolution, int(width), int(height),
+                    (low[0] * resolution, low[1] * resolution, 0.0))
 
 
 class SemanticMapper(Node):
@@ -81,6 +144,7 @@ class SemanticMapper(Node):
         super().__init__('semantic_mapper')
         defaults = {
             'cloud_topic': '/limo/cv_package/visual_ptcld/points',
+            'scan_topic': '/scan',
             'reference_map_topic': '/map', 'map_frame': 'map', 'odom_frame': 'odom',
             'pose_source': 'tf', 'submap_topic': '/submap_list', 'trajectory_id': 0,
             'resolution': 0.05, 'turquoise_cost': 60, 'white_cost': 30,
@@ -110,10 +174,14 @@ class SemanticMapper(Node):
         if not self.config['map_frame'] or not self.config['odom_frame']:
             raise ValueError('Map and odom frames must be nonempty')
         self.grid = self.make_grid()
+        self.laser_grid = LaserEndpointGrid(
+            self.config['resolution'], self.config['max_cells'])
         self.reference_geometry = None
         self.last_geometry = None
         self.pending = None
+        self.pending_scan = None
         self.last_stamp = -1
+        self.last_scan_stamp = -1
         self.submaps = {}
         self.submap_stamp = None
         self.dirty = False
@@ -125,10 +193,12 @@ class SemanticMapper(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.cloud_sub = self.create_subscription(
             PointCloud2, self.config['cloud_topic'], self.cloud_callback, sensor_qos)
-        # Volatile subscription accepts both Cartographer and transient-local
-        # SLAM publishers. It intentionally waits for a current map publication.
+        self.scan_sub = self.create_subscription(
+            LaserScan, self.config['scan_topic'], self.scan_callback,
+            qos_profile_sensor_data)
+        # A latched reference map is optional and supplies output geometry only.
         self.map_sub = self.create_subscription(
-            OccupancyGrid, self.config['reference_map_topic'], self.map_callback, sensor_qos)
+            OccupancyGrid, self.config['reference_map_topic'], self.map_callback, self.map_qos)
         if self.pose_source == 'cartographer':
             try:
                 from cartographer_ros_msgs.msg import SubmapList
@@ -150,11 +220,14 @@ class SemanticMapper(Node):
         self.save_service = self.create_service(
             Trigger, prefix + '/map_saver/save_map', self.save_map)
         self.retry_timer = self.create_timer(0.05, self.consume_pending)
+        self.scan_retry_timer = self.create_timer(0.05, self.consume_pending_scan)
         self.publish_timer = self.create_timer(
             1.0 / self.config['publish_rate_hz'], self.publish_maps)
         costs = ', '.join(name + '=' + str(int(cost))
                           for name, cost in zip(CLASS_NAMES, self.grid.costs))
-        self.status('Ready: blue ignored; ' + costs + '; pose_source=' + self.pose_source)
+        self.status('Ready: blue=0; interior_blue=0; laser=100 from '
+                    + self.config['scan_topic'] + '; ' + costs
+                    + '; pose_source=' + self.pose_source)
         if self.pose_source == 'tf':
             self.get_logger().info(
                 'TF mode corrects classifications on revisits. Historical pose corrections '
@@ -196,6 +269,62 @@ class SemanticMapper(Node):
             return
         self.pending = (msg, time.monotonic())
         self.consume_pending()
+
+    def scan_callback(self, msg):
+        """Queue the newest LaserScan for timestamped TF integration."""
+        stamp = stamp_ns(msg.header.stamp)
+        newest = max(
+            self.last_scan_stamp,
+            stamp_ns(self.pending_scan[0].header.stamp) if self.pending_scan else -1)
+        if stamp <= 0 or not msg.header.frame_id or stamp <= newest:
+            return
+        self.pending_scan = (msg, time.monotonic())
+        self.consume_pending_scan()
+
+    def consume_pending_scan(self):
+        """Integrate a queued scan when its timestamped TF becomes available."""
+        if self.pending_scan is None:
+            return
+        msg, received = self.pending_scan
+        stamp = stamp_ns(msg.header.stamp)
+        # Use float64 through trigonometry and TF so axis-aligned beams do not
+        # fall into the adjacent cell through float32 rounding at boundaries.
+        ranges = np.asarray(msg.ranges, dtype=np.float64)
+        valid = (np.isfinite(ranges) & (ranges >= msg.range_min)
+                 & (ranges <= msg.range_max))
+        if not np.any(valid):
+            self.pending_scan = None
+            self.last_scan_stamp = stamp
+            return
+        angles = (msg.angle_min
+                  + np.arange(ranges.size, dtype=np.float64) * msg.angle_increment)
+        local = np.column_stack((
+            ranges[valid] * np.cos(angles[valid]),
+            ranges[valid] * np.sin(angles[valid]),
+        ))
+        try:
+            if msg.header.frame_id == self.config['map_frame']:
+                pose = (0.0, 0.0, 0.0)
+            else:
+                transform = self.tf_buffer.lookup_transform(
+                    self.config['map_frame'], msg.header.frame_id,
+                    Time.from_msg(msg.header.stamp))
+                pose = planar_pose(
+                    transform.transform.translation, transform.transform.rotation)
+            if self.laser_grid.update(transform_xy(local, pose)):
+                self.dirty = True
+            self.pending_scan = None
+            self.last_scan_stamp = stamp
+        except TransformException as error:
+            if time.monotonic() - received <= self.config['tf_wait_sec']:
+                return
+            self.pending_scan = None
+            self.get_logger().warning(
+                'Dropping laser scan: ' + str(error), throttle_duration_sec=3.0)
+        except (ValueError, MemoryError) as error:
+            self.pending_scan = None
+            self.get_logger().warning(
+                'Dropping laser scan: ' + str(error), throttle_duration_sec=3.0)
 
     def cloud_in_submap(self, msg):
         if self.pose_source == 'tf':
@@ -290,6 +419,22 @@ class SemanticMapper(Node):
             self.reference_geometry = geometry
             self.dirty = True
 
+    def save_geometry(self):
+        """Use reference geometry when available, otherwise cover retained evidence."""
+        if self.reference_geometry is not None:
+            return self.reference_geometry
+        semantic_geometry = None
+        if self.grid.sequence:
+            rendered = self.grid.render()
+            semantic_geometry = rendered[0] if rendered is not None else None
+        geometry = union_axis_aligned_geometries(
+            [semantic_geometry, self.laser_grid.geometry()], self.config['resolution'])
+        if geometry is None:
+            raise ValueError('No semantic or laser observations to save')
+        if geometry.width * geometry.height > self.config['max_output_cells']:
+            raise MemoryError('Output grid limit reached; use a smaller mapping area')
+        return geometry
+
     def message(self, values, geometry, stamp):
         msg = OccupancyGrid()
         msg.header.frame_id = self.config['map_frame']
@@ -325,8 +470,11 @@ class SemanticMapper(Node):
         # Clear the retained maps, including the last latched view.
         geometry = self.reference_geometry or self.last_geometry
         self.grid = self.make_grid()
+        self.laser_grid = LaserEndpointGrid(
+            self.config['resolution'], self.config['max_cells'])
         self.submaps, self.submap_stamp = {}, None
-        self.pending, self.last_stamp = None, -1
+        self.pending, self.pending_scan = None, None
+        self.last_stamp, self.last_scan_stamp = -1, -1
         if geometry is not None:
             unknown = np.full((geometry.height, geometry.width), -1, dtype=np.int8)
             stamp = self.get_clock().now().to_msg()
@@ -340,11 +488,18 @@ class SemanticMapper(Node):
     def save_map(self, _request, response):
         temporary_files = []
         try:
-            rendered = self.grid.render(self.reference_geometry)
-            if rendered is None or not self.grid.sequence:
-                raise ValueError('No semantic observations to save')
-            geometry, _layers, combined = rendered
-            saved_combined = self.filter_saved_black_points(combined)
+            if not self.laser_grid.cells:
+                raise ValueError('No laser observations received on '
+                                 + self.config['scan_topic'])
+            geometry = self.save_geometry()
+            rendered = self.grid.render(geometry)
+            if rendered is None:
+                raise ValueError('Cannot render the complete map')
+            _geometry, _layers, combined = rendered
+            semantic = self.filter_saved_black_points(combined)
+            laser = self.laser_grid.render(geometry)
+            complete = combine_semantic_and_laser(semantic, laser)
+            cv_obstacles = cv_obstacle_map(complete)
             if self.config['save_directory']:
                 directory = Path(self.config['save_directory']).expanduser()
             else:
@@ -360,26 +515,35 @@ class SemanticMapper(Node):
                     or map_name.endswith(('.pgm', '.yaml'))):
                 raise ValueError('save_map_name must be a filename stem without a path or suffix')
 
-            pgm_path = directory / (map_name + '.pgm')
-            yaml_path = directory / (map_name + '.yaml')
-            pgm_fd, pgm_temporary = tempfile.mkstemp(
-                prefix='.' + map_name + '_', suffix='.pgm.partial', dir=str(directory))
-            temporary_files.append(pgm_temporary)
-            with os.fdopen(pgm_fd, 'wb') as stream:
-                stream.write(raw_pgm(saved_combined))
+            outputs = (
+                (map_name + '_complete', complete, 'scale'),
+                (map_name + '_laser', laser, 'trinary'),
+                (map_name + '_cv_obstacle', cv_obstacles, 'trinary'),
+            )
+            replacements = []
+            for stem, values, mode in outputs:
+                pgm_path = directory / (stem + '.pgm')
+                yaml_path = directory / (stem + '.yaml')
+                pgm_fd, pgm_temporary = tempfile.mkstemp(
+                    prefix='.' + stem + '_', suffix='.pgm.partial', dir=str(directory))
+                temporary_files.append(pgm_temporary)
+                with os.fdopen(pgm_fd, 'wb') as stream:
+                    stream.write(map_pgm(values, mode))
+                replacements.append((pgm_temporary, pgm_path))
 
-            yaml_fd, yaml_temporary = tempfile.mkstemp(
-                prefix='.' + map_name + '_', suffix='.yaml.partial', dir=str(directory))
-            temporary_files.append(yaml_temporary)
-            with os.fdopen(yaml_fd, 'w', encoding='utf-8') as stream:
-                stream.write(map_yaml(pgm_path.name, geometry))
+                yaml_fd, yaml_temporary = tempfile.mkstemp(
+                    prefix='.' + stem + '_', suffix='.yaml.partial', dir=str(directory))
+                temporary_files.append(yaml_temporary)
+                with os.fdopen(yaml_fd, 'w', encoding='utf-8') as stream:
+                    stream.write(map_yaml(pgm_path.name, geometry, mode))
+                replacements.append((yaml_temporary, yaml_path))
 
-            os.replace(pgm_temporary, pgm_path)
-            temporary_files.remove(pgm_temporary)
-            os.replace(yaml_temporary, yaml_path)
-            temporary_files.remove(yaml_temporary)
+            for temporary, destination in replacements:
+                os.replace(temporary, destination)
+                temporary_files.remove(temporary)
             response.success = True
-            response.message = 'Saved semantic map: {}, {}'.format(pgm_path, yaml_path)
+            response.message = 'Saved complete, laser and CV obstacle maps in {}'.format(
+                directory)
         except (OSError, ValueError, MemoryError) as error:
             response.success, response.message = False, str(error)
         finally:

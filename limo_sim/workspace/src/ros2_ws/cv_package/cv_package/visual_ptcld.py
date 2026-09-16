@@ -45,6 +45,7 @@ PUBLISHED_CLASS_COUNTS = (
     ('published_turquoise_count', 'turquoise'),
     ('published_background_count', 'white'),
     ('published_boardwalk_count', 'boardwalk'),
+    ('published_interior_blue_count', 'interior blue'),
 )
 
 
@@ -55,6 +56,7 @@ class VisualPtcld(Node):
     LABEL_TURQUOISE = np.uint8(2)
     LABEL_BACKGROUND = np.uint8(3)
     LABEL_BOARDWALK = np.uint8(4)
+    LABEL_INTERIOR_BLUE = np.uint8(5)
     CLOUD_DTYPE = np.dtype({
         'names': ('x', 'y', 'z', 'class_id'),
         'formats': ('<f4', '<f4', '<f4', 'u1'),
@@ -137,7 +139,6 @@ class VisualPtcld(Node):
         self.declare_parameter('fallback_depth_height', 120)
         self.declare_parameter(
             'pointcloud_topic', 'limo/cv_package/visual_ptcld/points')
-        self.declare_parameter('publish_blue_points', False)
         self.declare_parameter('bev_frame', 'base_link')
         self.declare_parameter('input_crop_y_min', 0.5)
         self.declare_parameter('pointcloud_min_depth_m', 0.1)
@@ -167,8 +168,6 @@ class VisualPtcld(Node):
             self.get_parameter('enable_boardwalk').value)
         self.boardwalk_propagation_radius = float(
             self.get_parameter('boardwalk_propagation_radius_m').value)
-        self.publish_blue_points = bool(
-            self.get_parameter('publish_blue_points').value)
         self.boardwalk_classifier = BoardwalkClassifier()
         self.bev_frame = str(self.get_parameter('bev_frame').value)
         if not 0.0 <= self.input_crop_y_min < 1.0:
@@ -307,9 +306,7 @@ class VisualPtcld(Node):
         self.get_logger().info(
             f'VisualPtcld initialized: compact 2D cloud in '
             f'{self.bev_frame}; debug publications '
-            f'{"enabled" if self.enable_debug_publications else "disabled"}; '
-            f'blue point publication '
-            f'{"enabled" if self.publish_blue_points else "disabled"}.')
+            f'{"enabled" if self.enable_debug_publications else "disabled"}.')
         self.get_logger().info(
             f'Boardwalk classification {"enabled" if self.enable_boardwalk else "disabled"}: '
             f'class_id={int(self.LABEL_BOARDWALK)}, '
@@ -341,18 +338,18 @@ class VisualPtcld(Node):
         return np.column_stack((centroids_y, centroids_x))
 
     def voxelize_bev_cloud(self, points, class_ids):
-        """Downsample non-blue BEV points independently for every class.
+        """Downsample finite BEV points independently for every class.
 
-        Blue observations pass through unchanged. Keeping the class identifier
-        in the voxel key prevents turquoise, white and boardwalk points from
-        being averaged together when they occupy the same metric cell.
+        Keeping the class identifier in the voxel key prevents blue,
+        turquoise, white, boardwalk and interior blue points from being averaged
+        together when they occupy the same metric cell.
         """
         if len(points) == 0:
             return points, class_ids
 
         finite = np.isfinite(points).all(axis=1)
-        passthrough = (class_ids == self.LABEL_BLUE) | ~finite
-        reduced_indices = np.flatnonzero(~passthrough)
+        passthrough = ~finite
+        reduced_indices = np.flatnonzero(finite)
         if not len(reduced_indices):
             return points, class_ids
 
@@ -561,6 +558,7 @@ class VisualPtcld(Node):
         blue_mask = self.boardwalk_classifier.filter_blue(
             labels, self.blue_boundary_kernel,
             self.LABEL_BLUE, self.LABEL_BACKGROUND)
+        interior_blue_mask = (labels == self.LABEL_BLUE) & ~blue_mask
         t['step1_masks'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 3: OPTIONAL ADDITIONAL BOUNDARY ROI ---
@@ -570,6 +568,7 @@ class VisualPtcld(Node):
         roi_stop = int(height * self.roi_y_max)
         roi_mask[roi_start:roi_stop, :] = True
         blue_mask &= roi_mask
+        interior_blue_mask &= roi_mask
         turquoise_mask &= roi_mask
         background_mask &= roi_mask
         t['step3_crop'] = (time.perf_counter() - t_start) * 1000.0
@@ -594,6 +593,12 @@ class VisualPtcld(Node):
             raw_points_blue, width)
         raw_points_white = self.voxelize_points(
             raw_points_white, width)
+        raw_points_interior_blue = self.voxelize_points(
+            np.argwhere(interior_blue_mask), width)
+        # A rounded pixel centroid can land outside a non-convex mask. Only
+        # actual interior-blue pixels may provide road evidence to the mapper.
+        raw_points_interior_blue = raw_points_interior_blue[
+            interior_blue_mask[tuple(raw_points_interior_blue.T)]]
         t['step7_points'] = (time.perf_counter() - t_start) * 1000.0
 
         # --- STEP 8: METRIC 2D BEV POINT CLOUD ---
@@ -606,6 +611,7 @@ class VisualPtcld(Node):
             width,
             height,
             msg.header,
+            interior_blue_points=raw_points_interior_blue,
         )
         t['step8_cloud_prepare'] = prepare_ms
         t['step8_lock'] = lock_ms
@@ -635,6 +641,10 @@ class VisualPtcld(Node):
             if len(raw_points_blue) > 0:
                 v_b, u_b = raw_points_blue.T
                 only_lines_frame[v_b, u_b] = [255, 0, 0]
+
+            if len(raw_points_interior_blue) > 0:
+                v_i, u_i = raw_points_interior_blue.T
+                only_lines_frame[v_i, u_i] = [128, 0, 0]
 
             # Keep one valid-background representative per spatial voxel.
             if len(raw_points_white) > 0:
@@ -787,7 +797,7 @@ class VisualPtcld(Node):
 
     def publish_pointcloud(
             self, blue_points, turquoise_points, background_points,
-            width, height, header):
+            width, height, header, interior_blue_points=None):
         """Back-project the pixel classes directly into a 2D BEV cloud."""
         prepare_started_at = time.perf_counter()
         lock_ms = 0.0
@@ -836,6 +846,8 @@ class VisualPtcld(Node):
             (turquoise_points, self.LABEL_TURQUOISE),
             (background_points, self.LABEL_BACKGROUND),
         )
+        if interior_blue_points is not None:
+            point_groups += ((interior_blue_points, self.LABEL_INTERIOR_BLUE),)
         nonempty_groups = [
             (points, label) for points, label in point_groups if len(points)
         ]
@@ -915,17 +927,9 @@ class VisualPtcld(Node):
                 self.boardwalk_propagation_radius,
                 self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK)
 
-        # Blue geometry is required by the boardwalk classifier above, but it
-        # is omitted from the outgoing cloud by default. This keeps the
-        # classification behavior unchanged while reducing the published data.
-        if not self.publish_blue_points:
-            publish_mask = class_ids != self.LABEL_BLUE
-            bev_points = bev_points[publish_mask]
-            class_ids = class_ids[publish_mask]
-
         # Downsample only the outgoing cloud. The full-resolution points above
-        # remains available to both cKDTree passes. Classes use separate 2D
-        # metric voxel keys; optional blue points pass through unchanged.
+        # remain available to both cKDTree passes. Classes use separate 2D
+        # metric voxel keys, including blue points.
         point_count_before_voxel = len(bev_points)
         voxel_started_at = time.perf_counter()
         bev_points, class_ids = self.voxelize_bev_cloud(
@@ -938,6 +942,7 @@ class VisualPtcld(Node):
                 ('published_turquoise_count', self.LABEL_TURQUOISE),
                 ('published_background_count', self.LABEL_BACKGROUND),
                 ('published_boardwalk_count', self.LABEL_BOARDWALK),
+                ('published_interior_blue_count', self.LABEL_INTERIOR_BLUE),
             )
         })
 

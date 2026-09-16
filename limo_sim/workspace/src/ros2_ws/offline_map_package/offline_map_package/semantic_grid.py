@@ -6,9 +6,14 @@ import math
 import numpy as np
 
 
-CLASS_IDS = np.array([2, 3, 4], dtype=np.uint8)
+CLASS_IDS = np.array([2, 3, 4, 5], dtype=np.uint8)
+INPUT_CLASS_IDS = np.array([1, 2, 3, 4, 5], dtype=np.uint8)
 CLASS_NAMES = ('turquoise', 'white', 'boardwalk')
 DEFAULT_COSTS = (60, 30, 90)
+# Boundary and interior blue share observed-road evidence, represented by
+# class 5 internally. Road competes for evidence with the three
+# cost classes, but is represented by zero in all existing output layers.
+ROAD_INDEX = 3
 TILE_SIZE = 32
 
 
@@ -25,8 +30,9 @@ def transform_xy(points, pose, inverse=False):
 def read_class_cloud(msg):
     """Read XYZ/class_id with offsets, row padding and endian from PointCloud2.
 
-    Only the fields used by visual_ptcld are required. Blue, invalid labels,
+    Only the fields used by visual_ptcld are required. Invalid labels,
     nonfinite points and empty clouds contribute no evidence, including misses.
+    Both blue classes (1 and 5) contribute observed-road evidence.
     """
     fields = {field.name: field for field in msg.fields}
     required = ('x', 'y', 'z', 'class_id')
@@ -56,7 +62,7 @@ def read_class_cloud(msg):
     points = np.ndarray(
         (msg.height, msg.width), dtype=dtype, buffer=msg.data,
         strides=(msg.row_step, msg.point_step))
-    valid = (np.isin(points['class_id'], CLASS_IDS)
+    valid = (np.isin(points['class_id'], INPUT_CLASS_IDS)
              & np.isfinite(points['x']) & np.isfinite(points['y'])
              & np.isfinite(points['z']))
     return (np.column_stack((points['x'][valid], points['y'][valid])),
@@ -78,6 +84,55 @@ class Geometry:
         valid = ((cells[:, 0] >= 0) & (cells[:, 0] < self.width)
                  & (cells[:, 1] >= 0) & (cells[:, 1] < self.height))
         return cells[:, 1] * self.width + cells[:, 0], valid
+
+
+class LaserEndpointGrid:
+    """Sparse set of laser endpoint cells in the global map frame."""
+
+    def __init__(self, resolution=0.05, max_cells=2000000):
+        if not math.isfinite(resolution) or resolution <= 0 or max_cells < 1:
+            raise ValueError('Invalid laser grid limits')
+        self.resolution = resolution
+        self.max_cells = max_cells
+        self.cells = set()
+
+    def update(self, points):
+        """Add finite endpoints and report whether new cells were observed."""
+        points = np.asarray(points)
+        if points.ndim != 2 or points.shape[1] != 2:
+            raise ValueError('Laser endpoints must be an N x 2 array')
+        points = points[np.isfinite(points).all(axis=1)]
+        if not len(points):
+            return False
+        cells = np.unique(
+            np.floor(points / self.resolution).astype(np.int64), axis=0)
+        additions = {tuple(cell) for cell in cells} - self.cells
+        if len(self.cells) + len(additions) > self.max_cells:
+            raise MemoryError('Laser endpoint cell limit reached; save/reset or increase max_cells')
+        self.cells.update(additions)
+        return bool(additions)
+
+    def geometry(self):
+        """Return tight axis-aligned geometry around all retained endpoints."""
+        if not self.cells:
+            return None
+        cells = np.asarray(list(self.cells), dtype=np.int64)
+        low, high = cells.min(axis=0), cells.max(axis=0)
+        width, height = high - low + 1
+        return Geometry(
+            self.resolution, int(width), int(height),
+            (low[0] * self.resolution, low[1] * self.resolution, 0.0))
+
+    def render(self, geometry):
+        """Rasterize endpoints at cost 100 and every other cell at cost 0."""
+        output = np.zeros((geometry.height, geometry.width), dtype=np.int8)
+        if not self.cells:
+            return output
+        cells = np.asarray(list(self.cells), dtype=np.float64)
+        points = (cells + 0.5) * self.resolution
+        indices, valid = geometry.indices(points)
+        output.ravel()[indices[valid]] = 100
+        return output
 
 
 class SemanticGrid:
@@ -123,10 +178,13 @@ class SemanticGrid:
         """Integrate one cloud in the selected submap's local coordinates."""
         if key not in self.poses:
             raise ValueError('Submap pose not available')
-        valid = np.isfinite(points).all(axis=1) & np.isin(labels, CLASS_IDS)
+        valid = np.isfinite(points).all(axis=1) & np.isin(labels, INPUT_CLASS_IDS)
         points, labels = points[valid], labels[valid]
         if not len(points):
             return False
+        # Both blue labels vote for the same road class within the single
+        # normalized update per cell/cloud. Boolean indexing above made a copy.
+        labels[labels == 1] = 5
         cells = np.floor(points / self.resolution).astype(np.int64)
         cells, inverse = np.unique(cells, axis=0, return_inverse=True)
         counts = np.stack([
@@ -146,7 +204,7 @@ class SemanticGrid:
         for index, tile_key in enumerate(keys):
             if tile_key not in self.tiles:
                 self.tiles[tile_key] = (
-                    np.zeros((TILE_SIZE ** 2, 3), dtype=np.float32),
+                    np.zeros((TILE_SIZE ** 2, len(CLASS_IDS)), dtype=np.float32),
                     np.zeros(TILE_SIZE ** 2, dtype=np.uint32))
                 self.allocated_cells += TILE_SIZE ** 2
             scores, seen = self.tiles[tile_key]
@@ -181,7 +239,8 @@ class SemanticGrid:
             if geometry is None:
                 return None
             world = np.empty((0, 2))
-            scores, seen = np.empty((0, 3)), np.empty(0, dtype=np.uint32)
+            scores = np.empty((0, len(CLASS_IDS)))
+            seen = np.empty(0, dtype=np.uint32)
         else:
             world = np.concatenate(positions)
             scores = np.concatenate(evidence)
@@ -216,6 +275,9 @@ class SemanticGrid:
             certain = (best >= self.threshold) & unique_best
             target, classes = indices[winners][certain], classes[certain]
             layers[:, target] = 0
+            combined[target] = 0
+            semantic = classes != ROAD_INDEX
+            target, classes = target[semantic], classes[semantic]
             layers[classes, target] = self.costs[classes]
             combined[target] = self.costs[classes]
         shape = (geometry.height, geometry.width)

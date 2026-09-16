@@ -15,7 +15,6 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     offline_share = get_package_share_directory('offline_map_package')
     rviz_share = get_package_share_directory('limo_rviz')
-    cv_share = get_package_share_directory('cv_package')
     use_sim_time = LaunchConfiguration('use_sim_time')
 
     def include(share, filename, enabled, arguments=None):
@@ -26,20 +25,16 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
-        DeclareLaunchArgument('start_cv', default_value='true'),
         DeclareLaunchArgument(
             'start_slam', default_value='true',
             description='Start existing SLAM Toolbox; set false with external Cartographer.'),
         DeclareLaunchArgument('start_rviz', default_value='true'),
         DeclareLaunchArgument('start_gui', default_value='true'),
-        DeclareLaunchArgument('publish_blue_points', default_value='false'),
         DeclareLaunchArgument('pose_source', default_value='tf',
                               description='tf, or cartographer with external submap_list.'),
         DeclareLaunchArgument('trajectory_id', default_value='0'),
         DeclareLaunchArgument('resolution', default_value='0.05'),
         DeclareLaunchArgument('save_directory', default_value=''),
-        include(cv_share, 'cv.launch.py', 'start_cv',
-                {'publish_blue_points': LaunchConfiguration('publish_blue_points')}),
         include(rviz_share, 'limo_mapping.launch.py', 'start_slam',
                 {'use_sim_time': use_sim_time}),
         Node(

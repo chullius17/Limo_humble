@@ -6,7 +6,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from offline_map_package.semantic_grid import Geometry, SemanticGrid, read_class_cloud
+from offline_map_package.semantic_grid import (
+    Geometry, LaserEndpointGrid, SemanticGrid, read_class_cloud,
+)
 
 
 def mapper():
@@ -15,13 +17,22 @@ def mapper():
     return grid
 
 
-def test_costs_and_ignored_blue():
+def test_laser_endpoint_grid_accumulates_and_rasterizes_cost_100():
+    grid = LaserEndpointGrid(resolution=1.0, max_cells=4)
+    assert grid.update(np.array([[0.1, 0.1], [2.1, 1.1], [2.9, 1.9]]))
+    assert not grid.update(np.array([[0.2, 0.2]]))
+    geometry = grid.geometry()
+    assert geometry == Geometry(1.0, 3, 2, (0.0, 0.0, 0.0))
+    assert grid.render(geometry).tolist() == [[100, 0, 0], [0, 0, 100]]
+
+
+def test_costs_and_blue_road():
     grid = mapper()
     grid.update(np.array([[0.1, 0.1], [1.1, 0.1], [2.1, 0.1], [3.1, 0.1]]),
                 np.array([1, 2, 3, 4]))
     _, layers, combined = grid.render(Geometry(1.0, 4, 1, (0, 0, 0)))
-    assert combined.tolist() == [[-1, 60, 30, 90]]
-    assert layers[:, 0].tolist() == [[-1, 60, 0, 0], [-1, 0, 30, 0], [-1, 0, 0, 90]]
+    assert combined.tolist() == [[0, 60, 30, 90]]
+    assert layers[:, 0].tolist() == [[0, 60, 0, 0], [0, 0, 30, 0], [0, 0, 0, 90]]
 
 
 def test_repeated_white_corrects_saturated_boardwalk():
@@ -38,6 +49,65 @@ def test_repeated_white_corrects_saturated_boardwalk():
     assert grid.render()[1][2, 0, 0] == 0
 
 
+@pytest.mark.parametrize('obstacle_class', [2, 3, 4])
+@pytest.mark.parametrize('road_class', [1, 5])
+def test_blue_clears_observed_cell_and_obstacles_can_return(obstacle_class, road_class):
+    grid = mapper()
+    xy = np.array([[0.1, 0.1], [1.1, 0.1]])
+    for _ in range(30):
+        grid.update(xy, np.full(2, obstacle_class))
+    old_cost = grid.render()[2][0, 0]
+    grid.update(xy[:1], np.array([road_class]))
+    assert grid.render()[2].tolist() == [[old_cost, old_cost]]
+    for _ in range(4):
+        grid.update(xy[:1], np.array([road_class]))
+    _, layers, combined = grid.render()
+    assert combined.tolist() == [[0, old_cost]]
+    assert layers[:, 0, 0].tolist() == [0, 0, 0]
+    for _ in range(30):
+        grid.update(xy[:1], np.array([road_class]))
+    for _ in range(5):
+        grid.update(xy[:1], np.array([obstacle_class]))
+    assert grid.render()[2][0, 0] == old_cost
+
+
+def test_both_blue_classes_are_road_distinct_from_unknown():
+    grid = mapper()
+    grid.update(np.array([[0.1, 0.1], [1.1, 0.1]]), np.array([5, 1]))
+    _, layers, combined = grid.render(Geometry(1.0, 3, 1, (0, 0, 0)))
+    assert combined.tolist() == [[0, 0, -1]]
+    assert layers[:, 0].tolist() == [[0, 0, -1]] * 3
+
+
+@pytest.mark.parametrize('labels', [[1, 5], [1, 5, 4]])
+def test_blue_labels_share_evidence_without_mutating_input(labels):
+    mixed, canonical = mapper(), mapper()
+    labels = np.array(labels, dtype=np.uint8)
+    original = labels.copy()
+    xy = np.full((len(labels), 2), 0.1)
+    mixed.update(xy, labels)
+    canonical.update(xy, np.where(labels == 1, 5, labels))
+    np.testing.assert_array_equal(labels, original)
+    for one, many in zip(mixed.tiles.values(), canonical.tiles.values()):
+        np.testing.assert_allclose(one[0], many[0])
+    if len(labels) == 2:
+        single = mapper()
+        single.update(xy[:1], np.array([5]))
+        for one, many in zip(single.tiles.values(), mixed.tiles.values()):
+            np.testing.assert_allclose(one[0], many[0])
+        assert mixed.render()[2].tolist() == [[0]]
+
+
+def test_mixed_road_and_obstacle_evidence_has_no_density_bias():
+    single, dense = mapper(), mapper()
+    labels = np.array([4, 5])
+    single.update(np.full((2, 2), 0.1), labels)
+    dense.update(np.full((2000, 2), 0.1), np.tile(labels, 1000))
+    for one, many in zip(single.tiles.values(), dense.tiles.values()):
+        np.testing.assert_allclose(one[0], many[0])
+    assert single.render()[2].tolist() == [[-1]]
+
+
 def test_density_does_not_multiply_confidence():
     single, dense = mapper(), mapper()
     single.update(np.array([[0.1, 0.1]]), np.array([2]))
@@ -46,13 +116,13 @@ def test_density_does_not_multiply_confidence():
         np.testing.assert_allclose(one[0], many[0])
 
 
-def test_no_free_rays_or_blue_clearing():
+def test_blue_clears_only_observed_endpoint_without_free_rays():
     grid = mapper()
     grid.update(np.array([[4.1, 0.1]]), np.array([2]))
     for _ in range(20):
-        assert not grid.update(np.array([[4.1, 0.1]]), np.array([1]))
+        assert grid.update(np.array([[4.1, 0.1]]), np.array([1]))
     _, _, combined = grid.render(Geometry(1.0, 5, 1, (0, 0, 0)))
-    assert combined.tolist() == [[-1, -1, -1, -1, 60]]
+    assert combined.tolist() == [[-1, -1, -1, -1, 0]]
 
 
 def test_negative_coordinates_use_floor():
@@ -131,10 +201,10 @@ def test_cloud_layout_and_invalid_points(endian):
     msg, points = cloud(endian)
     points['x'][0, 0] = np.nan
     points['class_id'][1, 0] = 1
-    points['class_id'][1, 1] = 4
+    points['class_id'][1, 1] = 5
     xy, labels = read_class_cloud(msg)
-    assert xy.tolist() == [[1, 2], [1, 2]]
-    assert labels.tolist() == [3, 4]
+    assert xy.tolist() == [[1, 2], [1, 2], [1, 2]]
+    assert labels.tolist() == [3, 1, 5]
 
 
 def test_cloud_rejects_bad_schema_and_truncated_buffer():
