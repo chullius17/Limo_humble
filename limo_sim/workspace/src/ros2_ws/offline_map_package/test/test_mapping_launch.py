@@ -105,7 +105,7 @@ def test_custom_profile_parameters_reach_nodes(monkeypatch, tmp_path):
 @pytest.mark.parametrize('filename,profile,mode', [
     ('map_sim.launch.py', 'sim', None),
     ('map_real.launch.py', 'real', 'backend'),
-    ('desktop.launch.py', 'real', 'desktop'),
+    ('desktop_offline.launch.py', 'real', 'desktop'),
 ])
 def test_wrappers_select_profile_and_role(filename, profile, mode):
     module = load_launch(filename)

@@ -88,10 +88,10 @@ indipendentemente dopo le prove sul robot.
 Sul PC, nel container Foxy con i pacchetti aggiornati, le sole interfacce:
 
 ```bash
-ros2 launch offline_map_package desktop.launch.py
+ros2 launch offline_map_package desktop_offline.launch.py
 ```
 
-`desktop.launch.py` apre solo RViz e Save Map, collegati ai topic e al servizio
+`desktop_offline.launch.py` apre solo RViz e Save Map, collegati ai topic e al servizio
 del robot; non avvia SLAM o mapper. I file salvati restano sulla LIMO.
 Il container deve avere accesso al display del PC e alla rete del robot
 (nel setup attuale `limo_sim` usa la rete host). Usare lo stesso `ROS_DOMAIN_ID`
@@ -127,7 +127,7 @@ I percorsi RViz relativi si riferiscono a `limo_rviz/config`.
 SLAM viene avviato direttamente con i parametri del profilo, quindi non serve
 più il workaround Foxy `params_file:=...` e non si usano i default con
 `base_footprint`. I due ingressi per il robot reale sono `map_real.launch.py`
-sulla LIMO e `desktop.launch.py` nel Docker del PC; `map.launch.py` contiene la
+sulla LIMO e `desktop_offline.launch.py` nel Docker del PC; `map.launch.py` contiene la
 logica condivisa e `map_sim.launch.py` resta l'ingresso per la simulazione.
 
 Il nodo non pubblica TF. Un TF mancante viene atteso fino a `tf_wait_sec`, poi la

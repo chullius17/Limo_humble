@@ -1,474 +1,217 @@
+"""Launch online localization or its desktop client from one YAML profile."""
+
 import os
 from pathlib import Path
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
-def find_project_root(start: Path):
-    """Find the LIMO project root from source or install paths."""
+AMCL_PARAMETER_TYPES = {
+    'base_frame_id': str,
+    'odom_frame_id': str,
+    'global_frame_id': str,
+    'scan_topic': str,
+    'tf_broadcast': bool,
+    'cv_enabled': bool,
+    'cv_cloud_topic': str,
+    'cv_buffer_size': int,
+    'cv_sync_tolerance': float,
+    'cv_voxel_size': float,
+    'cv_min_points': float,
+    'cv_occupied_threshold': int,
+    'laser_weight_factor': float,
+    'cv_weight_factor': float,
+    'cv_sad_gain': float,
+    'max_particles': int,
+    'min_particles': int,
+    'workload_logging_enabled': bool,
+    'alpha1': float,
+    'alpha2': float,
+    'alpha3': float,
+    'alpha4': float,
+}
+
+
+def _boolean(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in ('true', 'false'):
+        return value.lower() == 'true'
+    raise ValueError('Expected true or false, got {!r}'.format(value))
+
+
+def _project_root(start):
     for candidate in [start] + list(start.parents):
         if (candidate / 'src' / 'ros2_ws').is_dir():
             return candidate
     return None
 
 
-def generate_launch_description():
-    laser_weight_factor_default = '2.0'
-    cv_weight_factor_default = '1.0'
-    cv_obstacle_weight_factor_default = '1.0'
-    cv_street_weight_factor_default = '1.0'
-    cv_sad_gain_default = '20.0'
-    cv_sad_cell_size_default = '0.075'
-    cv_sad_min_cell_occupancy_default = '0.1'
-    cv_sad_min_positive_mass_default = '5.0'
-    combined_magenta_max_blue_distance_px_default = '20.0'
-    max_particles_default = '800'
-    min_particles_default = '300'
-    workload_logging_enabled_default = 'true'
-    cv_sync_tolerance_default = '0.20'
-    alpha1_default = '0.2'
-    alpha2_default = '0.2'
-    alpha3_default = '0.2'
-    alpha4_default = '0.2'
+def _profile(context):
+    config_file = os.path.expanduser(
+        LaunchConfiguration('config_file').perform(context))
+    with open(config_file, encoding='utf-8') as stream:
+        profile = yaml.safe_load(stream)
+    for section in ('launch', 'map_servers', 'amcl'):
+        if not isinstance(profile, dict) or not isinstance(
+                profile.get(section), dict):
+            raise ValueError(
+                '{}: missing YAML mapping {!r}'.format(config_file, section))
+    return profile
 
-    limo_rviz_share = get_package_share_directory('limo_rviz')
-    nav_cv_share = get_package_share_directory('cv_package')
-    cost_threshold = LaunchConfiguration('cost_threshold')
-    classification_blue_distance_threshold_px = LaunchConfiguration(
-        'classification_blue_distance_threshold_px'
-    )
-    classification_magenta_distance_threshold_px = LaunchConfiguration(
-        'classification_magenta_distance_threshold_px'
-    )
-    laser_weight_factor = LaunchConfiguration('laser_weight_factor')
-    cv_weight_factor = LaunchConfiguration('cv_weight_factor')
-    cv_obstacle_weight_factor = LaunchConfiguration(
-        'cv_obstacle_weight_factor'
-    )
-    cv_street_weight_factor = LaunchConfiguration(
-        'cv_street_weight_factor'
-    )
-    cv_sad_gain = LaunchConfiguration('cv_sad_gain')
-    cv_sad_cell_size = LaunchConfiguration('cv_sad_cell_size')
-    cv_sad_min_cell_occupancy = LaunchConfiguration(
-        'cv_sad_min_cell_occupancy'
-    )
-    cv_sad_min_positive_mass = LaunchConfiguration(
-        'cv_sad_min_positive_mass'
-    )
-    combined_magenta_max_blue_distance_px = LaunchConfiguration(
-        'combined_magenta_max_blue_distance_px'
-    )
-    max_particles = LaunchConfiguration('max_particles')
-    min_particles = LaunchConfiguration('min_particles')
-    workload_logging_enabled = LaunchConfiguration(
-        'workload_logging_enabled'
-    )
-    cv_sync_tolerance = LaunchConfiguration('cv_sync_tolerance')
-    alpha1 = LaunchConfiguration('alpha1')
-    alpha2 = LaunchConfiguration('alpha2')
-    alpha3 = LaunchConfiguration('alpha3')
-    alpha4 = LaunchConfiguration('alpha4')
-    project_root = find_project_root(Path(__file__).resolve())
-    if project_root is None:
-        raise RuntimeError('Cannot locate the LIMO project root')
-    map_directory = project_root / 'ros2_maps' / 'pipeline'
 
-    limo_rviz = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                limo_rviz_share,
-                'launch',
-                'limo_rviz.launch.py',
-            )
-        ),
-        launch_arguments={
-            'start_map_server': 'false',
-            'publish_static_map_to_odom': 'false',
-        }.items(),
-    )
+def _override(context, name, current, value_type):
+    value = LaunchConfiguration(name).perform(context)
+    selected = current if value == '' else value
+    if value_type is bool:
+        return _boolean(selected)
+    return value_type(selected)
 
-    cv_pipeline = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(nav_cv_share, 'launch', 'cv.launch.py')
-        ),
-        launch_arguments={
-            'classification_blue_distance_threshold_px': (
-                classification_blue_distance_threshold_px
-            ),
-            'classification_magenta_distance_threshold_px': (
-                classification_magenta_distance_threshold_px
-            ),
-        }.items(),
-    )
 
-    amcl = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                limo_rviz_share,
-                'launch',
-                'amcl.launch.py',
-            )
-        ),
-        launch_arguments={
-            'use_sim_time': 'true',
-            'base_frame_id': 'base_link',
-            # Keep the two AMCL sensor models independent: the laser model
-            # scores /scan only against the static laser occupancy map.
-            'map_topic': (
-                '/limo/map_package/online/maps/laser_map'
-            ),
-            # The CV model evaluates obstacle and street evidence against
-            # their respective static occupancy maps.
-            'cv_map_topic': (
-                '/limo/map_package/online/maps/cv_map'
-            ),
-            'cv_obstacle_grid_topic': (
-                '/limo/map_package/online/metric_bev/'
-                'cost_grid_binary_obstacles'
-            ),
-            'cv_street_map_topic': (
-                '/limo/map_package/online/maps/street_map'
-            ),
-            'cv_street_grid_topic': (
-                '/limo/map_package/online/metric_bev/'
-                'cost_grid_binary_street'
-            ),
-            # AMCL is the only map -> odom publisher in the online pipeline.
-            'tf_broadcast': 'true',
-            'laser_weight_factor': laser_weight_factor,
-            'cv_weight_factor': cv_weight_factor,
-            'cv_obstacle_weight_factor': cv_obstacle_weight_factor,
-            'cv_street_weight_factor': cv_street_weight_factor,
-            'cv_sad_gain': cv_sad_gain,
-            'cv_sad_cell_size': cv_sad_cell_size,
-            'cv_sad_min_cell_occupancy': cv_sad_min_cell_occupancy,
-            'cv_sad_min_positive_mass': cv_sad_min_positive_mass,
-            'max_particles': max_particles,
-            'min_particles': min_particles,
-            'workload_logging_enabled': workload_logging_enabled,
-            'cv_sync_tolerance': cv_sync_tolerance,
-            'alpha1': alpha1,
-            'alpha2': alpha2,
-            'alpha3': alpha3,
-            'alpha4': alpha4,
-        }.items(),
-    )
+def _launch_online(context):
+    profile = _profile(context)
+    settings = dict(profile['launch'])
+    for name in (
+            'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
+            'start_rviz'):
+        settings[name] = _override(context, name, settings[name], bool)
+    for name in ('rviz_config', 'fixed_frame'):
+        settings[name] = _override(context, name, settings[name], str)
 
+    mode = LaunchConfiguration('mode').perform(context)
+    if mode == 'desktop':
+        settings.update(start_cv=False, start_maps=False, start_amcl=False)
+        override = LaunchConfiguration('start_rviz').perform(context)
+        settings['start_rviz'] = _boolean(override) if override else True
+    elif mode == 'backend':
+        settings['start_rviz'] = False
+    elif mode != 'profile':
+        raise ValueError('mode must be profile, backend or desktop')
+
+    maps = dict(profile['map_servers'])
+    maps['directory'] = _override(
+        context, 'map_directory', maps.get('directory', ''), str)
+    maps['name'] = _override(context, 'map_name', maps['name'], str)
+    map_directory = os.path.expanduser(maps['directory'])
+    if settings['start_maps']:
+        if not map_directory:
+            root = _project_root(Path(__file__).resolve())
+            if root is None:
+                raise RuntimeError('Cannot locate the LIMO workspace')
+            map_directory = str(root / 'ros2_maps' / 'semantic')
+        elif not os.path.isabs(map_directory):
+            root = _project_root(Path(__file__).resolve())
+            if root is None:
+                raise RuntimeError(
+                    'A relative map directory requires a LIMO workspace')
+            map_directory = str(root / map_directory)
+
+    amcl = dict(profile['amcl'])
+    for name, value_type in AMCL_PARAMETER_TYPES.items():
+        if name not in amcl:
+            raise ValueError('AMCL profile is missing {!r}'.format(name))
+        amcl[name] = _override(context, name, amcl[name], value_type)
+
+    clock = {'use_sim_time': settings['use_sim_time']}
     map_specs = (
-        ('combined_map_server', 'limo_map_combined.yaml', '/map'),
-        (
-            'laser_map_server',
-            'limo_map_laser.yaml',
-            '/limo/map_package/online/maps/laser_map',
-        ),
-        (
-            'cv_map_server',
-            'limo_map_cv.yaml',
-            '/limo/map_package/online/maps/cv_map',
-        ),
-        (
-            'street_map_server',
-            'limo_map_street.yaml',
-            '/limo/map_package/online/maps/street_map',
-        ),
+        ('complete_map_server', '_complete.yaml', maps['complete_topic']),
+        ('laser_map_server', '_laser.yaml', maps['laser_topic']),
+        ('cv_map_server', '_cv_obstacle.yaml', maps['cv_obstacle_topic']),
     )
-    map_servers = [
-        Node(
-            package='nav2_map_server',
-            executable='map_server',
-            name=node_name,
-            output='screen',
+    actions = []
+    if settings['start_cv']:
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('cv_package'),
+                'launch', 'cv.launch.py')),
+            launch_arguments={
+                'use_sim_time': str(settings['use_sim_time']).lower(),
+            }.items(),
+        ))
+    if settings['start_maps']:
+        for name, suffix, topic in map_specs:
+            actions.append(Node(
+                package='nav2_map_server', executable='map_server',
+                name=name, output='screen', parameters=[{
+                    'yaml_filename': os.path.join(
+                        map_directory, maps['name'] + suffix),
+                    'frame_id': maps['frame_id'],
+                    **clock,
+                }], remappings=[
+                    ('map', topic),
+                    ('map_metadata', topic + '_metadata'),
+                ]))
+        actions.append(Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_online_maps', output='screen',
             parameters=[{
-                'yaml_filename': str(map_directory / yaml_name),
-                'frame_id': 'map',
-                'use_sim_time': True,
-            }],
-            remappings=[
-                ('map', map_topic),
-                ('map_metadata', f'{map_topic}_metadata'),
-            ],
-        )
-        for node_name, yaml_name, map_topic in map_specs
-    ]
-    map_lifecycle_manager = Node(
-        package='nav2_lifecycle_manager',
-        executable='lifecycle_manager',
-        name='lifecycle_manager_online_maps',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'autostart': True,
-            'node_names': [spec[0] for spec in map_specs],
-        }],
-    )
+                **clock,
+                'autostart': True,
+                'node_names': [name for name, _, _ in map_specs],
+            }]))
+    if settings['start_amcl']:
+        arguments = {
+            name: str(value).lower() if isinstance(value, bool) else str(value)
+            for name, value in amcl.items()
+        }
+        arguments.update({
+            'use_sim_time': str(settings['use_sim_time']).lower(),
+            'map_topic': maps['laser_topic'],
+            'cv_map_topic': maps['cv_obstacle_topic'],
+        })
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('limo_rviz'),
+                'launch', 'amcl.launch.py')),
+            launch_arguments=arguments.items(),
+        ))
+    if settings['start_rviz']:
+        rviz_config = os.path.expanduser(settings['rviz_config'])
+        if not os.path.isabs(rviz_config):
+            rviz_config = os.path.join(
+                get_package_share_directory('limo_rviz'),
+                'config', rviz_config)
+        actions.append(Node(
+            package='rviz2', executable='rviz2', name='rviz2',
+            output='screen',
+            arguments=['-d', rviz_config, '-f', settings['fixed_frame']],
+            parameters=[clock]))
+    return actions
 
-    online_metric_bev = Node(
-        package='online_map_package',
-        executable='online_metric_bev',
-        name='online_metric_bev',
-        output='screen',
-        parameters=[{
-            'enable_telemetry': False,
-            'binary_threshold': ParameterValue(
-                cost_threshold,
-                value_type=float,
-            ),
-            'combined_magenta_max_blue_distance_px': ParameterValue(
-                combined_magenta_max_blue_distance_px,
-                value_type=float,
-            ),
-        }],
-    )
 
-    cv_amcl_debug = Node(
-        package='online_map_package',
-        executable='cv_amcl_debug',
-        name='cv_amcl_debug',
-        output='screen',
-        parameters=[{
-            'obstacle_grid_topic': (
-                '/limo/map_package/online/metric_bev/'
-                'cost_grid_binary_obstacles'
-            ),
-            'street_grid_topic': (
-                '/limo/map_package/online/metric_bev/'
-                'cost_grid_binary_street'
-            ),
-            'obstacle_grid_subsampled_topic': (
-                '/limo/map_package/online/cv_amcl_debug/'
-                'subsampled_obstacles'
-            ),
-            'street_grid_subsampled_topic': (
-                '/limo/map_package/online/cv_amcl_debug/'
-                'subsampled_street'
-            ),
-            'sad_cell_size': ParameterValue(
-                cv_sad_cell_size,
-                value_type=float,
-            ),
-        }],
+def generate_launch_description():
+    default_config = os.path.join(
+        get_package_share_directory('online_map_package'),
+        'config', 'mapping_sim.yaml')
+    launch_overrides = (
+        'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
+        'start_rviz', 'rviz_config', 'fixed_frame',
+        'map_directory', 'map_name',
     )
-
-    map = Node(
-        package='online_map_package',
-        executable='online_map',
-        name='online_map',
-        output='screen',
-        parameters=[{
-            'global_frame': 'map',
-            'static_map_topic': '/map',
-            'cv_grid_topic': (
-                '/limo/map_package/online/metric_bev/'
-                'cost_grid_combined'
-            ),
-            'scan_topic': '/scan',
-            'output_topic': (
-                '/limo/map_package/online/map/combined_grid'
-            ),
-            'publish_rate_hz': 10.0,
-            'lidar_cost': 100,
-        }],
-    )
-
-    cv_pointcloud = Node(
-        package='online_map_package',
-        executable='cv_2_ptcld',
-        name='cv_2_ptcld',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'input_topic': (
-                '/limo/map_package/online/metric_bev/'
-                'cost_grid_combined'
-            ),
-            'output_topic': '/limo/map_package/online/cv_cloud',
-            'output_frame': 'base_link',
-            'voxel_size': 0.03,
-            'source_block_size': 5,
-            'minimum_cells_per_block': 5,
-            'minimum_cost': 30.0,
-            'maximum_points': 2000,
-            'statistics_window_cycles': 30,
-        }],
-    )
-
-    local_ptcld = Node(
-        package='online_map_package',
-        executable='local_ptcld',
-        name='local_ptcld',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'input_topic': '/limo/map_package/online/cv_cloud',
-            'output_topic': (
-                '/limo/map_package/online/local_ptcld'
-            ),
-            'base_frame': 'base_link',
-            'odometry_frame': 'odom',
-            'bounding_box_topic': (
-                '/limo/map_package/online/cloud_bounding_box'
-            ),
-            'roi_marker_topic': (
-                '/limo/map_package/online/cloud_roi'
-            ),
-            'roi_frame': 'online_metric_bev_origin_combined',
-            'roi_trapezoid_height': 1.85,
-            'roi_near_base_width': 0.60,
-            'roi_far_base_width': 2.65,
-            'bounding_box_length': 2.46,
-            'bounding_box_width': 2.66,
-            'cmd_vel_topic': '/cmd_vel',
-            'maximum_decay_per_cycle': 0.02,
-            'low_cost_threshold': 50.0,
-            'low_cost_decay_multiplier': 3.0,
-            'linear_speed_at_max_decay': 0.50,
-            'angular_speed_at_max_decay': 1.00,
-            'linear_stationary_threshold': 0.01,
-            'angular_stationary_threshold': 0.02,
-            # teleop_twist_keyboard publishes on key events, not continuously.
-            'cmd_vel_timeout_sec': 0.0,
-            'tf_lookup_timeout_sec': 0.0,
-            'maximum_tf_age_sec': 0.03,
-            'minimum_confidence': 0.30,
-            'maximum_points': 2000,
-            'point_statistics_window_cycles': 30,
-        }],
-    )
-
     return LaunchDescription([
         DeclareLaunchArgument(
-            'cost_threshold',
-            default_value='40.0',
+            'config_file', default_value=default_config,
             description=(
-                'Threshold used by obstacle and street binary CV grids.'
-            ),
-        ),
+                'Online localization profile YAML containing launch, map '
+                'server and AMCL settings.')),
         DeclareLaunchArgument(
-            'classification_blue_distance_threshold_px',
-            default_value='10.0',
-            description='CV classification distance from blue in pixels.',
-        ),
-        DeclareLaunchArgument(
-            'classification_magenta_distance_threshold_px',
-            default_value='0.0',
-            description='CV classification distance from magenta in pixels.',
-        ),
-        DeclareLaunchArgument(
-            'laser_weight_factor',
-            default_value=laser_weight_factor_default,
-            description='Exponent applied to the normalized laser weight.',
-        ),
-        DeclareLaunchArgument(
-            'cv_weight_factor',
-            default_value=cv_weight_factor_default,
-            description='Exponent applied to the CV SAD likelihood.',
-        ),
-        DeclareLaunchArgument(
-            'cv_obstacle_weight_factor',
-            default_value=cv_obstacle_weight_factor_default,
+            'mode', default_value='profile',
             description=(
-                'Relative obstacle evidence factor; zero disables '
-                'obstacle SAD.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'cv_street_weight_factor',
-            default_value=cv_street_weight_factor_default,
-            description=(
-                'Relative street evidence factor; zero disables street SAD.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'cv_sad_gain',
-            default_value=cv_sad_gain_default,
-            description='Gain converting normalized SAD into likelihood.',
-        ),
-        DeclareLaunchArgument(
-            'cv_sad_cell_size',
-            default_value=cv_sad_cell_size_default,
-            description='Regular SAD template sampling size in metres.',
-        ),
-        DeclareLaunchArgument(
-            'cv_sad_min_cell_occupancy',
-            default_value=cv_sad_min_cell_occupancy_default,
-            description=(
-                'Minimum occupied fraction retained in a local SAD cell.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'cv_sad_min_positive_mass',
-            default_value=cv_sad_min_positive_mass_default,
-            description=(
-                'Minimum foreground mass required for a CV class to vote.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'combined_magenta_max_blue_distance_px',
-            default_value=combined_magenta_max_blue_distance_px_default,
-            description=(
-                'Maximum magenta-to-blue distance retained in the combined '
-                'metric BEV grid, in pixels.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'max_particles',
-            default_value=max_particles_default,
-            description=(
-                'Maximum AMCL particle count, limited for Jetson Nano.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'min_particles',
-            default_value=min_particles_default,
-            description=(
-                'Minimum AMCL particle count used by adaptive sampling.'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'workload_logging_enabled',
-            default_value=workload_logging_enabled_default,
-            description='Publish throttled AMCL and CV workload counters.',
-        ),
-        DeclareLaunchArgument(
-            'cv_sync_tolerance',
-            default_value=cv_sync_tolerance_default,
-            description='Maximum laser-to-CV timestamp error in seconds.',
-        ),
-        DeclareLaunchArgument(
-            'alpha1',
-            default_value=alpha1_default,
-            description='Rotation noise caused by Ackermann rotation.',
-        ),
-        DeclareLaunchArgument(
-            'alpha2',
-            default_value=alpha2_default,
-            description='Rotation/steering noise caused by translation.',
-        ),
-        DeclareLaunchArgument(
-            'alpha3',
-            default_value=alpha3_default,
-            description='Translation noise caused by translation.',
-        ),
-        DeclareLaunchArgument(
-            'alpha4',
-            default_value=alpha4_default,
-            description='Translation noise caused by Ackermann rotation.',
-        ),
-        limo_rviz,
-        cv_pipeline,
-        amcl,
-        *map_servers,
-        map_lifecycle_manager,
-        online_metric_bev,
-        cv_amcl_debug,
-        map,
-        cv_pointcloud,
-        local_ptcld,
+                'profile: use YAML; backend: no RViz; desktop: RViz only.')),
+        *[DeclareLaunchArgument(
+            name, default_value='',
+            description='Override YAML; empty uses the profile.')
+          for name in launch_overrides + tuple(AMCL_PARAMETER_TYPES)],
+        OpaqueFunction(function=_launch_online),
     ])

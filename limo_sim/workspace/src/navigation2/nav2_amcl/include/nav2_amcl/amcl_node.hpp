@@ -22,6 +22,7 @@
 #define NAV2_AMCL__AMCL_NODE_HPP_
 
 #include <atomic>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -34,10 +35,12 @@
 #include "nav2_util/lifecycle_node.hpp"
 #include "nav2_amcl/motion_model/motion_model.hpp"
 #include "nav2_amcl/sensors/laser/laser.hpp"
+#include "nav2_amcl/sensors/cv/cv_likelihood_model.hpp"
 #include "nav2_msgs/msg/particle.hpp"
 #include "nav2_msgs/msg/particle_cloud.hpp"
 #include "nav_msgs/srv/set_map.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
 #include "std_srvs/srv/empty.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
@@ -122,6 +125,29 @@ protected:
     particle_cloud_pub_;
   void initialPoseReceived(geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
   void laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan);
+
+  // Semantic point clouds are buffered independently of the laser map.
+  void cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
+  void cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
+  bool applyCvFusion(pf_sample_set_t * set, const builtin_interfaces::msg::Time & stamp);
+  std::mutex cv_mutex_;
+  std::unique_ptr<CvLikelihoodModel> cv_likelihood_model_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr cv_map_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cv_cloud_sub_;
+  std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> cv_cloud_buffer_;
+  sensor_msgs::msg::PointCloud2::ConstSharedPtr last_fused_cv_cloud_;
+  bool cv_enabled_{false};
+  bool workload_logging_enabled_{true};
+  std::string cv_map_topic_;
+  std::string cv_cloud_topic_;
+  int cv_buffer_size_{10};
+  int cv_occupied_threshold_{50};
+  double cv_sync_tolerance_{0.2};
+  double cv_voxel_size_{0.075};
+  double cv_min_points_{5.0};
+  double cv_sad_gain_{20.0};
+  double laser_weight_factor_{1.0};
+  double cv_weight_factor_{0.25};
 
   // Services and service callbacks
   void initServices();

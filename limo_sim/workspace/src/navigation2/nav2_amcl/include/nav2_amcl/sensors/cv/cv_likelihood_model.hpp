@@ -25,7 +25,7 @@
 namespace nav2_amcl
 {
 
-/** @brief One sampled local OccupancyGrid cell expressed in the robot frame. */
+/** @brief One positive semantic observation expressed in the robot frame. */
 struct CvTemplateCell2D
 {
   double x;
@@ -35,7 +35,7 @@ struct CvTemplateCell2D
 
 /**
  * @class CvLikelihoodModel
- * @brief Evaluate particle poses using semantic grid SAD matching.
+ * @brief Evaluate particle poses using positive semantic evidence against a binary map.
  */
 class CvLikelihoodModel
 {
@@ -51,7 +51,7 @@ public:
   struct SadScoreResult
   {
     std::vector<double> normalized_sad;
-    /// Foreground mass after fractional grid downsampling.
+    /// Sum of positive observation weights (one per occupied point-cloud voxel).
     double positive_mass{0.0};
   };
 
@@ -73,14 +73,20 @@ public:
   /**
    * @brief Compare positive local evidence with its matching static CV map.
    *
-   * Only false-positive semantic mismatches vote: a local obstacle or street
-   * cell is penalized when it lands outside the corresponding static class.
-   * White local cells carry no evidence. Fractional occupancy produced by
-   * downsampling acts as confidence and supplies the normalization mass.
+   * Each observed obstacle is penalized when it lands outside static occupied
+   * cells, including unknown and off-map locations (the Humble SAD rule).
+   * Unobserved space supplies no negative evidence. All selected semantic
+   * classes, including WHITE, contribute equally after voxelization.
    */
   SadScoreResult scoreSad(
     const pf_sample_set_t * set,
     const std::vector<CvTemplateCell2D> & cells) const;
+
+  /// Humble fusion rule: normalized laser weight^a * exp(-b * gain * SAD).
+  /// Returns false without modifying weights when inputs are invalid.
+  static bool fuseWeights(
+    pf_sample_set_t * set, const SadScoreResult & score,
+    double laser_factor, double cv_factor, double gain);
 
 private:
   /// Validated model parameters supplied by AmclNode during configuration.

@@ -34,7 +34,7 @@ def generate_launch_description():
 
     online_map_launch = _include(
         'online_map_package',
-        'online_map.launch.py',
+        'online_map_sim.launch.py',
     )
     trajectory_launch = _include(
         'traj_package',

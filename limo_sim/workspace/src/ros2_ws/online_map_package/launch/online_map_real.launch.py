@@ -1,4 +1,4 @@
-"""Start RViz and Map Saver in the PC container for the physical LIMO."""
+"""Start headless online localization on the physical LIMO."""
 
 import os
 
@@ -9,11 +9,13 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def generate_launch_description():
-    share = get_package_share_directory('offline_map_package')
+    share = get_package_share_directory('online_map_package')
     return LaunchDescription([IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'map.launch.py')),
+        PythonLaunchDescriptionSource(os.path.join(
+            share, 'launch', 'online_map.launch.py')),
         launch_arguments={
-            'config_file': os.path.join(share, 'config', 'mapping_real.yaml'),
-            'mode': 'desktop',
+            'config_file': os.path.join(
+                share, 'config', 'mapping_real.yaml'),
+            'mode': 'backend',
         }.items(),
     )])

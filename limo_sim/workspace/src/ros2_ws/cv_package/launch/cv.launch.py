@@ -1,10 +1,13 @@
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.substitutions import LaunchConfiguration
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.event_handlers import OnProcessStart
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    use_sim_time = ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool)
     lane_node = Node(
             package='cv_package',
             executable='lane_detector',
@@ -12,6 +15,7 @@ def generate_launch_description():
             output='screen',
             emulate_tty=True,
             parameters=[{
+                'use_sim_time': use_sim_time,
                 'enable_telemetry': False,
                 'rgb_topic': '/rgb/image_raw',
                 'roi_y_min': 0.1,
@@ -33,6 +37,7 @@ def generate_launch_description():
             'BLIS_NUM_THREADS': '1',
         },
         parameters=[{
+            'use_sim_time': use_sim_time,
             'opencv_num_threads': 1,
             'enable_telemetry': True,
             'roi_y_min': 0.0,
@@ -75,6 +80,7 @@ def generate_launch_description():
         output='screen',
         emulate_tty=True,
         parameters=[{
+            'use_sim_time': use_sim_time,
             'input_topic': '/depth_camera/depth/image_raw',
             'camera_info_topic': '/depth_camera/depth/camera_info',
             'enable_telemetry': False,
@@ -89,6 +95,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
         lane_node,
         depth_correction_node,
         boundary_trigger,

@@ -40,6 +40,7 @@ set(library_name ${executable_name}_core)
 
 add_library(${library_name} SHARED
   src/amcl_node.cpp
+  src/amcl_cv.cpp
 )
 
 target_include_directories(${library_name} PRIVATE src/include)
@@ -93,6 +94,16 @@ install(DIRECTORY include/
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_cv_cloud test/test_cv_cloud.cpp)
+  ament_target_dependencies(test_cv_cloud nav_msgs sensor_msgs tf2)
+  target_link_libraries(test_cv_cloud sensors_lib map_lib pf_lib)
+  ament_add_gtest(test_cv_sync test/test_cv_sync.cpp)
+  ament_target_dependencies(test_cv_sync ${dependencies})
+  target_link_libraries(test_cv_sync ${library_name})
+  # Foxy's cppcheck 1.90 cannot parse GoogleTest macros. Keep analysis on
+  # production code; the tests above are compiled and executed by CTest.
+  set(ament_cmake_cppcheck_ADDITIONAL_EXCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/test/*")
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   set(ament_cmake_copyright_FOUND TRUE)

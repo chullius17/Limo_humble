@@ -1,0 +1,42 @@
+# Read by online_map.launch.py; this is not a ROS --params-file.
+# Robot: wall clock and headless localization; CV/sensors already run onboard.
+launch:
+  use_sim_time: false
+  start_cv: false
+  start_maps: true
+  start_amcl: true
+  start_rviz: false
+  rviz_config: online_map.rviz  # Used by desktop_online.launch.py on the PC.
+  fixed_frame: map
+
+map_servers:
+  directory: ''  # ros2_maps/semantic in the workspace running the backend.
+  name: limo_map
+  frame_id: map
+  complete_topic: /map
+  laser_topic: /limo/map_package/online/maps/laser_map
+  cv_obstacle_topic: /limo/map_package/online/maps/cv_obstacle
+
+amcl:
+  base_frame_id: base_link
+  odom_frame_id: odom
+  global_frame_id: map
+  scan_topic: /scan
+  tf_broadcast: true
+  cv_enabled: true
+  cv_cloud_topic: /limo/cv_package/visual_ptcld/points
+  cv_buffer_size: 10
+  cv_sync_tolerance: 0.20
+  cv_voxel_size: 0.075
+  cv_min_points: 5.0
+  cv_occupied_threshold: 50
+  laser_weight_factor: 2.0
+  cv_weight_factor: 1.0
+  cv_sad_gain: 20.0
+  max_particles: 800
+  min_particles: 300
+  workload_logging_enabled: true
+  alpha1: 0.2
+  alpha2: 0.2
+  alpha3: 0.2
+  alpha4: 0.2

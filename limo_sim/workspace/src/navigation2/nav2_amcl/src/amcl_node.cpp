@@ -23,6 +23,7 @@
 #include "nav2_amcl/amcl_node.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
@@ -218,6 +219,23 @@ AmclNode::AmclNode()
     "scan_topic", rclcpp::ParameterValue("scan"),
     "Topic to subscribe to in order to receive the laser scan for localization");
 
+  add_parameter("cv_enabled", rclcpp::ParameterValue(false));
+  add_parameter(
+    "cv_map_topic", rclcpp::ParameterValue(
+      std::string("/limo/map_package/online/maps/cv_obstacle")));
+  add_parameter(
+    "cv_cloud_topic", rclcpp::ParameterValue(
+      std::string("/limo/cv_package/visual_ptcld/points")));
+  add_parameter("cv_buffer_size", rclcpp::ParameterValue(10));
+  add_parameter("cv_sync_tolerance", rclcpp::ParameterValue(0.2));
+  add_parameter("cv_voxel_size", rclcpp::ParameterValue(0.075));
+  add_parameter("cv_min_points", rclcpp::ParameterValue(5.0));
+  add_parameter("cv_occupied_threshold", rclcpp::ParameterValue(50));
+  add_parameter("cv_sad_gain", rclcpp::ParameterValue(20.0));
+  add_parameter("laser_weight_factor", rclcpp::ParameterValue(1.0));
+  add_parameter("cv_weight_factor", rclcpp::ParameterValue(0.25));
+  add_parameter("workload_logging_enabled", rclcpp::ParameterValue(true));
+
   add_parameter(
     "map_topic", rclcpp::ParameterValue("map"),
     "Topic to subscribe to in order to receive the map to localize on");
@@ -335,6 +353,16 @@ AmclNode::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   laser_scan_connection_.disconnect();
   laser_scan_filter_.reset();
   laser_scan_sub_.reset();
+
+  cv_cloud_sub_.reset();
+  cv_map_sub_.reset();
+  {
+    std::lock_guard<std::mutex> lock(cv_mutex_);
+    cv_cloud_buffer_.clear();
+    last_fused_cv_cloud_.reset();
+    cv_likelihood_model_.reset();
+  }
+  map_sub_.reset();
 
   // Map
   map_free(map_);
@@ -698,7 +726,13 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
 
   // If the robot has moved, update the filter
   if (lasers_update_[laser_index]) {
-    updateFilter(laser_index, laser_scan, pose);
+    if (!updateFilter(laser_index, laser_scan, pose)) {
+      return;
+    }
+    // Same ordering as Humble: normalized laser weights, CV fusion, resampling.
+    if (cv_enabled_) {
+      applyCvFusion(pf_->sets + pf_->current_set, laser_scan->header.stamp);
+    }
     if (resample_interval_ == 0) {
       RCLCPP_WARN(
         get_logger(), "You've set resample_interval to be zero,"
@@ -863,7 +897,9 @@ bool AmclNode::updateFilter(
     ldata.ranges[i][1] = angle_min +
       (i * angle_increment);
   }
-  lasers_[laser_index]->sensorUpdate(pf_, reinterpret_cast<nav2_amcl::LaserData *>(&ldata));
+  if (!lasers_[laser_index]->sensorUpdate(pf_, &ldata)) {
+    return false;
+  }
   lasers_update_[laser_index] = false;
   pf_odom_pose_ = pose;
   return true;
@@ -1112,6 +1148,38 @@ AmclNode::initParameters()
   get_parameter("always_reset_initial_pose", always_reset_initial_pose_);
   get_parameter("scan_topic", scan_topic_);
   get_parameter("map_topic", map_topic_);
+  get_parameter("cv_enabled", cv_enabled_);
+  get_parameter("cv_map_topic", cv_map_topic_);
+  get_parameter("cv_cloud_topic", cv_cloud_topic_);
+  get_parameter("cv_buffer_size", cv_buffer_size_);
+  get_parameter("cv_sync_tolerance", cv_sync_tolerance_);
+  get_parameter("cv_voxel_size", cv_voxel_size_);
+  get_parameter("cv_min_points", cv_min_points_);
+  get_parameter("cv_occupied_threshold", cv_occupied_threshold_);
+  get_parameter("cv_sad_gain", cv_sad_gain_);
+  get_parameter("laser_weight_factor", laser_weight_factor_);
+  get_parameter("cv_weight_factor", cv_weight_factor_);
+  get_parameter("workload_logging_enabled", workload_logging_enabled_);
+
+  const auto valid_double = [this](double & value, double fallback, double minimum,
+      const char * name) {
+      if (!std::isfinite(value) || value < minimum) {
+        RCLCPP_WARN(get_logger(), "Invalid %s; using %.3f", name, fallback);
+        value = fallback;
+      }
+    };
+  valid_double(cv_sync_tolerance_, 0.2, 0.0, "cv_sync_tolerance");
+  valid_double(cv_voxel_size_, 0.075, 1e-6, "cv_voxel_size");
+  valid_double(cv_min_points_, 5.0, 1.0, "cv_min_points");
+  valid_double(cv_sad_gain_, 20.0, 0.0, "cv_sad_gain");
+  valid_double(laser_weight_factor_, 1.0, 0.0, "laser_weight_factor");
+  valid_double(cv_weight_factor_, 0.25, 0.0, "cv_weight_factor");
+  if (cv_buffer_size_ < 1) {
+    cv_buffer_size_ = 10;
+  }
+  if (cv_occupied_threshold_ < 1 || cv_occupied_threshold_ > 100) {
+    cv_occupied_threshold_ = 50;
+  }
 
   save_pose_period_ = tf2::durationFromSec(1.0 / save_pose_rate);
   transform_tolerance_ = tf2::durationFromSec(tmp_tol);
@@ -1290,6 +1358,20 @@ AmclNode::initPubSub()
     map_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable(),
     std::bind(&AmclNode::mapReceived, this, std::placeholders::_1));
 
+  if (cv_enabled_) {
+    CvLikelihoodModel::Parameters parameters;
+    parameters.occupied_threshold = cv_occupied_threshold_;
+    cv_likelihood_model_ = std::make_unique<CvLikelihoodModel>(parameters);
+    cv_map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
+      cv_map_topic_, rclcpp::QoS(1).transient_local().reliable(),
+      std::bind(&AmclNode::cvMapReceived, this, std::placeholders::_1));
+    cv_cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+      cv_cloud_topic_, rclcpp::SensorDataQoS(),
+      std::bind(&AmclNode::cvCloudReceived, this, std::placeholders::_1));
+    RCLCPP_INFO(
+      get_logger(), "CV cloud fusion: %s -> %s, XY voxel %.3f m, classes 2/3/4",
+      cv_cloud_topic_.c_str(), cv_map_topic_.c_str(), cv_voxel_size_);
+  }
   RCLCPP_INFO(get_logger(), "Subscribed to map topic.");
 }
 

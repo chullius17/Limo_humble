@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <vector>
 
 namespace nav2_amcl
@@ -44,6 +45,7 @@ bool CvLikelihoodModel::setMap(const nav_msgs::msg::OccupancyGrid & map_msg)
     static_cast<std::size_t>(height);
   if (
     width <= 0 || height <= 0 || map_msg.info.resolution <= 0.0 ||
+    !std::isfinite(map_msg.info.resolution) ||
     map_msg.data.size() != expected_size)
   {
     return false;
@@ -61,8 +63,7 @@ bool CvLikelihoodModel::setMap(const nav_msgs::msg::OccupancyGrid & map_msg)
     return false;
   }
 
-  // Unknown and free cells are both non-obstacles, matching the Python
-  // occupancy >= threshold mask used by cv_amcl_debug.
+  // Preserve Humble SAD semantics: unknown and free cells are non-obstacles.
   for (std::size_t index = 0; index < expected_size; ++index) {
     new_map->cells[index].occ_state =
       map_msg.data[index] >= parameters_.occupied_threshold ? 1 : -1;
@@ -108,8 +109,8 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
   // ignored because this semantic detector does not distinguish a confident
   // negative from a missed or unavailable classification.
   for (const auto & cell : cells) {
-    if (std::isfinite(cell.occupancy)) {
-      const double occupancy = std::clamp(cell.occupancy, 0.0, 1.0);
+    if (std::isfinite(cell.occupancy) && std::isfinite(cell.x) && std::isfinite(cell.y)) {
+      const double occupancy = std::max(0.0, std::min(cell.occupancy, 1.0));
       result.positive_mass += occupancy;
     }
   }
@@ -124,7 +125,12 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
     double false_positive_sum = 0.0;
 
     for (const auto & cell : cells) {
-      const double local_positive = std::clamp(cell.occupancy, 0.0, 1.0);
+      if (!std::isfinite(cell.x) || !std::isfinite(cell.y) ||
+        !std::isfinite(cell.occupancy))
+      {
+        continue;
+      }
+      const double local_positive = std::max(0.0, std::min(cell.occupancy, 1.0));
       if (local_positive <= 0.0) {
         continue;
       }
@@ -135,14 +141,17 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
       const double delta_y = world_y - map_origin_y_;
       const double local_x = map_origin_cos_ * delta_x + map_origin_sin_ * delta_y;
       const double local_y = -map_origin_sin_ * delta_x + map_origin_cos_ * delta_y;
-      const int column = static_cast<int>(std::floor(local_x / map_->scale));
-      const int row = static_cast<int>(std::floor(local_y / map_->scale));
-
-      // An off-map positive observation receives maximum disagreement.
-      if (!MAP_VALID(map_, column, row)) {
+      const double column_d = std::floor(local_x / map_->scale);
+      const double row_d = std::floor(local_y / map_->scale);
+      if (!std::isfinite(column_d) || !std::isfinite(row_d) ||
+        column_d < 0 || column_d >= map_->size_x || row_d < 0 || row_d >= map_->size_y)
+      {
         false_positive_sum += local_positive;
         continue;
       }
+      const int column = static_cast<int>(column_d);
+      const int row = static_cast<int>(row_d);
+
       const double static_occupancy =
         map_->cells[MAP_INDEX(map_, column, row)].occ_state > 0 ? 1.0 : 0.0;
       false_positive_sum += local_positive * (1.0 - static_occupancy);
@@ -153,6 +162,46 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
     result.normalized_sad[output_index] = normalized_sad;
   }
   return result;
+}
+
+bool CvLikelihoodModel::fuseWeights(
+  pf_sample_set_t * set, const SadScoreResult & score,
+  double laser_factor, double cv_factor, double gain)
+{
+  if (!set || set->sample_count <= 0 ||
+    score.normalized_sad.size() != static_cast<std::size_t>(set->sample_count) ||
+    !std::isfinite(laser_factor) || laser_factor < 0.0 ||
+    !std::isfinite(cv_factor) || cv_factor < 0.0 || !std::isfinite(gain) || gain < 0.0)
+  {
+    return false;
+  }
+  std::vector<double> weights(set->sample_count);
+  double maximum = -std::numeric_limits<double>::infinity();
+  for (int i = 0; i < set->sample_count; ++i) {
+    if (!std::isfinite(set->samples[i].weight) || set->samples[i].weight < 0.0 ||
+      !std::isfinite(score.normalized_sad[i]))
+    {
+      return false;
+    }
+    weights[i] = laser_factor * std::log(std::max(set->samples[i].weight, 1e-300)) -
+      cv_factor * gain * score.normalized_sad[i];
+    if (!std::isfinite(weights[i])) {
+      return false;
+    }
+    maximum = std::max(maximum, weights[i]);
+  }
+  double total = 0.0;
+  for (auto & weight : weights) {
+    weight = std::exp(weight - maximum);
+    total += weight;
+  }
+  if (!std::isfinite(total) || total <= 0.0) {
+    return false;
+  }
+  for (int i = 0; i < set->sample_count; ++i) {
+    set->samples[i].weight = weights[i] / total;
+  }
+  return true;
 }
 
 }  // namespace nav2_amcl
