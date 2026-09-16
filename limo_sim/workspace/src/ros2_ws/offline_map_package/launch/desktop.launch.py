@@ -1,4 +1,4 @@
-"""Compatibility entry point for the robot profile's desktop GUI clients."""
+"""Start RViz and Map Saver in the PC container for the physical LIMO."""
 
 import os
 

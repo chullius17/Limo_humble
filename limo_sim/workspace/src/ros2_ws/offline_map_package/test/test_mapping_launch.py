@@ -102,13 +102,20 @@ def test_custom_profile_parameters_reach_nodes(monkeypatch, tmp_path):
     assert nodes['map_save_gui']['values']['save_service'] == '/test_save'
 
 
-@pytest.mark.parametrize('profile', ['sim', 'real'])
-def test_wrappers_only_select_profile(profile):
-    module = load_launch('map_' + profile + '.launch.py')
+@pytest.mark.parametrize('filename,profile,mode', [
+    ('map_sim.launch.py', 'sim', None),
+    ('map_real.launch.py', 'real', 'backend'),
+    ('desktop.launch.py', 'real', 'desktop'),
+])
+def test_wrappers_select_profile_and_role(filename, profile, mode):
+    module = load_launch(filename)
     actions = module.generate_launch_description().entities
     assert len(actions) == 1
-    assert dict(actions[0].launch_arguments) == {
+    expected = {
         'config_file': str(PACKAGE / 'config' / ('mapping_' + profile + '.yaml'))}
+    if mode is not None:
+        expected['mode'] = mode
+    assert dict(actions[0].launch_arguments) == expected
 
 
 @pytest.mark.parametrize('overrides', [{'use_sim_time': 'typo'}, {'mode': 'typo'}])

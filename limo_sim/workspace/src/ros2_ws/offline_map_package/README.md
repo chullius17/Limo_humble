@@ -80,23 +80,35 @@ Sul robot reale (sensori, EKF e computer vision già attivi):
 ros2 launch offline_map_package map_real.launch.py
 ```
 
-Questo secondo wrapper usa `mapping_real.yaml`: tempo reale, `base_link`,
-stessi topic del bringup fisico e nessuna finestra sul robot. Il tuning
+Questo launch usa `mapping_real.yaml` e forza `mode:=backend`: avvia SLAM e
+mapper con tempo reale, `base_link` e nessuna finestra sul robot. Il tuning
 semantico/SLAM resta quello esistente; i due YAML permettono di modificarlo
 indipendentemente dopo le prove sul robot.
 
 Sul PC, nel container Foxy con i pacchetti aggiornati, le sole interfacce:
 
 ```bash
-ros2 launch offline_map_package map_real.launch.py mode:=desktop
+ros2 launch offline_map_package desktop.launch.py
 ```
 
-Oppure dal terminale grafico del PC, nella directory `workspace/src` di questo
-checkout: `bash scripts/limo_gui.sh`. Lo script usa lo stesso launch principale
-e il profilo reale, anche se il container monta una copia diversa del workspace.
-Per il profilo simulato: `bash scripts/limo_gui.sh --profile sim`.
-`mode:=desktop` non avvia SLAM o mapper; apre RViz e Save Map, collegati al robot.
-I file salvati restano sulla macchina dove gira il mapper.
+`desktop.launch.py` apre solo RViz e Save Map, collegati ai topic e al servizio
+del robot; non avvia SLAM o mapper. I file salvati restano sulla LIMO.
+Il container deve avere accesso al display del PC e alla rete del robot
+(nel setup attuale `limo_sim` usa la rete host). Usare lo stesso `ROS_DOMAIN_ID`
+su entrambe le macchine, normalmente `0`, e `ROS_LOCALHOST_ONLY=0`.
+
+Prima del primo avvio, aggiornare questo pacchetto nel workspace di entrambe
+le macchine, poi dalla radice di ciascun workspace eseguire:
+
+```bash
+source /opt/ros/foxy/setup.bash
+colcon build --symlink-install --packages-select offline_map_package
+source install/setup.bash
+```
+
+Il workspace montato nel Docker del PC può essere una copia diversa da questo
+checkout: verificare che contenga i launch aggiornati. Per fermare la mappatura
+e le finestre, premere `Ctrl-C` nei rispettivi terminali.
 
 `map.launch.py` senza argomenti mantiene il profilo simulato. Per un file proprio:
 
@@ -114,7 +126,9 @@ I percorsi RViz relativi si riferiscono a `limo_rviz/config`.
 
 SLAM viene avviato direttamente con i parametri del profilo, quindi non serve
 più il workaround Foxy `params_file:=...` e non si usano i default con
-`base_footprint`. `desktop.launch.py` resta un alias compatibile per le GUI reali.
+`base_footprint`. I due ingressi per il robot reale sono `map_real.launch.py`
+sulla LIMO e `desktop.launch.py` nel Docker del PC; `map.launch.py` contiene la
+logica condivisa e `map_sim.launch.py` resta l'ingresso per la simulazione.
 
 Il nodo non pubblica TF. Un TF mancante viene atteso fino a `tf_wait_sec`, poi la
 cloud viene scartata; non si ripiega sulla posa più recente. Timestamp duplicati
