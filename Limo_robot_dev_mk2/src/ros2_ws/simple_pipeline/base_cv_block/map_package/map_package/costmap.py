@@ -23,14 +23,15 @@ from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoS
 
 class Costmap(Node):
     """
-    Converts the turquoise and white channels of a BEV image into ROS2 costmaps.
+    Converts the turquoise, white and magenta channels into ROS2 costmaps.
     """
 
-    COLORS = ['TURQUOISE', 'WHITE']
+    COLORS = ['TURQUOISE', 'WHITE', 'MAGENTA']
 
     COLOR_MAP = {
         'TURQUOISE': np.array([255, 255,   0], dtype=np.uint8),
         'WHITE': np.array([255, 255, 255], dtype=np.uint8),
+        'MAGENTA': np.array([255,   0, 255], dtype=np.uint8),
     }
 
     TOLERANCE = 30          # Pixel-value tolerance for color matching
@@ -42,6 +43,7 @@ class Costmap(Node):
             'interior_max_cost': 100.0,   # max cost at the core of thick blobs
             'interior_radius': 220,         # px of interior depth needed to saturate
         },
+        'MAGENTA': {'peak_cost': 100.0, 'radius': 2},
     }
 
     DECAY = 8.0
@@ -74,7 +76,7 @@ class Costmap(Node):
         self.colors = self.COLORS
         self.color_map = self.COLOR_MAP
         self.config_map = self.CONFIG_MAP
-        self.get_logger().info('Using TURQUOISE and WHITE color maps')
+        self.get_logger().info('Using TURQUOISE, WHITE and MAGENTA color maps')
 
         # Global (color-independent) parameters
         self.declare_parameter('fixed_frame', 'base_link')
@@ -105,7 +107,7 @@ class Costmap(Node):
         # Single subscription shared by all active colors
         self.bev_sub = self.create_subscription(
             Image,
-            'limo/cv_package/bev/bird_perspective/raw',
+            'limo/cv_package/classification/output/raw',
             self.bev_callback,
             10
         )

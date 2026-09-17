@@ -1,0 +1,321 @@
+[INFO] [launch]: All log files can be found below /root/.ros/log/2026-09-17-08-40-51-267922-giulio-ASUS-TUF-Gaming-A15-FA507XI-FA507XI-1344
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [lane_detector-1]: process started with pid [1346]
+[INFO] [classification-2]: process started with pid [1348]
+[INFO] [amcl-3]: process started with pid [1350]
+[INFO] [lifecycle_manager-4]: process started with pid [1352]
+[INFO] [map_server-5]: process started with pid [1354]
+[INFO] [map_server-6]: process started with pid [1356]
+[INFO] [map_server-7]: process started with pid [1358]
+[INFO] [map_server-8]: process started with pid [1360]
+[INFO] [lifecycle_manager-9]: process started with pid [1362]
+[INFO] [online_metric_bev-10]: process started with pid [1364]
+[INFO] [cv_amcl_debug-11]: process started with pid [1366]
+[INFO] [online_nav_map-12]: process started with pid [1368]
+[INFO] [cv_2_ptcld-13]: process started with pid [1370]
+[INFO] [local_ptcld-14]: process started with pid [1372]
+[INFO] [boundaries-15]: process started with pid [1382]
+[INFO] [bev_node-16]: process started with pid [1415]
+[amcl-3] [INFO] [1789634451.363334728] [amcl]: 
+[amcl-3] 	amcl lifecycle node launched. 
+[amcl-3] 	Waiting on external lifecycle transitions to activate
+[amcl-3] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[amcl-3] [INFO] [1789634451.364226223] [amcl]: Creating
+[lifecycle_manager-9] [INFO] [1789634451.365397258] [lifecycle_manager_online_maps]: Creating
+[lifecycle_manager-9] [INFO] [1789634451.368261987] [lifecycle_manager_online_maps]: [34m[1mCreating and initializing lifecycle service clients[0m[0m
+[lifecycle_manager-4] [INFO] [1789634451.377654195] [lifecycle_manager_amcl]: Creating
+[lifecycle_manager-4] [INFO] [1789634451.382097695] [lifecycle_manager_amcl]: [34m[1mCreating and initializing lifecycle service clients[0m[0m
+[map_server-8] [INFO] [1789634451.382459086] [street_map_server]: 
+[map_server-8] 	street_map_server lifecycle node launched. 
+[map_server-8] 	Waiting on external lifecycle transitions to activate
+[map_server-8] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[map_server-8] [INFO] [1789634451.382576444] [street_map_server]: Creating
+[lifecycle_manager-4] [INFO] [1789634451.385194164] [lifecycle_manager_amcl]: [34m[1mStarting managed nodes bringup...[0m[0m
+[lifecycle_manager-4] [INFO] [1789634451.385999099] [lifecycle_manager_amcl]: [34m[1mConfiguring amcl[0m[0m
+[amcl-3] [INFO] [1789634451.386723724] [amcl]: Configuring
+[amcl-3] [INFO] [1789634451.386808391] [amcl]: initTransforms
+[map_server-5] [INFO] [1789634451.390125921] [combined_map_server]: 
+[map_server-5] 	combined_map_server lifecycle node launched. 
+[map_server-5] 	Waiting on external lifecycle transitions to activate
+[map_server-5] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[map_server-5] [INFO] [1789634451.390264559] [combined_map_server]: Creating
+[map_server-6] [INFO] [1789634451.402728169] [laser_map_server]: 
+[map_server-6] 	laser_map_server lifecycle node launched. 
+[map_server-6] 	Waiting on external lifecycle transitions to activate
+[map_server-6] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[map_server-6] [INFO] [1789634451.402876575] [laser_map_server]: Creating
+[map_server-7] [INFO] [1789634451.406489813] [cv_map_server]: 
+[map_server-7] 	cv_map_server lifecycle node launched. 
+[map_server-7] 	Waiting on external lifecycle transitions to activate
+[map_server-7] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[map_server-7] [INFO] [1789634451.407334361] [cv_map_server]: Creating
+[amcl-3] [INFO] [1789634451.411618135] [amcl]: initPubSub
+[amcl-3] [INFO] [1789634451.416733392] [amcl]: Subscribed to map topic.
+[amcl-3] [INFO] [1789634451.419734685] [amcl]: Dual CV grid-SAD fusion enabled: obstacle=[/limo/nav_map_package/online/maps/cv_map, /limo/nav_map_package/online/metric_bev/cost_grid_binary_obstacles] street=[/limo/nav_map_package/online/maps/street_map, /limo/nav_map_package/online/metric_bev/cost_grid_binary_street] laser_factor=2.000 cv_factor=1.000 sad_gain=20.000 cell_size=0.075
+[lifecycle_manager-4] [INFO] [1789634451.429973966] [lifecycle_manager_amcl]: [34m[1mActivating amcl[0m[0m
+[amcl-3] [INFO] [1789634451.430136177] [amcl]: Activating
+[amcl-3] [INFO] [1789634451.430169479] [amcl]: Creating bond (amcl) to lifecycle manager.
+[lifecycle_manager-9] [INFO] [1789634451.497135854] [lifecycle_manager_online_maps]: [34m[1mStarting managed nodes bringup...[0m[0m
+[lifecycle_manager-9] [INFO] [1789634451.497187279] [lifecycle_manager_online_maps]: [34m[1mConfiguring combined_map_server[0m[0m
+[map_server-5] [INFO] [1789634451.497494520] [combined_map_server]: Configuring
+[map_server-5] [INFO] [1789634451.497551485] [map_io]: Loading yaml file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_combined.yaml
+[map_server-5] [INFO] [1789634451.497758350] [map_io]: resolution: 0.05
+[map_server-5] [INFO] [1789634451.497766014] [map_io]: origin[0]: -6.14
+[map_server-5] [INFO] [1789634451.497770692] [map_io]: origin[1]: -3.97
+[map_server-5] [INFO] [1789634451.497774980] [map_io]: origin[2]: 0
+[map_server-5] [INFO] [1789634451.497779429] [map_io]: free_thresh: 0.25
+[map_server-5] [INFO] [1789634451.497783546] [map_io]: occupied_thresh: 0.65
+[map_server-5] [INFO] [1789634451.497788185] [map_io]: mode: scale
+[map_server-5] [INFO] [1789634451.497793084] [map_io]: negate: 0
+[map_server-5] [INFO] [1789634451.497968099] [map_io]: Loading image_file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_combined.pgm
+[map_server-5] [INFO] [1789634451.501842703] [map_io]: Read map /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_combined.pgm: 242 X 160 map @ 0.05 m/cell
+[lifecycle_manager-9] [INFO] [1789634451.507253549] [lifecycle_manager_online_maps]: [34m[1mConfiguring laser_map_server[0m[0m
+[map_server-6] [INFO] [1789634451.507492562] [laser_map_server]: Configuring
+[map_server-6] [INFO] [1789634451.507550540] [map_io]: Loading yaml file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_laser.yaml
+[map_server-6] [INFO] [1789634451.507771330] [map_io]: resolution: 0.05
+[map_server-6] [INFO] [1789634451.507778153] [map_io]: origin[0]: -6.14
+[map_server-6] [INFO] [1789634451.507782260] [map_io]: origin[1]: -3.97
+[map_server-6] [INFO] [1789634451.507786418] [map_io]: origin[2]: 0
+[map_server-6] [INFO] [1789634451.507790646] [map_io]: free_thresh: 0.25
+[map_server-6] [INFO] [1789634451.507794774] [map_io]: occupied_thresh: 0.65
+[map_server-6] [INFO] [1789634451.507799623] [map_io]: mode: trinary
+[map_server-6] [INFO] [1789634451.507804572] [map_io]: negate: 0
+[map_server-6] [INFO] [1789634451.507972213] [map_io]: Loading image_file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_laser.pgm
+[map_server-6] [INFO] [1789634451.511680558] [map_io]: Read map /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_laser.pgm: 242 X 160 map @ 0.05 m/cell
+[lifecycle_manager-9] [INFO] [1789634451.522289005] [lifecycle_manager_online_maps]: [34m[1mConfiguring cv_map_server[0m[0m
+[amcl-3] [WARN] [1789634451.524049684] [amcl]: Waiting for map....
+[lifecycle_manager-4] [INFO] [1789634451.535482190] [lifecycle_manager_amcl]: Server amcl connected with bond.
+[lifecycle_manager-4] [INFO] [1789634451.535531923] [lifecycle_manager_amcl]: [34m[1mManaged nodes are active[0m[0m
+[lifecycle_manager-4] [INFO] [1789634451.535540509] [lifecycle_manager_amcl]: [34m[1mCreating bond timer...[0m[0m
+[local_ptcld-14] [INFO] [1789634451.658733467] [local_ptcld]: Local pointcloud: /limo/nav_map_package/online/cv_cloud -> /limo/nav_map_package/online/local_ptcld, frame=base_link, motion reference=odom, decay=0..0.02/cycle from /cmd_vel, low_cost=<50 at 3x decay, threshold=0.30, tf_timeout=0.000s, latest_tf_max_age=0.030s
+[cv_2_ptcld-13] [INFO] [1789634451.668567686] [cv_2_ptcld]: CV grid to cloud: /limo/nav_map_package/online/metric_bev/cost_grid_combined -> /limo/nav_map_package/online/cv_cloud, frame=base_link, voxel=0.03
+[map_server-7] [INFO] [1789634451.669888679] [cv_map_server]: Configuring
+[map_server-7] [INFO] [1789634451.669969279] [map_io]: Loading yaml file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_cv.yaml
+[map_server-7] [INFO] [1789634451.670203303] [map_io]: resolution: 0.05
+[map_server-7] [INFO] [1789634451.670210406] [map_io]: origin[0]: -6.14
+[map_server-7] [INFO] [1789634451.670214634] [map_io]: origin[1]: -3.97
+[map_server-7] [INFO] [1789634451.670218592] [map_io]: origin[2]: 0
+[map_server-7] [INFO] [1789634451.670222890] [map_io]: free_thresh: 0.25
+[map_server-7] [INFO] [1789634451.670226967] [map_io]: occupied_thresh: 0.65
+[map_server-7] [INFO] [1789634451.670239480] [map_io]: mode: trinary
+[map_server-7] [INFO] [1789634451.670244369] [map_io]: negate: 0
+[map_server-7] [INFO] [1789634451.670440484] [map_io]: Loading image_file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_cv.pgm
+[map_server-7] [INFO] [1789634451.674925040] [map_io]: Read map /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_cv.pgm: 242 X 160 map @ 0.05 m/cell
+[lifecycle_manager-9] [INFO] [1789634451.681720968] [lifecycle_manager_online_maps]: [34m[1mConfiguring street_map_server[0m[0m
+[map_server-8] [INFO] [1789634451.682101494] [street_map_server]: Configuring
+[map_server-8] [INFO] [1789634451.682172667] [map_io]: Loading yaml file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_street.yaml
+[map_server-8] [INFO] [1789634451.682377086] [map_io]: resolution: 0.05
+[map_server-8] [INFO] [1789634451.682389319] [map_io]: origin[0]: -6.14
+[map_server-8] [INFO] [1789634451.682393146] [map_io]: origin[1]: -3.97
+[map_server-8] [INFO] [1789634451.682397113] [map_io]: origin[2]: 0
+[map_server-8] [INFO] [1789634451.682401251] [map_io]: free_thresh: 0.25
+[map_server-8] [INFO] [1789634451.682405138] [map_io]: occupied_thresh: 0.65
+[map_server-8] [INFO] [1789634451.682409827] [map_io]: mode: trinary
+[map_server-8] [INFO] [1789634451.682414135] [map_io]: negate: 0
+[map_server-8] [INFO] [1789634451.683347758] [map_io]: Loading image_file: /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_street.pgm
+[map_server-8] [INFO] [1789634451.686278840] [map_io]: Read map /workspace/Limo_robot_dev_mk2/ros2_maps/nav_pipeline/limo_map_street.pgm: 242 X 160 map @ 0.05 m/cell
+[lifecycle_manager-9] [INFO] [1789634451.694396722] [lifecycle_manager_online_maps]: [34m[1mActivating combined_map_server[0m[0m
+[map_server-5] [INFO] [1789634451.694589039] [combined_map_server]: Activating
+[map_server-5] [INFO] [1789634451.694835507] [combined_map_server]: Creating bond (combined_map_server) to lifecycle manager.
+[online_nav_map-12] [INFO] [1789634451.715699765] [online_nav_map]: Online mapping: static=/map, cv=/limo/nav_map_package/online/metric_bev/cost_grid_combined, laser=/scan -> combined=/limo/nav_map_package/online/nav_map/combined_grid
+[lifecycle_manager-9] [INFO] [1789634451.801833317] [lifecycle_manager_online_maps]: Server combined_map_server connected with bond.
+[lifecycle_manager-9] [INFO] [1789634451.801886726] [lifecycle_manager_online_maps]: [34m[1mActivating laser_map_server[0m[0m
+[map_server-6] [INFO] [1789634451.802126582] [laser_map_server]: Activating
+[map_server-6] [INFO] [1789634451.802359494] [laser_map_server]: Creating bond (laser_map_server) to lifecycle manager.
+[amcl-3] [INFO] [1789634451.802574523] [amcl]: Received a 242 X 160 map @ 0.050 m/pix
+[amcl-3] [INFO] [1789634451.846007665] [amcl]: createLaserObject
+[amcl-3] [INFO] [1789634451.848975295] [amcl]: AMCL workload: particles=800 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=48000 cv_enabled=1
+[amcl-3] [WARN] [1789634451.849010740] [amcl]: Waiting for synchronized CV grids: tolerance=0.200 s obstacle_dt=inf s street_dt=inf s
+[online_nav_map-12] [WARN] [1789634451.888804545] [online_nav_map]: Laser transform unavailable: "map" passed to lookupTransform argument target_frame does not exist. 
+[lifecycle_manager-9] [INFO] [1789634451.904942628] [lifecycle_manager_online_maps]: Server laser_map_server connected with bond.
+[lifecycle_manager-9] [INFO] [1789634451.904977373] [lifecycle_manager_online_maps]: [34m[1mActivating cv_map_server[0m[0m
+[map_server-7] [INFO] [1789634451.905193734] [cv_map_server]: Activating
+[map_server-7] [INFO] [1789634451.905420195] [cv_map_server]: Creating bond (cv_map_server) to lifecycle manager.
+[amcl-3] [INFO] [1789634451.905710564] [amcl]: Received CV obstacle semantic map: 242 x 160 @ 0.050 m/pix
+[lifecycle_manager-9] [INFO] [1789634452.007946553] [lifecycle_manager_online_maps]: Server cv_map_server connected with bond.
+[lifecycle_manager-9] [INFO] [1789634452.008007085] [lifecycle_manager_online_maps]: [34m[1mActivating street_map_server[0m[0m
+[map_server-8] [INFO] [1789634452.008248974] [street_map_server]: Activating
+[map_server-8] [INFO] [1789634452.008388904] [street_map_server]: Creating bond (street_map_server) to lifecycle manager.
+[amcl-3] [INFO] [1789634452.008924649] [amcl]: Received CV street semantic map: 242 x 160 @ 0.050 m/pix
+[lifecycle_manager-9] [INFO] [1789634452.110856333] [lifecycle_manager_online_maps]: Server street_map_server connected with bond.
+[lifecycle_manager-9] [INFO] [1789634452.110898622] [lifecycle_manager_online_maps]: [34m[1mManaged nodes are active[0m[0m
+[lifecycle_manager-9] [INFO] [1789634452.110909061] [lifecycle_manager_online_maps]: [34m[1mCreating bond timer...[0m[0m
+[online_metric_bev-10] [INFO] [1789634452.132998113] [online_metric_bev]: Using TURQUOISE, WHITE and MAGENTA color maps
+[lane_detector-1] [0m[INFO] [1789634452.138147744] [lane_node]: HSV Color Segmentation Node initialized successfully.[0m
+[boundaries-15] [0m[INFO] [1789634452.149314688] [boundary_node]: CurbDetector node initialized: Multi-zone MORPH_OPEN Background Extraction.[0m
+[classification-2] [0m[INFO] [1789634452.155254306] [classification]: Classification node listening on limo/nav_cv_package/bev/bird_perspective/raw; publishing debug images on limo/nav_cv_package/classification/debug/raw and final output on limo/nav_cv_package/classification/output/raw[0m
+[online_metric_bev-10] [INFO] [1789634452.155994039] [online_metric_bev]: online_metric_bev initialized for combined and binary outputs; internal color layers=['TURQUOISE', 'WHITE', 'MAGENTA']; publishers=7
+[bev_node-16] [0m[INFO] [1789634452.165108382] [bev_node]: Multithreaded BirdPerspective node initialized successfully.[0m
+[cv_amcl_debug-11] [INFO] [1789634452.171749733] [cv_amcl_debug]: Publishing only the two CV grids subsampled at 0.075 m
+[INFO] [rviz2-17]: process started with pid [1693]
+[rviz2-17] QStandardPaths: XDG_RUNTIME_DIR not set, defaulting to '/tmp/runtime-root'
+[bev_node-16] [33m[WARN] [1789634452.931910237] [bev_node]: Waiting for Depth, CameraInfo; skipping frame.[0m
+[bev_node-16] [0m[INFO] [1789634453.080659967] [bev_node]: CameraInfo received successfully![0m
+[local_ptcld-14] [WARN] [1789634453.157826461] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[online_nav_map-12] [WARN] [1789634453.188797595] [online_nav_map]: CV transform unavailable: "map" passed to lookupTransform argument target_frame does not exist. 
+[rviz2-17] [INFO] [1789634453.375452263] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-17] [INFO] [1789634453.375595389] [rviz2]: OpenGl version: 4.6 (GLSL 4.6)
+[rviz2-17] [INFO] [1789634453.424266165] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-17] [INFO] [1789634453.618068695] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-17] [INFO] [1789634453.672476623] [rviz2]: Stereo is NOT SUPPORTED
+[amcl-3] [WARN] [1789634453.711861919] [amcl]: AMCL cannot publish a pose or update the transform. Please set the initial pose...
+[rviz2-17] [INFO] [1789634453.714637463] [rviz2]: Stereo is NOT SUPPORTED
+[rviz2-17] [INFO] [1789634453.738524323] [rviz2]: Trying to create a map of size 242 x 160 using 1 swatches
+[amcl-3] [WARN] [1789634453.866363370] [amcl]: New subscription discovered on topic '/particle_cloud', requesting incompatible QoS. No messages will be sent to it. Last incompatible policy: RELIABILITY_QOS_POLICY
+[online_nav_map-12] [WARN] [1789634453.889960001] [online_nav_map]: Laser transform unavailable: "map" passed to lookupTransform argument target_frame does not exist. 
+[rviz2-17] [INFO] [1789634453.915482488] [rviz2]: Trying to create a map of size 242 x 160 using 1 swatches
+[rviz2-17] [INFO] [1789634454.614139034] [rviz2]: Message Filter dropping message: frame 'base_link' at time 379.481 for reason 'discarding message because the queue is full'
+[rviz2-17] [INFO] [1789634454.614279996] [rviz2]: Message Filter dropping message: frame 'base_link' at time 379.481 for reason 'discarding message because the queue is full'
+[cv_2_ptcld-13] [INFO] [1789634454.636093487] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=388.3/382.0/397.0; wall_ms avg/min/max=2.986/2.746/3.652; cpu_ms avg/min/max=3.033/2.765/3.840; frequency=19.44 Hz
+[rviz2-17] [INFO] [1789634454.965759433] [rviz2]: Message Filter dropping message: frame 'base_link' at time 379.534 for reason 'discarding message because the queue is full'
+[online_nav_map-12] [WARN] [1789634455.188909304] [online_nav_map]: CV transform unavailable: "map" passed to lookupTransform argument target_frame does not exist. 
+[local_ptcld-14] [WARN] [1789634455.253249834] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.034000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[amcl-3] [WARN] [1789634455.887316720] [amcl]: AMCL cannot publish a pose or update the transform. Please set the initial pose...
+[local_ptcld-14] [INFO] [1789634455.930425670] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=388.0/381/395; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=4.172/1.150/30.095; tf_wait_ms avg/min/max=0.096/0.057/0.185; processing_ms avg/min/max=4.076/1.079/29.976; cpu_ms avg/min/max=4.558/1.240/34.719; tf_latest_fallbacks=1; tf_drops=25; frequency=10.42 Hz
+[online_nav_map-12] [WARN] [1789634455.989641555] [online_nav_map]: Laser transform unavailable: "map" passed to lookupTransform argument target_frame does not exist. 
+[cv_2_ptcld-13] [INFO] [1789634456.183450128] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=393.3/387.0/399.0; wall_ms avg/min/max=3.737/2.722/14.615; cpu_ms avg/min/max=3.804/2.735/15.329; frequency=19.26 Hz
+[rviz2-17] [INFO] [1789634456.653279698] [rviz2]: Setting estimate pose: Frame:map, Position(0.0479755, 0.0550919, 0), Orientation(0, 0, 0.00281275, 0.999996) = Angle: 0.00562551
+[amcl-3] [INFO] [1789634456.653854786] [amcl]: initialPoseReceived
+[amcl-3] [WARN] [1789634456.653952357] [amcl]: Failed to transform initial pose in time (Lookup would require extrapolation into the future.  Requested time 382.400000 but the latest data is at time 382.399000, when looking up transform from frame [base_link] to frame [odom])
+[amcl-3] [INFO] [1789634456.653965802] [amcl]: Setting pose (382.400000): 0.048 0.055 0.006
+[amcl-3] [INFO] [1789634456.717315864] [amcl]: AMCL workload: particles=800 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=48000 cv_enabled=1
+[amcl-3] [INFO] [1789634456.721459026] [amcl]: CV workload: particles=800 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[116,404] min_cell_occupancy=0.100 particle_cell_iterations=416000
+[amcl-3] [INFO] [1789634456.721532393] [amcl]: Fused dual CV positive SAD: dt=[0.0220, 0.0220] cells=[116, 404] positive_mass=[obstacles=55.4 street=232.2] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.594014 street=0.429684 combined=0.511849] combined_range=[0.141532, 0.788711] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634456.721633781] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.000000 median=0.632544 max=1.000000] street=[min=0.003768 median=0.425712 max=0.974026] combined=[min=0.141532 median=0.556240 max=0.788711]
+[amcl-3] [INFO] [1789634456.721640904] [amcl]: Dual CV positive-SAD best poses: obstacles=(-0.501, -0.995, -0.434; sad=0.000000) street=(0.820, 1.004, 0.418; sad=0.003768) combined=(-0.098, -0.037, -0.084; sad=0.141532)
+[rviz2-17] [INFO] [1789634457.174233220] [rviz2]: Message Filter dropping message: frame 'base_link' at time 381.781 for reason 'discarding message because the queue is full'
+[rviz2-17] [INFO] [1789634457.174370736] [rviz2]: Message Filter dropping message: frame 'base_link' at time 381.781 for reason 'discarding message because the queue is full'
+[online_nav_map-12] [WARN] [1789634457.289053487] [online_nav_map]: CV transform unavailable: Lookup would require extrapolation into the past.  Requested time 382.999000 but the earliest data is at time 383.409000, when looking up transform from frame [online_metric_bev_origin_combined] to frame [map]
+[local_ptcld-14] [WARN] [1789634457.336737362] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[rviz2-17] [INFO] [1789634457.526140947] [rviz2]: Message Filter dropping message: frame 'base_link' at time 382.034 for reason 'discarding message because the queue is full'
+[cv_2_ptcld-13] [INFO] [1789634457.701457687] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=393.0/389.0/396.0; wall_ms avg/min/max=2.955/2.616/3.663; cpu_ms avg/min/max=2.979/2.625/3.693; frequency=19.70 Hz
+[local_ptcld-14] [INFO] [1789634459.061194091] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=391.0/386/395; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=5.830/1.154/33.421; tf_wait_ms avg/min/max=0.092/0.058/0.144; processing_ms avg/min/max=5.738/1.087/33.298; cpu_ms avg/min/max=6.487/1.210/37.878; tf_latest_fallbacks=0; tf_drops=32; frequency=9.63 Hz
+[cv_2_ptcld-13] [INFO] [1789634459.193986647] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=392.9/386.0/398.0; wall_ms avg/min/max=2.974/2.722/3.655; cpu_ms avg/min/max=3.008/2.722/3.754; frequency=20.03 Hz
+[local_ptcld-14] [WARN] [1789634459.437088516] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.033000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634460.698703666] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=392.6/386.0/398.0; wall_ms avg/min/max=2.973/2.731/3.559; cpu_ms avg/min/max=2.999/2.742/3.582; frequency=19.98 Hz
+[local_ptcld-14] [WARN] [1789634461.458592730] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634462.054141924] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=390.6/386/395; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=5.466/1.184/37.997; tf_wait_ms avg/min/max=0.087/0.058/0.161; processing_ms avg/min/max=5.379/1.114/37.836; cpu_ms avg/min/max=6.087/1.192/43.700; tf_latest_fallbacks=0; tf_drops=30; frequency=9.99 Hz
+[cv_2_ptcld-13] [INFO] [1789634462.210824058] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=392.4/388.0/398.0; wall_ms avg/min/max=3.035/2.792/3.826; cpu_ms avg/min/max=3.073/2.804/3.847; frequency=19.95 Hz
+[local_ptcld-14] [WARN] [1789634463.505291999] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634463.708335504] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=396.4/393.0/400.0; wall_ms avg/min/max=3.081/2.772/3.802; cpu_ms avg/min/max=3.103/2.794/3.823; frequency=19.94 Hz
+[local_ptcld-14] [INFO] [1789634465.058554877] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=393.2/388/397; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=3.826/1.155/47.106; tf_wait_ms avg/min/max=0.076/0.057/0.122; processing_ms avg/min/max=3.750/1.090/47.016; cpu_ms avg/min/max=4.233/1.212/53.812; tf_latest_fallbacks=0; tf_drops=30; frequency=9.99 Hz
+[cv_2_ptcld-13] [INFO] [1789634465.215115987] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=394.8/391.0/398.0; wall_ms avg/min/max=3.161/2.770/3.942; cpu_ms avg/min/max=3.194/2.781/4.019; frequency=20.04 Hz
+[local_ptcld-14] [WARN] [1789634465.524092292] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[rviz2-17] [INFO] [1789634466.527263258] [rviz2]: Message Filter dropping message: frame 'base_link' at time 382.284 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[cv_2_ptcld-13] [INFO] [1789634466.709884787] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=394.7/391.0/399.0; wall_ms avg/min/max=2.927/2.768/3.343; cpu_ms avg/min/max=2.940/2.783/3.350; frequency=19.95 Hz
+[rviz2-17] [INFO] [1789634466.727480698] [rviz2]: Message Filter dropping message: frame 'online_metric_bev_origin_combined' at time 382.481 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[rviz2-17] [INFO] [1789634466.727563932] [rviz2]: Message Filter dropping message: frame 'base_link' at time 382.481 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[local_ptcld-14] [WARN] [1789634467.615313646] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.033000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634468.072553429] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=392.5/388/397; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=4.371/1.092/37.311; tf_wait_ms avg/min/max=0.095/0.053/0.153; processing_ms avg/min/max=4.275/1.032/37.205; cpu_ms avg/min/max=4.757/1.141/41.708; tf_latest_fallbacks=0; tf_drops=30; frequency=10.02 Hz
+[cv_2_ptcld-13] [INFO] [1789634468.219014298] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=393.3/389.0/398.0; wall_ms avg/min/max=3.147/2.795/3.796; cpu_ms avg/min/max=3.181/2.807/3.873; frequency=19.85 Hz
+[cv_2_ptcld-13] [INFO] [1789634469.709026300] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=394.0/389.0/399.0; wall_ms avg/min/max=3.118/2.769/3.652; cpu_ms avg/min/max=3.144/2.770/3.711; frequency=19.99 Hz
+[local_ptcld-14] [WARN] [1789634469.745404294] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634471.082794845] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=391.9/388/397; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=5.180/1.128/30.752; tf_wait_ms avg/min/max=0.092/0.057/0.158; processing_ms avg/min/max=5.088/1.067/30.632; cpu_ms avg/min/max=5.810/1.175/35.159; tf_latest_fallbacks=0; tf_drops=30; frequency=9.93 Hz
+[cv_2_ptcld-13] [INFO] [1789634471.219459567] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=395.7/391.0/400.0; wall_ms avg/min/max=3.464/2.776/14.195; cpu_ms avg/min/max=3.589/2.789/16.665; frequency=19.99 Hz
+[local_ptcld-14] [WARN] [1789634471.822186338] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634472.728162679] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=395.2/389.0/399.0; wall_ms avg/min/max=3.067/2.751/3.990; cpu_ms avg/min/max=3.114/2.777/4.107; frequency=19.87 Hz
+[local_ptcld-14] [WARN] [1789634473.830063616] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634474.101122195] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=393.2/389/398; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=4.567/1.126/32.737; tf_wait_ms avg/min/max=0.084/0.060/0.135; processing_ms avg/min/max=4.483/1.061/32.630; cpu_ms avg/min/max=5.102/1.176/36.807; tf_latest_fallbacks=0; tf_drops=30; frequency=9.90 Hz
+[cv_2_ptcld-13] [INFO] [1789634474.245265665] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=395.3/391.0/400.0; wall_ms avg/min/max=3.120/2.773/4.013; cpu_ms avg/min/max=3.166/2.790/4.381; frequency=19.84 Hz
+[cv_2_ptcld-13] [INFO] [1789634475.741794066] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=397.0/389.0/407.0; wall_ms avg/min/max=3.010/2.767/4.580; cpu_ms avg/min/max=3.037/2.769/4.623; frequency=19.92 Hz
+[local_ptcld-14] [WARN] [1789634475.836752992] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[amcl-3] [INFO] [1789634476.056586761] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634476.058403454] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[156,348] min_cell_occupancy=0.100 particle_cell_iterations=151704
+[amcl-3] [INFO] [1789634476.058466872] [amcl]: Fused dual CV positive SAD: dt=[0.0530, 0.0530] cells=[156, 348] positive_mass=[obstacles=72.3 street=204.1] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.458270 street=0.444730 combined=0.451500] combined_range=[0.103808, 0.735078] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634476.058517055] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.001944 median=0.469978 max=0.847516] street=[min=0.165786 median=0.435668 max=0.983850] combined=[min=0.103808 median=0.469916 max=0.735078]
+[amcl-3] [INFO] [1789634476.058528065] [amcl]: Dual CV positive-SAD best poses: obstacles=(-0.408, 0.107, -1.118; sad=0.001944) street=(0.214, -0.180, -0.356; sad=0.165786) combined=(0.321, -0.219, -0.372; sad=0.103808)
+[local_ptcld-14] [INFO] [1789634477.022966780] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=435.2/289/646; decay avg/min/max=0.0120/0.0000/0.0200; wall_ms avg/min/max=4.240/1.094/24.833; tf_wait_ms avg/min/max=0.090/0.058/0.162; processing_ms avg/min/max=4.150/1.010/24.710; cpu_ms avg/min/max=4.667/1.132/28.001; tf_latest_fallbacks=0; tf_drops=28; frequency=10.40 Hz
+[cv_2_ptcld-13] [INFO] [1789634477.236120306] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=280.2/148.0/460.0; wall_ms avg/min/max=2.867/2.446/3.943; cpu_ms avg/min/max=2.891/2.453/3.936; frequency=20.12 Hz
+[local_ptcld-14] [WARN] [1789634477.864481657] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[amcl-3] [INFO] [1789634478.267466316] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634478.269062650] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[251,261] min_cell_occupancy=0.100 particle_cell_iterations=154112
+[amcl-3] [INFO] [1789634478.269086053] [amcl]: Fused dual CV positive SAD: dt=[0.0230, 0.0230] cells=[251, 261] positive_mass=[obstacles=190.3 street=112.8] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.140381 street=0.254250 combined=0.197316] combined_range=[0.057959, 0.503813] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634478.269123082] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.031448 median=0.093522 max=0.563183] street=[min=0.074536 median=0.231089 max=0.568163] combined=[min=0.057959 median=0.182253 max=0.503813]
+[amcl-3] [INFO] [1789634478.269129494] [amcl]: Dual CV positive-SAD best poses: obstacles=(0.718, -1.238, -1.338; sad=0.031448) street=(0.824, -1.265, -1.349; sad=0.074536) combined=(0.824, -1.265, -1.349; sad=0.057959)
+[cv_2_ptcld-13] [INFO] [1789634478.739301485] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=288.7/228.0/392.0; wall_ms avg/min/max=2.940/2.571/3.616; cpu_ms avg/min/max=2.943/2.579/3.553; frequency=19.99 Hz
+[local_ptcld-14] [INFO] [1789634479.781748591] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=425.4/264/573; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=2.869/1.048/24.096; tf_wait_ms avg/min/max=0.087/0.057/0.131; processing_ms avg/min/max=2.782/0.991/23.989; cpu_ms avg/min/max=3.088/1.109/26.574; tf_latest_fallbacks=0; tf_drops=25; frequency=10.81 Hz
+[local_ptcld-14] [WARN] [1789634479.865504397] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634480.263011758] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=354.7/335.0/398.0; wall_ms avg/min/max=3.005/2.752/3.891; cpu_ms avg/min/max=3.020/2.773/3.921; frequency=19.80 Hz
+[amcl-3] [INFO] [1789634480.369404926] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634480.370961276] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[73,310] min_cell_occupancy=0.100 particle_cell_iterations=115283
+[amcl-3] [INFO] [1789634480.371032068] [amcl]: Fused dual CV positive SAD: dt=[0.0530, 0.0530] cells=[73, 310] positive_mass=[obstacles=34.1 street=192.4] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.496629 street=0.324227 combined=0.410428] combined_range=[0.128505, 0.752517] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634480.371070719] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.138405 median=0.445005 max=0.993584] street=[min=0.108982 median=0.303801 max=0.760435] combined=[min=0.128505 median=0.397302 max=0.752517]
+[amcl-3] [INFO] [1789634480.371077742] [amcl]: Dual CV positive-SAD best poses: obstacles=(0.546, -2.106, -2.707; sad=0.138405) street=(0.280, -2.211, -2.234; sad=0.108982) combined=(0.280, -2.211, -2.234; sad=0.128505)
+[cv_2_ptcld-13] [INFO] [1789634481.780843844] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=310.4/265.0/351.0; wall_ms avg/min/max=2.967/2.684/3.745; cpu_ms avg/min/max=2.989/2.705/3.832; frequency=19.80 Hz
+[local_ptcld-14] [WARN] [1789634481.952759814] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634482.117085260] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=568.3/527/591; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=5.330/1.403/34.437; tf_wait_ms avg/min/max=0.098/0.062/0.145; processing_ms avg/min/max=5.232/1.312/34.313; cpu_ms avg/min/max=5.821/1.508/38.760; tf_latest_fallbacks=0; tf_drops=17; frequency=12.67 Hz
+[amcl-3] [INFO] [1789634482.871422319] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634482.872763199] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[47,400] min_cell_occupancy=0.100 particle_cell_iterations=134547
+[amcl-3] [INFO] [1789634482.872785611] [amcl]: Fused dual CV positive SAD: dt=[0.0030, 0.0030] cells=[47, 400] positive_mass=[obstacles=19.9 street=251.2] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.555024 street=0.192150 combined=0.373587] combined_range=[0.102579, 0.844787] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634482.872824613] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.143194 median=0.467349 max=1.000000] street=[min=0.029924 median=0.168595 max=0.763531] combined=[min=0.102579 median=0.345358 max=0.844787]
+[amcl-3] [INFO] [1789634482.872831726] [amcl]: Dual CV positive-SAD best poses: obstacles=(-0.889, -2.804, -2.901; sad=0.143194) street=(-1.028, -2.843, -2.949; sad=0.029924) combined=(-0.889, -2.804, -2.901; sad=0.102579)
+[cv_2_ptcld-13] [INFO] [1789634483.251349101] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=234.8/192.0/276.0; wall_ms avg/min/max=2.799/2.544/3.353; cpu_ms avg/min/max=2.833/2.556/3.442; frequency=20.23 Hz
+[local_ptcld-14] [WARN] [1789634483.957593495] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.033000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634484.771232480] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=184.8/157.0/198.0; wall_ms avg/min/max=2.697/2.483/3.364; cpu_ms avg/min/max=2.740/2.489/3.417; frequency=19.70 Hz
+[amcl-3] [INFO] [1789634484.883624999] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634484.885008878] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[222,287] min_cell_occupancy=0.100 particle_cell_iterations=153209
+[amcl-3] [INFO] [1789634484.885038654] [amcl]: Fused dual CV positive SAD: dt=[0.0530, 0.0530] cells=[222, 287] positive_mass=[obstacles=90.2 street=220.0] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.164657 street=0.162161 combined=0.163409] combined_range=[0.013979, 0.644018] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634484.885083336] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.000000 median=0.104297 max=0.775121] street=[min=0.005470 median=0.137662 max=0.676588] combined=[min=0.013979 median=0.142037 max=0.644018]
+[amcl-3] [INFO] [1789634484.885101410] [amcl]: Dual CV positive-SAD best poses: obstacles=(-2.157, -2.421, -3.649; sad=0.000000) street=(-1.732, -2.785, -3.357; sad=0.005470) combined=(-1.834, -2.647, -3.470; sad=0.013979)
+[local_ptcld-14] [INFO] [1789634485.041840361] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=433.1/327/524; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=4.544/1.077/33.858; tf_wait_ms avg/min/max=0.087/0.056/0.130; processing_ms avg/min/max=4.458/1.009/33.728; cpu_ms avg/min/max=5.047/1.206/38.162; tf_latest_fallbacks=0; tf_drops=28; frequency=10.20 Hz
+[local_ptcld-14] [WARN] [1789634486.081378606] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.033000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634486.280024661] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=207.0/158.0/252.0; wall_ms avg/min/max=2.782/2.460/3.405; cpu_ms avg/min/max=2.809/2.474/3.424; frequency=20.14 Hz
+[amcl-3] [INFO] [1789634486.986156292] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634486.987542736] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[78,435] min_cell_occupancy=0.100 particle_cell_iterations=154413
+[amcl-3] [INFO] [1789634486.987572671] [amcl]: Fused dual CV positive SAD: dt=[0.0280, 0.0280] cells=[78, 435] positive_mass=[obstacles=57.7 street=251.4] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.331306 street=0.238071 combined=0.284689] combined_range=[0.077354, 0.771272] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634486.987609690] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.000000 median=0.202655 max=1.000000] street=[min=0.002983 median=0.204115 max=0.844925] combined=[min=0.077354 median=0.212816 max=0.771272]
+[amcl-3] [INFO] [1789634486.987615952] [amcl]: Dual CV positive-SAD best poses: obstacles=(-2.300, -1.746, -4.777; sad=0.000000) street=(-2.390, -1.294, -4.624; sad=0.002983) combined=(-2.261, -1.367, -4.691; sad=0.077354)
+[local_ptcld-14] [INFO] [1789634487.617338929] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=392.3/296/466; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=4.505/1.088/32.843; tf_wait_ms avg/min/max=0.103/0.060/0.159; processing_ms avg/min/max=4.402/1.000/32.719; cpu_ms avg/min/max=4.985/1.165/36.416; tf_latest_fallbacks=0; tf_drops=22; frequency=11.67 Hz
+[cv_2_ptcld-13] [INFO] [1789634487.773328190] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=170.1/130.0/267.0; wall_ms avg/min/max=2.662/2.423/3.248; cpu_ms avg/min/max=2.687/2.432/3.241; frequency=20.10 Hz
+[local_ptcld-14] [WARN] [1789634488.181338322] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634489.294922115] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=374.0/159.0/517.0; wall_ms avg/min/max=3.085/2.524/5.556; cpu_ms avg/min/max=3.020/2.536/3.923; frequency=19.58 Hz
+[amcl-3] [INFO] [1789634489.488040858] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634489.489682897] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[177,315] min_cell_occupancy=0.100 particle_cell_iterations=148092
+[amcl-3] [INFO] [1789634489.489705669] [amcl]: Fused dual CV positive SAD: dt=[0.0280, 0.0280] cells=[177, 315] positive_mass=[obstacles=88.7 street=191.1] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.335505 street=0.329587 combined=0.332546] combined_range=[0.065342, 0.684328] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634489.489742818] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.017964 median=0.327756 max=0.886932] street=[min=0.103034 median=0.319650 max=0.806444] combined=[min=0.065342 median=0.328171 max=0.684328]
+[amcl-3] [INFO] [1789634489.489748929] [amcl]: Dual CV positive-SAD best poses: obstacles=(-1.791, -0.304, -5.422; sad=0.017964) street=(-1.987, -0.309, -5.336; sad=0.103034) combined=(-1.987, -0.309, -5.336; sad=0.065342)
+[local_ptcld-14] [WARN] [1789634490.266252724] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634490.454337230] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=548.5/368/677; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=2.931/1.205/28.197; tf_wait_ms avg/min/max=0.096/0.061/0.135; processing_ms avg/min/max=2.835/1.132/28.086; cpu_ms avg/min/max=3.199/1.254/32.447; tf_latest_fallbacks=0; tf_drops=26; frequency=10.73 Hz
+[cv_2_ptcld-13] [INFO] [1789634490.780339724] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=435.8/375.0/516.0; wall_ms avg/min/max=3.104/2.815/3.917; cpu_ms avg/min/max=3.122/2.815/3.940; frequency=20.02 Hz
+[amcl-3] [INFO] [1789634491.892086453] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634491.894091356] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[276,227] min_cell_occupancy=0.100 particle_cell_iterations=151403
+[amcl-3] [INFO] [1789634491.894126932] [amcl]: Fused dual CV positive SAD: dt=[0.0030, 0.0030] cells=[276, 227] positive_mass=[obstacles=169.0 street=124.3] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.193202 street=0.384288 combined=0.288745] combined_range=[0.082951, 0.675644] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634491.894173188] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.013687 median=0.107278 max=0.774808] street=[min=0.133719 median=0.374764 max=0.939676] combined=[min=0.082951 median=0.287437 max=0.675644]
+[amcl-3] [INFO] [1789634491.894186042] [amcl]: Dual CV positive-SAD best poses: obstacles=(-0.599, -0.366, -6.470; sad=0.013687) street=(-1.049, -0.125, -6.395; sad=0.133719) combined=(-1.049, -0.125, -6.395; sad=0.082951)
+[cv_2_ptcld-13] [INFO] [1789634492.266505739] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=383.2/338.0/443.0; wall_ms avg/min/max=2.941/2.707/3.783; cpu_ms avg/min/max=2.959/2.726/3.861; frequency=20.00 Hz
+[local_ptcld-14] [WARN] [1789634492.267755219] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634493.458687877] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=688.9/645/726; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=4.980/1.518/47.250; tf_wait_ms avg/min/max=0.092/0.060/0.152; processing_ms avg/min/max=4.888/1.440/47.151; cpu_ms avg/min/max=5.519/1.565/53.960; tf_latest_fallbacks=0; tf_drops=30; frequency=9.97 Hz
+[cv_2_ptcld-13] [INFO] [1789634493.771470706] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=431.5/384.0/461.0; wall_ms avg/min/max=2.965/2.772/3.347; cpu_ms avg/min/max=2.981/2.799/3.354; frequency=19.95 Hz
+[local_ptcld-14] [WARN] [1789634494.270628660] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[amcl-3] [INFO] [1789634494.394685100] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634494.396736609] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[129,370] min_cell_occupancy=0.100 particle_cell_iterations=150199
+[amcl-3] [INFO] [1789634494.396775742] [amcl]: Fused dual CV positive SAD: dt=[0.0030, 0.0030] cells=[129, 370] positive_mass=[obstacles=58.8 street=215.7] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.426039 street=0.384621 combined=0.405330] combined_range=[0.101805, 0.743317] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634494.396817560] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.053415 median=0.372575 max=0.892373] street=[min=0.150196 median=0.357484 max=0.779887] combined=[min=0.101805 median=0.363380 max=0.743317]
+[amcl-3] [INFO] [1789634494.396827628] [amcl]: Dual CV positive-SAD best poses: obstacles=(0.426, -0.529, -6.428; sad=0.053415) street=(0.426, -0.529, -6.428; sad=0.150196) combined=(0.426, -0.529, -6.428; sad=0.101805)
+[cv_2_ptcld-13] [INFO] [1789634495.274342854] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=433.0/396.0/462.0; wall_ms avg/min/max=3.102/2.821/4.049; cpu_ms avg/min/max=3.124/2.833/4.058; frequency=20.13 Hz
+[local_ptcld-14] [WARN] [1789634496.277850747] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.033000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634496.529282932] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=703.6/665/730; decay avg/min/max=0.0200/0.0200/0.0200; wall_ms avg/min/max=5.754/1.588/39.387; tf_wait_ms avg/min/max=0.091/0.057/0.162; processing_ms avg/min/max=5.664/1.532/39.300; cpu_ms avg/min/max=6.394/1.673/44.446; tf_latest_fallbacks=0; tf_drops=32; frequency=9.66 Hz
+[cv_2_ptcld-13] [INFO] [1789634496.775167576] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=440.6/364.0/469.0; wall_ms avg/min/max=3.127/2.739/3.939; cpu_ms avg/min/max=3.173/2.756/3.940; frequency=20.16 Hz
+[amcl-3] [INFO] [1789634496.897457156] [amcl]: AMCL workload: particles=301 configured=[300,800] scan_ranges=720 laser_beams_limit=60 particle_beam_evaluations=18060 cv_enabled=1
+[amcl-3] [INFO] [1789634496.899085720] [amcl]: CV workload: particles=301 configured=[300,800] raw_grid_cells=[115200,115200] retained_cells=[324,169] min_cell_occupancy=0.100 particle_cell_iterations=148393
+[amcl-3] [INFO] [1789634496.899126145] [amcl]: Fused dual CV positive SAD: dt=[0.0030, 0.0030] cells=[324, 169] positive_mass=[obstacles=168.8 street=108.7] active=[1, 1] min_positive=5.0 factors=[1.000, 1.000] mix=[0.500, 0.500] sad_mean=[obstacles=0.198164 street=0.549750 combined=0.373957] combined_range=[0.134103, 0.616851] gain=20.000 cv_factor=1.000
+[amcl-3] [INFO] [1789634496.899164546] [amcl]: Dual CV positive-SAD distributions: obstacles=[min=0.006017 median=0.184966 max=0.507499] street=[min=0.260707 median=0.558350 max=0.943949] combined=[min=0.134103 median=0.373405 max=0.616851]
+[amcl-3] [INFO] [1789634496.899174865] [amcl]: Dual CV positive-SAD best poses: obstacles=(1.739, -0.710, -6.402; sad=0.006017) street=(1.652, -0.759, -6.410; sad=0.260707) combined=(1.652, -0.759, -6.410; sad=0.134103)
+[cv_2_ptcld-13] [INFO] [1789634498.277742765] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=322.1/235.0/381.0; wall_ms avg/min/max=2.935/2.579/3.669; cpu_ms avg/min/max=2.952/2.592/3.665; frequency=19.96 Hz
+[local_ptcld-14] [WARN] [1789634498.280040220] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634499.531092660] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=526.9/498/581; decay avg/min/max=0.0093/0.0000/0.0200; wall_ms avg/min/max=7.746/1.304/70.970; tf_wait_ms avg/min/max=0.094/0.063/0.163; processing_ms avg/min/max=7.652/1.222/70.807; cpu_ms avg/min/max=8.678/1.337/81.272; tf_latest_fallbacks=0; tf_drops=30; frequency=9.99 Hz
+[cv_2_ptcld-13] [INFO] [1789634499.777736075] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=235.4/231.0/241.0; wall_ms avg/min/max=2.723/2.536/3.287; cpu_ms avg/min/max=2.733/2.548/3.300; frequency=19.96 Hz
+[local_ptcld-14] [WARN] [1789634500.382963440] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.031000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634501.289744892] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=237.4/234.0/241.0; wall_ms avg/min/max=2.781/2.559/3.430; cpu_ms avg/min/max=2.799/2.576/3.535; frequency=19.97 Hz
+[local_ptcld-14] [WARN] [1789634502.499394222] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634502.649128895] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=497.4/489/506; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=4.332/1.286/49.859; tf_wait_ms avg/min/max=0.091/0.060/0.160; processing_ms avg/min/max=4.241/1.202/49.700; cpu_ms avg/min/max=4.768/1.343/56.926; tf_latest_fallbacks=0; tf_drops=32; frequency=9.60 Hz
+[cv_2_ptcld-13] [INFO] [1789634502.782924362] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=232.1/227.0/238.0; wall_ms avg/min/max=2.732/2.529/3.525; cpu_ms avg/min/max=2.755/2.547/3.525; frequency=20.12 Hz
+[cv_2_ptcld-13] [INFO] [1789634504.285927289] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=231.9/226.0/237.0; wall_ms avg/min/max=2.775/2.496/3.588; cpu_ms avg/min/max=2.788/2.505/3.581; frequency=19.97 Hz
+[local_ptcld-14] [WARN] [1789634504.585739714] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[local_ptcld-14] [INFO] [1789634505.644059609] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=492.9/488/497; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=5.105/1.261/35.658; tf_wait_ms avg/min/max=0.101/0.055/0.155; processing_ms avg/min/max=5.005/1.186/35.547; cpu_ms avg/min/max=5.695/1.311/40.642; tf_latest_fallbacks=0; tf_drops=30; frequency=10.00 Hz
+[cv_2_ptcld-13] [INFO] [1789634505.787742817] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=232.0/228.0/236.0; wall_ms avg/min/max=2.739/2.537/3.317; cpu_ms avg/min/max=2.753/2.556/3.342; frequency=19.92 Hz
+[local_ptcld-14] [WARN] [1789634506.586180163] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.033000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634507.286782666] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=232.7/229.0/238.0; wall_ms avg/min/max=2.770/2.516/3.480; cpu_ms avg/min/max=2.786/2.529/3.496; frequency=19.95 Hz
+[local_ptcld-14] [WARN] [1789634508.588035850] [local_ptcld]: Cannot update local pointcloud: Latest transform from frame [base_link] to frame [odom] is 0.032000s from the requested time, exceeding maximum_tf_age_sec=0.030000s
+[cv_2_ptcld-13] [INFO] [1789634508.788039628] [cv_2_ptcld]: CV to cloud over 30 cycles: cells avg/min/max=115200.0/115200.0/115200.0; points avg/min/max=231.4/226.0/236.0; wall_ms avg/min/max=2.736/2.514/3.391; cpu_ms avg/min/max=2.752/2.514/3.415; frequency=19.98 Hz
+[local_ptcld-14] [INFO] [1789634508.849881439] [local_ptcld]: Local pointcloud over 30 cycles: points avg/min/max=493.1/487/499; decay avg/min/max=0.0000/0.0000/0.0000; wall_ms avg/min/max=2.788/1.231/13.140; tf_wait_ms avg/min/max=0.097/0.061/0.157; processing_ms avg/min/max=2.691/1.145/13.020; cpu_ms avg/min/max=3.064/1.323/15.024; tf_latest_fallbacks=0; tf_drops=34; frequency=9.34 Hz
