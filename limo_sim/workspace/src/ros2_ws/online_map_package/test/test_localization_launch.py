@@ -71,7 +71,7 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
                for node in nodes.values())
     assert len(includes) == 2
     include_arguments = [dict(action.launch_arguments) for action in includes]
-    assert {'use_sim_time': 'true'} in include_arguments
+    assert {'use_sim_time': 'true', 'visual_ptcld_enable_telemetry': 'false'} in include_arguments
     amcl = next(values for values in include_arguments
                 if 'cv_voxel_size' in values)
     assert amcl['cv_voxel_size'] == '0.075'

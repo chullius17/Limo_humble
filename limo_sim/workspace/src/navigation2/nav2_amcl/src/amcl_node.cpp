@@ -234,6 +234,10 @@ AmclNode::AmclNode()
   add_parameter("cv_sad_gain", rclcpp::ParameterValue(20.0));
   add_parameter("laser_weight_factor", rclcpp::ParameterValue(1.0));
   add_parameter("cv_weight_factor", rclcpp::ParameterValue(0.25));
+  add_parameter("cv_quality_gate_enabled", rclcpp::ParameterValue(true));
+  add_parameter("cv_min_information", rclcpp::ParameterValue(0.02));
+  add_parameter("cv_max_position_stddev", rclcpp::ParameterValue(0.5));
+  add_parameter("cv_max_yaw_stddev", rclcpp::ParameterValue(0.5));
   add_parameter("workload_logging_enabled", rclcpp::ParameterValue(true));
 
   add_parameter(
@@ -360,6 +364,7 @@ AmclNode::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
     std::lock_guard<std::mutex> lock(cv_mutex_);
     cv_cloud_buffer_.clear();
     last_fused_cv_cloud_.reset();
+    last_cv_fusion_stamp_ = builtin_interfaces::msg::Time{};
     cv_likelihood_model_.reset();
   }
   map_sub_.reset();
@@ -731,7 +736,9 @@ AmclNode::laserReceived(sensor_msgs::msg::LaserScan::ConstSharedPtr laser_scan)
     }
     // Same ordering as Humble: normalized laser weights, CV fusion, resampling.
     if (cv_enabled_) {
-      applyCvFusion(pf_->sets + pf_->current_set, laser_scan->header.stamp);
+      applyCvFusion(
+        pf_->sets + pf_->current_set, laser_scan->header.stamp,
+        hasValidLaserInformation(*laser_scan));
     }
     if (resample_interval_ == 0) {
       RCLCPP_WARN(
@@ -836,6 +843,13 @@ bool AmclNode::updateFilter(
   const sensor_msgs::msg::LaserScan::ConstSharedPtr & laser_scan,
   const pf_vector_t & pose)
 {
+  // Keep the odometry bookkeeping while disabling laser likelihood updates,
+  // including when no usable CV cloud is available.
+  if (laser_weight_factor_ == 0.0 || !hasValidLaserInformation(*laser_scan)) {
+    lasers_update_[laser_index] = false;
+    pf_odom_pose_ = pose;
+    return true;
+  }
   nav2_amcl::LaserData ldata;
   ldata.laser = lasers_[laser_index];
   ldata.range_count = laser_scan->ranges.size();
@@ -1159,6 +1173,10 @@ AmclNode::initParameters()
   get_parameter("cv_sad_gain", cv_sad_gain_);
   get_parameter("laser_weight_factor", laser_weight_factor_);
   get_parameter("cv_weight_factor", cv_weight_factor_);
+  get_parameter("cv_quality_gate_enabled", cv_quality_gate_enabled_);
+  get_parameter("cv_min_information", cv_quality_limits_.min_information);
+  get_parameter("cv_max_position_stddev", cv_quality_limits_.max_position_stddev);
+  get_parameter("cv_max_yaw_stddev", cv_quality_limits_.max_yaw_stddev);
   get_parameter("workload_logging_enabled", workload_logging_enabled_);
 
   const auto valid_double = [this](double & value, double fallback, double minimum,
@@ -1174,6 +1192,9 @@ AmclNode::initParameters()
   valid_double(cv_sad_gain_, 20.0, 0.0, "cv_sad_gain");
   valid_double(laser_weight_factor_, 1.0, 0.0, "laser_weight_factor");
   valid_double(cv_weight_factor_, 0.25, 0.0, "cv_weight_factor");
+  valid_double(cv_quality_limits_.min_information, 0.02, 0.0, "cv_min_information");
+  valid_double(cv_quality_limits_.max_position_stddev, 0.5, 1e-6, "cv_max_position_stddev");
+  valid_double(cv_quality_limits_.max_yaw_stddev, 0.5, 1e-6, "cv_max_yaw_stddev");
   if (cv_buffer_size_ < 1) {
     cv_buffer_size_ = 10;
   }
@@ -1369,7 +1390,8 @@ AmclNode::initPubSub()
       cv_cloud_topic_, rclcpp::SensorDataQoS(),
       std::bind(&AmclNode::cvCloudReceived, this, std::placeholders::_1));
     RCLCPP_INFO(
-      get_logger(), "CV cloud fusion: %s -> %s, XY voxel %.3f m, classes 2/3/4",
+      get_logger(),
+      "CV cloud fusion: %s -> %s, XY voxel %.3f m, obstacles 2/4/6, roads 1/5 (soft 3 excluded)",
       cv_cloud_topic_.c_str(), cv_map_topic_.c_str(), cv_voxel_size_);
   }
   RCLCPP_INFO(get_logger(), "Subscribed to map topic.");

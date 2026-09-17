@@ -129,13 +129,17 @@ protected:
   // Semantic point clouds are buffered independently of the laser map.
   void cvMapReceived(nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
-  bool applyCvFusion(pf_sample_set_t * set, const builtin_interfaces::msg::Time & stamp);
+  bool hasValidLaserInformation(const sensor_msgs::msg::LaserScan & scan) const;
+  bool applyCvFusion(
+    pf_sample_set_t * set, const builtin_interfaces::msg::Time & stamp,
+    bool lidar_information_valid = true);
   std::mutex cv_mutex_;
   std::unique_ptr<CvLikelihoodModel> cv_likelihood_model_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr cv_map_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cv_cloud_sub_;
   std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> cv_cloud_buffer_;
   sensor_msgs::msg::PointCloud2::ConstSharedPtr last_fused_cv_cloud_;
+  builtin_interfaces::msg::Time last_cv_fusion_stamp_;
   bool cv_enabled_{false};
   bool workload_logging_enabled_{true};
   std::string cv_map_topic_;
@@ -148,6 +152,8 @@ protected:
   double cv_sad_gain_{20.0};
   double laser_weight_factor_{1.0};
   double cv_weight_factor_{0.25};
+  bool cv_quality_gate_enabled_{true};
+  CvLikelihoodModel::QualityLimits cv_quality_limits_;
 
   // Services and service callbacks
   void initServices();

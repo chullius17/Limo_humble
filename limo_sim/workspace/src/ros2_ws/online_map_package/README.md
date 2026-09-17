@@ -12,9 +12,10 @@ in `ros2_maps/semantic` dal mapper offline:
 | `limo_map_complete.yaml` | `/map` | riferimento completo per visualizzazione/navigation |
 
 La cloud `/limo/cv_package/visual_ptcld/points` contiene `x,y,z` FLOAT32 e
-`class_id` UINT8. AMCL seleziona **turquoise=2, white=3, boardwalk=4**; i blu
-1/5 e le altre classi non votano. Le tre classi vengono unite perché la mappa
-CV di riferimento è binaria. Nessuna immagine o griglia BEV locale entra in AMCL.
+`class_id` UINT8. AMCL seleziona **yellow lines=2, boardwalk=4, interior
+boardwalk=6** come ostacoli e **exterior road=1, interior road=5** come strada.
+**Soft obstacle=3**, unknown e le altre classi non votano. Nessuna immagine
+o griglia BEV locale entra in AMCL.
 
 Per ogni aggiornamento laser:
 
@@ -23,25 +24,56 @@ Per ogni aggiornamento laser:
 3. Trasforma la cloud nel frame base al timestamp laser usando `odom` come
    frame fisso, senza dipendere dalla posa globale stimata da AMCL.
 4. Dopo il filtro delle classi, aggrega in voxel **XY** da `cv_voxel_size`
-   (default 0.075 m). Usa il centroide dei punti di ciascun voxel, con peso 1.
+   (default 0.075 m), separando strada e ostacoli. Usa il centroide dei punti
+   di ciascun gruppo nel voxel, con peso 1.
    La riduzione da 2 cm in `visual_ptcld` resta il primo stadio. Non si
-   moltiplica il peso per il numero di punti o classi nello stesso voxel.
+   moltiplica il peso per il numero di punti o classi della stessa polarità.
+   Se strada e ostacolo condividono un voxel, mantengono due voti distinti.
 5. Trasforma questo insieme con **ogni posa candidata** e calcola la frazione
-   di voxel che non ricadono su celle occupate della mappa CV.
+   di voti non corrispondenti: ostacoli su celle occupate, strada su celle
+   esattamente a costo 0 della stessa mappa CV. Il mismatch è normalizzato
+   sul totale dei voti strada + ostacoli, senza pesi aggiuntivi tra i due gruppi.
 6. Applica la formula del riferimento Humble e normalizza prima del resampling:
    `w_final ∝ w_laser^laser_weight_factor × exp(-cv_weight_factor × cv_sad_gain × mismatch)`.
 
 Il mismatch conserva la regola SAD positiva di Humble: libero, sconosciuto e
-fuori mappa danno disaccordo rispetto a un ostacolo osservato. L'assenza di punti
-non prova spazio libero. White è una classe positiva, non lo sfondo bianco di
-un'immagine. Non viene più usata una mappa street separata.
+fuori mappa danno disaccordo rispetto a un ostacolo osservato. La nuova componente
+"negative SAD" usa solo le classi strada esplicitamente osservate: qualsiasi
+cella diversa da 0, sconosciuto e fuori mappa danno disaccordo. L'assenza di punti
+non prova spazio libero. Non viene usata una mappa street separata e i soft
+obstacles non partecipano al confronto. La componente negativa estende il
+modello positivo del riferimento Humble disponibile nel repository.
 
 Cloud assente, troppo distante nel tempo, malformata, TF indisponibile o meno di
-`cv_min_points` voxel (default 5) lasciano i pesi laser invariati. Lo stesso
-frame CV non viene riapplicato in aggiornamenti consecutivi. `cv_enabled:=false`
-o `cv_weight_factor:=0.0` disabilitano la fusione. Come in Humble,
-`laser_weight_factor` si applica soltanto quando avviene la fusione CV.
+`cv_min_points` voxel (default 5) impediscono l'aggiornamento CV.
+Come nel launch online Humble, `cv_sync_tolerance` vale 0.20 s: la stessa cloud
+può essere riutilizzata entro questo limite **solo se il lidar non contiene
+ritorni validi oppure `laser_weight_factor` è zero**. Un ritorno valido è una
+distanza finita strettamente interna ai limiti utili del sensore e configurati.
+Con lidar valido e peso positivo ogni frame CV viene usato una sola volta.
+Il limite temporale parte sempre dal timestamp originale della cloud; il
+riutilizzo non lo rinnova. Ogni riutilizzo ricompensa il movimento tramite TF
+odom e conserva il guadagno CV configurato, come nel riferimento Humble.
+
+I profili attuali usano `laser_weight_factor: 1.0` e `cv_weight_factor: 1.0`.
+Il peso laser zero salta il modello laser anche quando manca la CV. Il topic
+`/scan` resta necessario per scandire gli aggiornamenti e valutarne la validità:
+se smette completamente di arrivare, questo meccanismo non avvia aggiornamenti
+autonomi. `cv_enabled:=false` o `cv_weight_factor:=0.0` disabilitano la fusione CV.
 I parametri CV si leggono alla configurazione del nodo: per cambiarli riavviare.
+
+Prima della fusione, `cv_quality_gate_enabled: true` valuta la probabilità
+prodotta dalla sola CV sulle pose delle particelle correnti. Un confronto quasi
+uniforme viene scartato (`cv_min_information: 0.02` nats di divergenza KL dalla
+distribuzione uniforme). Si scartano anche ipotesi CV con deviazione standard
+superiore a `cv_max_position_stddev: 0.5` m lungo l'asse XY più disperso oppure
+`cv_max_yaw_stddev: 0.5` rad per l'orientamento circolare. Le strade restano attive.
+Il rifiuto avviene prima di modificare qualsiasi peso: con laser attivo viene
+conservato il suo aggiornamento. Il log `CV update rejected` mostra motivo e
+misure. Questi valori descrivono l'ambiguità CV sulle particelle disponibili,
+non la covarianza del sensore; le soglie iniziali richiedono verifica sul circuito.
+Una distribuzione globale molto dispersa può restare esclusa dalla fusione CV
+finché il lidar o una posa iniziale non restringono le ipotesi.
 
 ## Avvio
 

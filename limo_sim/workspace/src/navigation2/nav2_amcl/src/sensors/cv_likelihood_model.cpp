@@ -63,10 +63,11 @@ bool CvLikelihoodModel::setMap(const nav_msgs::msg::OccupancyGrid & map_msg)
     return false;
   }
 
-  // Preserve Humble SAD semantics: unknown and free cells are non-obstacles.
+  // Distinguish exact free space from unknown/intermediate map values.
   for (std::size_t index = 0; index < expected_size; ++index) {
     new_map->cells[index].occ_state =
-      map_msg.data[index] >= parameters_.occupied_threshold ? 1 : -1;
+      map_msg.data[index] == 0 ? -1 :
+      (map_msg.data[index] >= parameters_.occupied_threshold ? 1 : 0);
   }
   // Replace the previous map only after construction has succeeded.
   if (map_ != nullptr) {
@@ -105,16 +106,17 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
   const auto sample_count = static_cast<std::size_t>(set->sample_count);
   result.normalized_sad.resize(sample_count, 0.0);
 
-  // Accumulate foreground confidence once. Background cells are deliberately
-  // ignored because this semantic detector does not distinguish a confident
-  // negative from a missed or unavailable classification.
+  // Only explicit observations enter this template: occupancy 1 is an obstacle,
+  // occupancy 0 is a classified road, never an absent/unclassified point.
   for (const auto & cell : cells) {
     if (std::isfinite(cell.occupancy) && std::isfinite(cell.x) && std::isfinite(cell.y)) {
       const double occupancy = std::max(0.0, std::min(cell.occupancy, 1.0));
       result.positive_mass += occupancy;
+      result.negative_mass += 1.0 - occupancy;
     }
   }
-  if (result.positive_mass <= 0.0) {
+  const double observation_mass = result.positive_mass + result.negative_mass;
+  if (observation_mass <= 0.0) {
     return result;
   }
 
@@ -122,7 +124,7 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
     const auto & sample = set->samples[sample_index];
     const double cos_yaw = std::cos(sample.pose.v[2]);
     const double sin_yaw = std::sin(sample.pose.v[2]);
-    double false_positive_sum = 0.0;
+    double mismatch_sum = 0.0;
 
     for (const auto & cell : cells) {
       if (!std::isfinite(cell.x) || !std::isfinite(cell.y) ||
@@ -131,9 +133,7 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
         continue;
       }
       const double local_positive = std::max(0.0, std::min(cell.occupancy, 1.0));
-      if (local_positive <= 0.0) {
-        continue;
-      }
+      const double local_negative = 1.0 - local_positive;
       const double world_x = sample.pose.v[0] + cos_yaw * cell.x - sin_yaw * cell.y;
       const double world_y = sample.pose.v[1] + sin_yaw * cell.x + cos_yaw * cell.y;
 
@@ -146,22 +146,100 @@ CvLikelihoodModel::SadScoreResult CvLikelihoodModel::scoreSad(
       if (!std::isfinite(column_d) || !std::isfinite(row_d) ||
         column_d < 0 || column_d >= map_->size_x || row_d < 0 || row_d >= map_->size_y)
       {
-        false_positive_sum += local_positive;
+        mismatch_sum += local_positive + local_negative;
         continue;
       }
       const int column = static_cast<int>(column_d);
       const int row = static_cast<int>(row_d);
 
-      const double static_occupancy =
-        map_->cells[MAP_INDEX(map_, column, row)].occ_state > 0 ? 1.0 : 0.0;
-      false_positive_sum += local_positive * (1.0 - static_occupancy);
+      const int static_state = map_->cells[MAP_INDEX(map_, column, row)].occ_state;
+      mismatch_sum += local_positive * (static_state == 1 ? 0.0 : 1.0) +
+        local_negative * (static_state == -1 ? 0.0 : 1.0);
     }
 
-    const double normalized_sad = false_positive_sum / result.positive_mass;
+    const double normalized_sad = mismatch_sum / observation_mass;
     const auto output_index = static_cast<std::size_t>(sample_index);
     result.normalized_sad[output_index] = normalized_sad;
   }
   return result;
+}
+
+bool CvLikelihoodModel::assessQuality(
+  const pf_sample_set_t * set, const SadScoreResult & score, double effective_gain,
+  const QualityLimits & limits, QualityReport & report)
+{
+  report = QualityReport{};
+  if (!set || !set->samples || set->sample_count <= 0 ||
+    score.normalized_sad.size() != static_cast<std::size_t>(set->sample_count) ||
+    !std::isfinite(effective_gain) || effective_gain <= 0.0 ||
+    !std::isfinite(limits.min_information) || limits.min_information < 0.0 ||
+    !std::isfinite(limits.max_position_stddev) || limits.max_position_stddev <= 0.0 ||
+    !std::isfinite(limits.max_yaw_stddev) || limits.max_yaw_stddev <= 0.0)
+  {
+    return false;
+  }
+  double best = std::numeric_limits<double>::infinity();
+  for (int i = 0; i < set->sample_count; ++i) {
+    const auto & pose = set->samples[i].pose;
+    if (!std::isfinite(score.normalized_sad[i]) || score.normalized_sad[i] < 0.0 ||
+      !std::isfinite(pose.v[0]) || !std::isfinite(pose.v[1]) || !std::isfinite(pose.v[2]))
+    {
+      return false;
+    }
+    best = std::min(best, score.normalized_sad[i]);
+  }
+  std::vector<double> support(set->sample_count);
+  double total = 0.0;
+  for (int i = 0; i < set->sample_count; ++i) {
+    support[i] = std::exp(-effective_gain * (score.normalized_sad[i] - best));
+    total += support[i];
+  }
+  // Relative coordinates avoid subtracting large squared world coordinates.
+  const double origin_x = set->samples[0].pose.v[0];
+  const double origin_y = set->samples[0].pose.v[1];
+  double mean_x = 0.0, mean_y = 0.0, mean_cos = 0.0, mean_sin = 0.0;
+  for (int i = 0; i < set->sample_count; ++i) {
+    support[i] /= total;
+    const double p = support[i];
+    const auto & pose = set->samples[i].pose;
+    mean_x += p * (pose.v[0] - origin_x);
+    mean_y += p * (pose.v[1] - origin_y);
+    mean_cos += p * std::cos(pose.v[2]);
+    mean_sin += p * std::sin(pose.v[2]);
+    if (p > 0.0) {
+      report.information += p * std::log(p * set->sample_count);
+    }
+  }
+  double xx = 0.0, xy = 0.0, yy = 0.0;
+  for (int i = 0; i < set->sample_count; ++i) {
+    const double dx = (set->samples[i].pose.v[0] - origin_x) - mean_x;
+    const double dy = (set->samples[i].pose.v[1] - origin_y) - mean_y;
+    xx += support[i] * dx * dx;
+    xy += support[i] * dx * dy;
+    yy += support[i] * dy * dy;
+  }
+  report.information = std::max(0.0, report.information);
+  report.position_stddev = std::sqrt(0.5 * (xx + yy + std::hypot(xx - yy, 2.0 * xy)));
+  const double resultant = std::min(1.0, std::hypot(mean_cos, mean_sin));
+  report.yaw_stddev = resultant > 0.0 ? std::sqrt(-2.0 * std::log(resultant)) :
+    std::numeric_limits<double>::infinity();
+  if (!std::isfinite(report.position_stddev) || !std::isfinite(report.information)) {
+    return false;
+  }
+  if (report.information < limits.min_information || report.information <= 1e-12) {
+    report.reason = "uninformative";
+    return false;
+  }
+  if (report.position_stddev > limits.max_position_stddev) {
+    report.reason = "position_spread";
+    return false;
+  }
+  if (report.yaw_stddev > limits.max_yaw_stddev) {
+    report.reason = "yaw_spread";
+    return false;
+  }
+  report.reason = "accepted";
+  return true;
 }
 
 bool CvLikelihoodModel::fuseWeights(

@@ -220,11 +220,13 @@ Il salvataggio richiede una mappa laser valida ricevuta su
 
 - `limo_map_laser.pgm/.yaml`: copia del solo layer laser SLAM in modalità
   `raw`, con gli stessi valori di occupazione e celle sconosciute.
-- `limo_map_cv_obstacle.pgm/.yaml`: mappa binaria `trinary` ottenuta dal solo
-  layer CV (dopo il filtro di salvataggio). I costi 0..9 sono liberi, 10..95
-  occupati, gli altri sconosciuti. Il laser non modifica questa mappa:
-  una cella laser libera non crea evidenza CV e un ostacolo laser non cancella
-  l'osservazione CV sottostante.
+- `limo_map_cv_obstacle.pgm/.yaml`: mappa binaria `trinary` ottenuta dal
+  layer CV (dopo il filtro di salvataggio). I costi 0..39 sono liberi, 40..95
+  occupati, gli altri sconosciuti. Le celle CV non osservate (-1) diventano
+  libere solo se il laser vale esattamente 0; con laser sconosciuto o positivo
+  restano sconosciute. I valori CV osservati non vengono sovrascritti dal laser.
+  Questo riempimento viene ricalcolato a ogni salvataggio e non modifica
+  l'evidenza CV accumulata.
 - `limo_map_complete.pgm/.yaml`: fusione dei layer in modalità `raw`.
   La precedenza è laser a 100, classe CV osservata, quindi stato del laser.
   Una cella sconosciuta in entrambi resta sconosciuta.

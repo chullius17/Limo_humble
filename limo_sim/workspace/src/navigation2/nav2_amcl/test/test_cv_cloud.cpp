@@ -41,29 +41,36 @@ sensor_msgs::msg::PointCloud2 cloudOf(const std::vector<std::array<float, 4>> & 
   return cloud;
 }
 
-TEST(CvCloud, MergesObstacleClassesButIgnoresBothBlueClassesAndInvalidPoints)
+TEST(CvCloud, MergesObstacleClassesAndRoadsSeparatelyIgnoringSoftAndUnknown)
 {
   auto cloud = cloudOf(
     {
       {0.01f, 0.01f, 0, 2}, {0.03f, 0.03f, 0, 3}, {0.05f, 0.05f, 0, 4},
       {0.07f, 0.07f, 0, 6},
-      {1, 1, 0, 1}, {2, 2, 0, 5}, {3, 3, 0, 0},
+      {0.02f, 0.02f, 0, 1}, {0.04f, 0.04f, 0, 5}, {3, 3, 0, 0},
+      {4, 4, 0, 3}, {5, 5, 0, 7},
       {std::numeric_limits<float>::quiet_NaN(), 0, 0, 2},
-      {0, 0, std::numeric_limits<float>::infinity(), 3}});
+      {0, 0, std::numeric_limits<float>::infinity(), 5}});
   std::vector<CvTemplateCell2D> cells;
   std::string error;
   ASSERT_TRUE(
     nav2_amcl::voxelizeCvCloud(
       cloud, tf2::Transform::getIdentity(), 0.075, cells, error));
-  ASSERT_EQ(cells.size(), 1u);
-  EXPECT_NEAR(cells[0].x, 0.04, 1e-7);
-  EXPECT_NEAR(cells[0].y, 0.04, 1e-7);
-  EXPECT_DOUBLE_EQ(cells[0].occupancy, 1.0);
+  ASSERT_EQ(cells.size(), 2u);
+  std::sort(
+    cells.begin(), cells.end(), [](const CvTemplateCell2D & a,
+    const CvTemplateCell2D & b) {return a.occupancy < b.occupancy;});
+  EXPECT_NEAR(cells[0].x, 0.03, 1e-7);
+  EXPECT_NEAR(cells[0].y, 0.03, 1e-7);
+  EXPECT_DOUBLE_EQ(cells[0].occupancy, 0.0);
+  EXPECT_NEAR(cells[1].x, 0.13 / 3, 1e-7);
+  EXPECT_NEAR(cells[1].y, 0.13 / 3, 1e-7);
+  EXPECT_DOUBLE_EQ(cells[1].occupancy, 1.0);
 }
 
 TEST(CvCloud, AppliesFullTransformAndHandlesNegativeVoxels)
 {
-  auto cloud = cloudOf({{-0.01f, 0.01f, 0, 3}, {0.01f, 0.01f, 0, 4}});
+  auto cloud = cloudOf({{-0.01f, 0.01f, 0, 1}, {0.01f, 0.01f, 0, 4}});
   std::vector<CvTemplateCell2D> cells;
   std::string error;
   ASSERT_TRUE(
@@ -83,7 +90,7 @@ TEST(CvCloud, AppliesFullTransformAndHandlesNegativeVoxels)
 
 TEST(CvCloud, ReadsOrganizedBigEndianCloudWithRowPadding)
 {
-  auto cloud = cloudOf({{1, 2, 0, 2}, {3, 4, 0, 3}});
+  auto cloud = cloudOf({{1, 2, 0, 2}, {3, 4, 0, 5}});
   cloud.height = 2;
   cloud.width = 1;
   cloud.row_step = 20;
@@ -186,6 +193,63 @@ TEST(CvCloud, RotatedMapAndParticlePoseAreAppliedIndependently)
   samples[1].pose.v[0] = 100;  // Off-map observation must disagree.
   const auto score = model.scoreSad(&set, {{0.5, 0.5, 1}});
   EXPECT_EQ(score.normalized_sad, (std::vector<double>{0, 1}));
+  map.data = {0, 100};
+  ASSERT_TRUE(model.setMap(map));
+  const auto road_score = model.scoreSad(&set, {{0.5, 0.5, 0}});
+  EXPECT_EQ(road_score.normalized_sad, (std::vector<double>{0, 1}));
+}
+
+TEST(CvCloud, RoadMatchesOnlyExactZeroIncludingUnknownAndOffMapChecks)
+{
+  nav_msgs::msg::OccupancyGrid map;
+  map.info.width = 5;
+  map.info.height = 1;
+  map.info.resolution = 1;
+  map.info.origin.orientation.w = 1;
+  map.data = {0, -1, 1, 49, 100};
+  CvLikelihoodModel model(CvLikelihoodModel::Parameters{});
+  ASSERT_TRUE(model.setMap(map));
+  pf_sample_t samples[6]{};
+  pf_sample_set_t set{};
+  set.samples = samples;
+  set.sample_count = 6;
+  for (int i = 0; i < 6; ++i) {
+    samples[i].pose.v[0] = i;
+    samples[i].weight = 1.0 / 6;
+  }
+  const auto score = model.scoreSad(&set, {{0.2, 0.2, 0.0}});
+  EXPECT_EQ(score.normalized_sad, (std::vector<double>{0, 1, 1, 1, 1, 1}));
+  EXPECT_DOUBLE_EQ(score.positive_mass, 0.0);
+  EXPECT_DOUBLE_EQ(score.negative_mass, 1.0);
+  ASSERT_TRUE(CvLikelihoodModel::fuseWeights(&set, score, 1, 1, 20));
+  EXPECT_GT(samples[0].weight, 0.99);
+}
+
+TEST(CvCloud, MixedSadUsesAllObservedVotesAndSkipsNonfiniteCells)
+{
+  nav_msgs::msg::OccupancyGrid map;
+  map.info.width = 4;
+  map.info.height = 1;
+  map.info.resolution = 1;
+  map.info.origin.orientation.w = 1;
+  map.data = {100, 0, -1, 100};
+  CvLikelihoodModel model(CvLikelihoodModel::Parameters{});
+  ASSERT_TRUE(model.setMap(map));
+  pf_sample_t samples[3]{};
+  pf_sample_set_t set{};
+  set.samples = samples;
+  set.sample_count = 3;
+  for (int i = 0; i < 3; ++i) {
+    samples[i].pose.v[0] = i;
+  }
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const auto score = model.scoreSad(
+    &set, {{0.2, 0.2, 1}, {1.2, 0.2, 0}, {nan, 0, 0}, {0, 0, nan}});
+  EXPECT_DOUBLE_EQ(score.positive_mass, 1.0);
+  EXPECT_DOUBLE_EQ(score.negative_mass, 1.0);
+  EXPECT_EQ(score.normalized_sad, (std::vector<double>{0, 1, 1}));
+  const auto conflict = model.scoreSad(&set, {{0.2, 0.2, 1}, {0.2, 0.2, 0}});
+  EXPECT_EQ(conflict.normalized_sad, (std::vector<double>{0.5, 0.5, 1}));
 }
 
 TEST(CvCloud, FusionUsesHumbleExponentsAndDoesNotModifyWeightsOnInvalidInput)
@@ -204,5 +268,70 @@ TEST(CvCloud, FusionUsesHumbleExponentsAndDoesNotModifyWeightsOnInvalidInput)
   score.normalized_sad[0] = std::numeric_limits<double>::quiet_NaN();
   EXPECT_FALSE(CvLikelihoodModel::fuseWeights(&set, score, 2, 1, 20));
   EXPECT_EQ(samples[0].weight, old_weight);
+}
+TEST(CvCloud, QualityRejectsFlatAndWeakScoresWithoutChangingWeights)
+{
+  pf_sample_t samples[3]{};
+  samples[0].weight = 0.8;
+  samples[1].weight = samples[2].weight = 0.1;
+  pf_sample_set_t set{};
+  set.samples = samples;
+  set.sample_count = 3;
+  CvLikelihoodModel::SadScoreResult score;
+  CvLikelihoodModel::QualityLimits limits;
+  CvLikelihoodModel::QualityReport report;
+  for (const auto & values : {std::vector<double>{0, 0, 0},
+      std::vector<double>{1, 1, 1}, std::vector<double>{0.5, 0.5001, 0.5}})
+  {
+    score.normalized_sad = values;
+    EXPECT_FALSE(CvLikelihoodModel::assessQuality(&set, score, 20, limits, report));
+    EXPECT_STREQ(report.reason, "uninformative");
+  }
+  EXPECT_DOUBLE_EQ(samples[0].weight, 0.8);
+  EXPECT_DOUBLE_EQ(samples[1].weight, 0.1);
+  EXPECT_DOUBLE_EQ(samples[2].weight, 0.1);
+}
+
+TEST(CvCloud, QualityRejectsWidelySeparatedMatchesAndAcceptsCompactSupport)
+{
+  pf_sample_t samples[3]{};
+  samples[1].pose.v[0] = 10;
+  samples[2].pose.v[0] = 5;
+  pf_sample_set_t set{};
+  set.samples = samples;
+  set.sample_count = 3;
+  CvLikelihoodModel::SadScoreResult score;
+  score.normalized_sad = {0, 0, 1};
+  CvLikelihoodModel::QualityLimits limits;
+  CvLikelihoodModel::QualityReport report;
+  EXPECT_FALSE(CvLikelihoodModel::assessQuality(&set, score, 20, limits, report));
+  EXPECT_STREQ(report.reason, "position_spread");
+  EXPECT_NEAR(report.position_stddev, 5.0, 1e-6);
+  samples[1].pose.v[0] = 0.1;
+  EXPECT_TRUE(CvLikelihoodModel::assessQuality(&set, score, 20, limits, report));
+  EXPECT_LT(report.position_stddev, 0.051);
+}
+
+TEST(CvCloud, QualityHandlesYawWrapAndRejectsOppositeOrientations)
+{
+  pf_sample_t samples[3]{};
+  samples[0].pose.v[2] = M_PI - 0.01;
+  samples[1].pose.v[2] = -M_PI + 0.01;
+  pf_sample_set_t set{};
+  set.samples = samples;
+  set.sample_count = 3;
+  CvLikelihoodModel::SadScoreResult score;
+  score.normalized_sad = {0, 0, 1};
+  CvLikelihoodModel::QualityLimits limits;
+  CvLikelihoodModel::QualityReport report;
+  EXPECT_TRUE(CvLikelihoodModel::assessQuality(&set, score, 20, limits, report));
+  EXPECT_LT(report.yaw_stddev, 0.011);
+  samples[0].pose.v[2] = 0;
+  samples[1].pose.v[2] = M_PI;
+  EXPECT_FALSE(CvLikelihoodModel::assessQuality(&set, score, 20, limits, report));
+  EXPECT_STREQ(report.reason, "yaw_spread");
+  samples[0].pose.v[0] = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(CvLikelihoodModel::assessQuality(&set, score, 20, limits, report));
+  EXPECT_STREQ(report.reason, "invalid");
 }
 }  // namespace

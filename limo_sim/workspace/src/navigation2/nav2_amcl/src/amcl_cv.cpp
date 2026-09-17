@@ -3,6 +3,7 @@
 #include "nav2_amcl/amcl_node.hpp"
 #include "nav2_amcl/sensors/cv/cv_point_cloud.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -40,14 +41,35 @@ void AmclNode::cvCloudReceived(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg
   }
 }
 
+bool AmclNode::hasValidLaserInformation(const sensor_msgs::msg::LaserScan & scan) const
+{
+  if (!std::isfinite(scan.range_min) || !std::isfinite(scan.range_max) ||
+    scan.range_min < 0.0 || scan.range_max <= scan.range_min ||
+    !std::isfinite(scan.angle_min) || !std::isfinite(scan.angle_increment))
+  {
+    return false;
+  }
+  const double minimum = laser_min_range_ > 0.0 ?
+    std::max(laser_min_range_, static_cast<double>(scan.range_min)) : scan.range_min;
+  const double maximum = laser_max_range_ > 0.0 ?
+    std::min(laser_max_range_, static_cast<double>(scan.range_max)) : scan.range_max;
+  return std::any_of(
+    scan.ranges.begin(), scan.ranges.end(),
+    [minimum, maximum](float range) {
+      return std::isfinite(range) && range > minimum && range < maximum;
+    });
+}
+
 bool AmclNode::applyCvFusion(
-  pf_sample_set_t * set, const builtin_interfaces::msg::Time & laser_stamp)
+  pf_sample_set_t * set, const builtin_interfaces::msg::Time & laser_stamp,
+  bool lidar_information_valid)
 {
   if (cv_weight_factor_ == 0.0 || cv_sad_gain_ == 0.0 || !set || set->sample_count <= 0) {
     return false;
   }
   sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud;
   double time_error = std::numeric_limits<double>::infinity();
+  bool reused = false;
   {
     std::lock_guard<std::mutex> lock(cv_mutex_);
     if (!cv_likelihood_model_ || !cv_likelihood_model_->ready()) {
@@ -65,13 +87,25 @@ bool AmclNode::applyCvFusion(
     if (!cloud || time_error > cv_sync_tolerance_) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 2000,
-        "No synchronized CV cloud (dt=%.3f s, tolerance=%.3f s); using laser only",
+        "No synchronized CV cloud (dt=%.3f s, tolerance=%.3f s); skipping CV update",
         time_error, cv_sync_tolerance_);
       return false;
     }
-    // A repeated laser update must not count the same semantic frame twice.
-    if (last_fused_cv_cloud_ && cloud->header.stamp == last_fused_cv_cloud_->header.stamp) {
-      return false;
+    if (last_fused_cv_cloud_) {
+      // Never reprocess the same scan or go backwards through the CV buffer.
+      if (rclcpp::Time(laser_stamp) <= rclcpp::Time(last_cv_fusion_stamp_) ||
+        rclcpp::Time(cloud->header.stamp) < rclcpp::Time(last_fused_cv_cloud_->header.stamp))
+      {
+        return false;
+      }
+      reused = cloud->header.stamp == last_fused_cv_cloud_->header.stamp;
+      // Match Humble's timeout, but allow reuse only without useful lidar.
+      // The timeout above always refers to the original cloud timestamp.
+      if (reused && ((lidar_information_valid && laser_weight_factor_ > 0.0) ||
+        rclcpp::Time(cloud->header.stamp) > rclcpp::Time(laser_stamp)))
+      {
+        return false;
+      }
     }
   }
 
@@ -99,25 +133,39 @@ bool AmclNode::applyCvFusion(
   if (cells.size() < cv_min_points_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "CV cloud has %zu obstacle voxels, minimum %.0f; using laser only",
+      "CV cloud has %zu obstacle/road voxels, minimum %.0f; skipping CV update",
       cells.size(), cv_min_points_);
     return false;
   }
   std::lock_guard<std::mutex> lock(cv_mutex_);
   const auto score = cv_likelihood_model_->scoreSad(set, cells);
+  CvLikelihoodModel::QualityReport quality;
+  if (cv_quality_gate_enabled_ && !CvLikelihoodModel::assessQuality(
+      set, score, cv_weight_factor_ * cv_sad_gain_, cv_quality_limits_, quality))
+  {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "CV update rejected: %s, information=%.4f, position_stddev=%.3f m, yaw_stddev=%.3f rad",
+      quality.reason, quality.information, quality.position_stddev, quality.yaw_stddev);
+    return false;
+  }
   if (!CvLikelihoodModel::fuseWeights(
       set, score, laser_weight_factor_, cv_weight_factor_, cv_sad_gain_))
   {
     return false;
   }
   last_fused_cv_cloud_ = cloud;
+  last_cv_fusion_stamp_ = laser_stamp;
   if (workload_logging_enabled_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "CV cloud fusion: dt=%.4f s input=%llu voxels=%zu particles=%d evaluations=%llu",
+      "CV cloud fusion: dt=%.4f s input=%llu voxels=%zu particles=%d evaluations=%llu "
+      "reused=%s lidar_valid=%s laser_weight=%.3f",
       time_error, static_cast<unsigned long long>(cloud->width) * cloud->height,
       cells.size(), set->sample_count,
-      static_cast<unsigned long long>(cells.size()) * set->sample_count);
+      static_cast<unsigned long long>(cells.size()) * set->sample_count,
+      reused ? "true" : "false", lidar_information_valid ? "true" : "false",
+      laser_weight_factor_);
   }
   return true;
 }

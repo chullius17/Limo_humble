@@ -137,7 +137,7 @@ def test_map_replacement_removes_ghost_even_with_same_geometry(node, tmp_path):
     assert result.success, result.message
     assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [[0, 0, -1]]
     assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [[0, 0, -1]]
-    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [[-1]*3]
+    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [[0, 0, -1]]
 
 
 @pytest.mark.parametrize('invalid', ['length', 'value', 'frame', 'resolution'])
@@ -207,7 +207,7 @@ def test_reset_and_save_exact_costs(node, tmp_path):
     assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [
         [0, 0, 100, -1, 100]]
     assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
-        [0, 100, 100, 100, -1]]
+        [0, 100, 0, 100, -1]]
     metadata = (tmp_path / 'limo_map_complete.yaml').read_text(encoding='utf-8')
     assert 'image: limo_map_complete.pgm\n' in metadata
     assert 'mode: raw\n' in metadata
@@ -277,9 +277,26 @@ def test_live_combined_grid_contains_laser_and_cv(node):
 
 
 def test_cv_obstacle_cost_boundaries():
-    complete = np.array([[-1, 0, 9, 10, 95, 96, 100]], dtype=np.int8)
+    semantic = np.array([[-1, 0, 9, 10, 30, 39, 40, 60, 90, 95, 96, 100]],
+                        dtype=np.int8)
     np.testing.assert_array_equal(
-        cv_obstacle_map(complete), [[-1, 0, 0, 100, 100, -1, -1]])
+        cv_obstacle_map(semantic, np.full_like(semantic, -1)),
+        [[-1, 0, 0, 0, 0, 0, 100, 100, 100, 100, -1, -1]])
+
+
+def test_cv_unknown_uses_only_exact_laser_zero_without_mutating_sources():
+    semantic = np.array([[-1, -1, -1, -1, 30, 60, 90, 0]], dtype=np.int8)
+    laser = np.array([[0, -1, 1, 100, 100, 0, 0, 100]], dtype=np.int8)
+    semantic_before, laser_before = semantic.copy(), laser.copy()
+    np.testing.assert_array_equal(
+        cv_obstacle_map(semantic, laser), [[0, -1, -1, -1, 0, 100, 100, 0]])
+    np.testing.assert_array_equal(semantic, semantic_before)
+    np.testing.assert_array_equal(laser, laser_before)
+
+
+def test_cv_obstacle_rejects_mismatched_geometry():
+    with pytest.raises(ValueError, match='geometry differs'):
+        cv_obstacle_map(np.array([[-1, -1]]), np.array([[0]]))
 
 
 def test_save_requires_slam_map(node, tmp_path):
@@ -301,7 +318,7 @@ def test_save_before_semantic_observations_produces_three_maps(node, tmp_path):
     assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == expected
     assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == expected
     assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
-        [-1, -1, -1]]
+        [-1, 0, -1]]
 
 
 def test_cartographer_pose_updates_reposition_old_evidence(node):
@@ -346,7 +363,7 @@ def test_cartographer_insertion_uses_submap_epoch_and_sensor_motion(node):
     assert node.grid.render()[0].origin[0] == 11.0
 
 
-def test_cv_export_is_independent_of_laser_and_reset_preserves_laser(node, tmp_path):
+def test_cv_export_fills_unknown_from_current_laser_and_reset_preserves_laser(node, tmp_path):
     node.config['save_directory'] = str(tmp_path)
     node.config['save_median_kernel'] = 1
     node.map_callback(reference_map([[100, 0, -1, -1]]))
@@ -355,13 +372,14 @@ def test_cv_export_is_independent_of_laser_and_reset_preserves_laser(node, tmp_p
     assert result.success, result.message
     assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [[100, 0, -1, -1]]
     assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [[100, 0, 0, -1]]
-    cv_before = (tmp_path / 'limo_map_cv_obstacle.pgm').read_bytes()
     assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
-        [100, -1, 0, -1]]
+        [100, 0, 0, -1]]
     node.map_callback(reference_map([[0, -1, 100, 0]]))
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
-    assert (tmp_path / 'limo_map_cv_obstacle.pgm').read_bytes() == cv_before
+    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
+        [100, -1, 0, 0]]
+    assert node.grid.render(node.reference_geometry)[2].tolist() == [[90, -1, 0, -1]]
     published = []
     node.combined_pub = SimpleNamespace(publish=published.append)
     result = node.reset_map(Trigger.Request(), Trigger.Response())
@@ -370,7 +388,8 @@ def test_cv_export_is_independent_of_laser_and_reset_preserves_laser(node, tmp_p
     assert node.laser_map.tolist() == [[0, -1, 100, 0]]
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
-    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [[-1]*4]
+    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
+        [0, -1, -1, 0]]
 
 
 def test_cv_waits_for_laser_map_before_publication(node, tmp_path):

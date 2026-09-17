@@ -3,6 +3,7 @@
 #include "nav2_amcl/sensors/cv/cv_point_cloud.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -68,14 +69,16 @@ bool voxelizeCvCloud(
     double y{0.0};
     std::size_t count{0};
   };
-  std::unordered_map<uint64_t, Voxel> voxels;
+  // Keep road and obstacle evidence separate even within the same XY voxel.
+  std::unordered_map<uint64_t, std::array<Voxel, 2>> voxels;
   for (uint32_t row = 0; row < cloud.height; ++row) {
     for (uint32_t column = 0; column < cloud.width; ++column) {
       const auto * point = cloud.data.data() +
         static_cast<std::size_t>(row) * cloud.row_step +
         static_cast<std::size_t>(column) * cloud.point_step;
       const uint8_t label = point[fields[3]->offset];
-      if (label != 2 && label != 3 && label != 4 && label != 6) {
+      const bool road = label == 1 || label == 5;
+      if (!road && label != 2 && label != 4 && label != 6) {
         continue;
       }
       const double x = read_float(point + fields[0]->offset);
@@ -98,16 +101,21 @@ bool voxelizeCvCloud(
       const uint64_t key =
         (static_cast<uint64_t>(static_cast<uint32_t>(static_cast<int32_t>(ix))) << 32) |
         static_cast<uint32_t>(static_cast<int32_t>(iy));
-      auto & voxel = voxels[key];
+      auto & voxel = voxels[key][road ? 0 : 1];
       voxel.x += transformed.x();
       voxel.y += transformed.y();
       ++voxel.count;
     }
   }
-  cells.reserve(voxels.size());
+  cells.reserve(voxels.size() * 2);
   for (const auto & entry : voxels) {
-    const auto & voxel = entry.second;
-    cells.push_back({voxel.x / voxel.count, voxel.y / voxel.count, 1.0});
+    for (std::size_t polarity = 0; polarity < 2; ++polarity) {
+      const auto & voxel = entry.second[polarity];
+      if (voxel.count > 0) {
+        cells.push_back(
+          {voxel.x / voxel.count, voxel.y / voxel.count, static_cast<double>(polarity)});
+      }
+    }
   }
   return true;
 }

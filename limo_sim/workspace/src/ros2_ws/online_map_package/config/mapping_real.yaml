@@ -30,10 +30,14 @@ amcl:
   cv_voxel_size: 0.075
   cv_min_points: 5.0
   cv_occupied_threshold: 50
-  # Disable the CV contribution to AMCL particle weights.
+  # Equal laser/CV factors; unusable CV leaves the laser update intact.
   laser_weight_factor: 1.0
-  cv_weight_factor: 0.0
+  cv_weight_factor: 1.0
   cv_sad_gain: 20.0
+  cv_quality_gate_enabled: true
+  cv_min_information: 0.02
+  cv_max_position_stddev: 0.5
+  cv_max_yaw_stddev: 0.5
   max_particles: 800
   min_particles: 300
   workload_logging_enabled: true

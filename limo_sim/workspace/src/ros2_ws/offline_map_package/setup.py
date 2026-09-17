@@ -25,7 +25,6 @@ setup(
     entry_points={
         'console_scripts': [
             'semantic_mapper = offline_map_package.semantic_mapper:main',
-            'map_saver = offline_map_package.map_saver:main',
             'map_save_gui = offline_map_package.map_save_gui:main',
         ],
     },

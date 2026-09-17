@@ -112,11 +112,14 @@ def combine_semantic_and_laser(semantic, laser):
     return complete
 
 
-def cv_obstacle_map(semantic):
-    """Binarize only CV evidence, independently of the laser layer."""
+def cv_obstacle_map(semantic, laser):
+    """Binarize CV evidence and fill unobserved cells only with laser free space."""
+    if semantic.shape != laser.shape:
+        raise ValueError('Semantic and laser map geometry differs')
     output = np.full(semantic.shape, -1, dtype=np.int8)
-    output[(semantic >= 0) & (semantic < 10)] = 0
-    output[(semantic >= 10) & (semantic <= 95)] = 100
+    output[(semantic >= 0) & (semantic < 40)] = 0
+    output[(semantic >= 40) & (semantic <= 95)] = 100
+    output[(semantic == -1) & (laser == 0)] = 0
     return output
 
 
@@ -416,7 +419,7 @@ class SemanticMapper(Node):
             semantic = self.filter_saved_black_points(combined)
             laser = self.laser_map
             complete = combine_semantic_and_laser(semantic, laser)
-            cv_obstacles = cv_obstacle_map(semantic)
+            cv_obstacles = cv_obstacle_map(semantic, laser)
             if self.config['save_directory']:
                 directory = Path(self.config['save_directory']).expanduser()
             else:

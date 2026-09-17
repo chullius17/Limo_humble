@@ -25,7 +25,7 @@
 namespace nav2_amcl
 {
 
-/** @brief One positive semantic observation expressed in the robot frame. */
+/** @brief One observed semantic voxel: occupancy 1 = obstacle, 0 = road. */
 struct CvTemplateCell2D
 {
   double x;
@@ -35,7 +35,7 @@ struct CvTemplateCell2D
 
 /**
  * @class CvLikelihoodModel
- * @brief Evaluate particle poses using positive semantic evidence against a binary map.
+ * @brief Evaluate obstacle and road observations against a static semantic map.
  */
 class CvLikelihoodModel
 {
@@ -47,13 +47,35 @@ public:
     int occupied_threshold{50};
   };
 
-  /** @brief Per-particle normalized positive-class mismatch. */
+  /** @brief Per-particle mismatch normalized by all observed voxel votes. */
   struct SadScoreResult
   {
     std::vector<double> normalized_sad;
     /// Sum of positive observation weights (one per occupied point-cloud voxel).
     double positive_mass{0.0};
+    /// Sum of explicit road observation weights (not missing classifications).
+    double negative_mass{0.0};
   };
+
+  struct QualityLimits
+  {
+    double min_information{0.02};  // KL divergence from uniform, in nats.
+    double max_position_stddev{0.5};  // Metres, along the widest XY axis.
+    double max_yaw_stddev{0.5};  // Circular standard deviation, radians.
+  };
+
+  struct QualityReport
+  {
+    double information{0.0};
+    double position_stddev{0.0};
+    double yaw_stddev{0.0};
+    const char * reason{"invalid"};
+  };
+
+  /// Assess CV-only support over current particle poses without changing weights.
+  static bool assessQuality(
+    const pf_sample_set_t * set, const SadScoreResult & score, double effective_gain,
+    const QualityLimits & limits, QualityReport & report);
 
   explicit CvLikelihoodModel(const Parameters & parameters);
   ~CvLikelihoodModel();
@@ -71,12 +93,14 @@ public:
   bool ready() const;
 
   /**
-   * @brief Compare positive local evidence with its matching static CV map.
+   * @brief Compare obstacle and road evidence with the static CV map.
    *
    * Each observed obstacle is penalized when it lands outside static occupied
    * cells, including unknown and off-map locations (the Humble SAD rule).
-   * Unobserved space supplies no negative evidence. All selected semantic
-   * classes, including soft obstacle, contribute equally after voxelization.
+   * Road observations are penalized unless the static cell is exactly zero.
+   * Unknown and off-map cells mismatch both types of observation. Soft obstacles
+   * and unclassified points are excluded before scoring. Each observed voxel
+   * contributes one vote per polarity; unobserved space supplies no evidence.
    */
   SadScoreResult scoreSad(
     const pf_sample_set_t * set,
