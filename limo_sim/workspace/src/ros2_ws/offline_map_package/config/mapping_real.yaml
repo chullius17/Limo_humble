@@ -2,6 +2,7 @@
 # Robot: wall clock, EKF publishes odom -> base_link; GUI runs on the PC.
 launch:
   use_sim_time: false
+  start_cv: false
   start_slam: true
   start_mapper: true
   start_rviz: false

@@ -5,7 +5,12 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -35,7 +40,9 @@ def _launch_mapping(context):
             raise ValueError('{}: missing YAML mapping {!r}'.format(config_file, section))
 
     settings = dict(profile['launch'])
-    for name in ('use_sim_time', 'start_slam', 'start_mapper', 'start_rviz', 'start_gui'):
+    for name in (
+            'use_sim_time', 'start_cv', 'start_slam', 'start_mapper',
+            'start_rviz', 'start_gui'):
         override = LaunchConfiguration(name).perform(context)
         settings[name] = _boolean(override if override else settings[name])
     for name in ('rviz_config', 'fixed_frame'):
@@ -45,7 +52,7 @@ def _launch_mapping(context):
 
     mode = LaunchConfiguration('mode').perform(context)
     if mode == 'desktop':
-        settings.update(start_slam=False, start_mapper=False)
+        settings.update(start_cv=False, start_slam=False, start_mapper=False)
         # A robot profile disables local windows; desktop mode enables them
         # unless the caller explicitly disables an individual GUI.
         for name in ('start_rviz', 'start_gui'):
@@ -68,6 +75,16 @@ def _launch_mapping(context):
                 slam[name] = mapper[name]
 
     nodes = []
+    if settings['start_cv']:
+        nodes.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('cv_package'),
+                'launch', 'cv.launch.py')),
+            launch_arguments={
+                'use_sim_time': str(settings['use_sim_time']).lower(),
+                'visual_ptcld_enable_telemetry': 'false',
+            }.items(),
+        ))
     if settings['start_slam']:
         # Avoid the different Foxy/Humble argument names in online_async_launch.
         nodes.append(Node(
@@ -101,7 +118,8 @@ def generate_launch_description():
     default_config = os.path.join(
         get_package_share_directory('offline_map_package'), 'config', 'mapping_sim.yaml')
     overrides = (
-        'use_sim_time', 'start_slam', 'start_mapper', 'start_rviz', 'start_gui',
+        'use_sim_time', 'start_cv', 'start_slam', 'start_mapper', 'start_rviz',
+        'start_gui',
         'rviz_config', 'fixed_frame', 'pose_source', 'trajectory_id',
         'resolution', 'save_directory',
     )

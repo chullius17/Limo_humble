@@ -136,6 +136,7 @@ def _launch_online(context):
                 'launch', 'cv.launch.py')),
             launch_arguments={
                 'use_sim_time': str(settings['use_sim_time']).lower(),
+                'visual_ptcld_enable_telemetry': 'false',
             }.items(),
         ))
     if settings['start_maps']:

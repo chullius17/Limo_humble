@@ -8,6 +8,10 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     use_sim_time = ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool)
+    visual_ptcld_enable_telemetry = ParameterValue(
+        LaunchConfiguration('visual_ptcld_enable_telemetry'),
+        value_type=bool,
+    )
     lane_node = Node(
             package='cv_package',
             executable='lane_detector',
@@ -39,7 +43,7 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': use_sim_time,
             'opencv_num_threads': 1,
-            'enable_telemetry': True,
+            'enable_telemetry': visual_ptcld_enable_telemetry,
             'roi_y_min': 0.0,
             'roi_y_max': 1.0,
             # Optional images are disabled; PointCloud2 is always published.
@@ -96,6 +100,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument(
+            'visual_ptcld_enable_telemetry',
+            default_value='true',
+            description='Enable visual_ptcld performance telemetry.',
+        ),
         lane_node,
         depth_correction_node,
         boundary_trigger,
