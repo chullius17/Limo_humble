@@ -9,7 +9,7 @@ import pytest
 rclpy = pytest.importorskip('rclpy')
 from geometry_msgs.msg import Pose, TransformStamped
 from nav_msgs.msg import OccupancyGrid
-from sensor_msgs.msg import LaserScan, PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2, PointField
 from std_srvs.srv import Trigger
 
 from offline_map_package.semantic_mapper import (
@@ -56,15 +56,6 @@ def cloud(sec=1, labels=(1, 2, 3, 4)):
     return msg
 
 
-def scan(sec=1, ranges=(1.0,), angle_min=0.0, angle_increment=1.0):
-    msg = LaserScan()
-    msg.header.frame_id, msg.header.stamp.sec = 'base_link', sec
-    msg.angle_min, msg.angle_increment = angle_min, angle_increment
-    msg.range_min, msg.range_max = 0.1, 10.0
-    msg.ranges = list(ranges)
-    return msg
-
-
 def reference_map(values, resolution=1.0):
     values = np.asarray(values, dtype=np.int8)
     msg = OccupancyGrid()
@@ -85,9 +76,12 @@ def read_pgm(path):
         return np.frombuffer(stream.read(), dtype=np.uint8).reshape(height, width)
 
 
-def read_scale_costs(path):
-    """Decode the scale PGM written with YAML thresholds 0.0 and 1.0."""
-    return np.rint((1.0 - read_pgm(path) / 255.0) * 100.0).astype(np.int8)
+def read_raw_costs(path):
+    """Decode Nav2 raw mode (0..100 costs, 255 unknown), in image row order."""
+    pixels = read_pgm(path)
+    costs = pixels.astype(np.int16)
+    costs[costs > 100] = -1
+    return costs.astype(np.int8)
 
 
 def read_trinary_costs(path):
@@ -113,6 +107,7 @@ def test_uses_sensor_tf_not_latest_and_deduplicates(node):
     output = node.message(combined, geometry, msg.header.stamp)
     assert list(output.data) == [0, 60, 30, 90]
     assert output.header.frame_id == 'map'
+    node.map_callback(reference_map([[0] * 6]))
     node.publish_maps()
     assert not node.dirty
 
@@ -127,31 +122,66 @@ def test_missing_tf_is_retried_without_integration(node):
     assert node.pending is None
 
 
-def test_scan_endpoints_are_accumulated_at_sensor_timestamp(node):
-    transform(node, 1, 1.0)
-    transform(node, 2, 10.0)
-    node.scan_callback(scan(1, (1.1, 2.1), angle_increment=np.pi / 2))
-    assert node.laser_grid.cells == {(2, 0), (1, 2)}
-    node.scan_callback(scan(1, (5.0,)))
-    assert node.laser_grid.cells == {(2, 0), (1, 2)}
+def test_map_replacement_removes_ghost_even_with_same_geometry(node, tmp_path):
+    node.config['save_directory'] = str(tmp_path)
+    node.map_callback(reference_map([[0, 100, -1]]))
+    published = []
+    node.combined_pub = SimpleNamespace(publish=published.append)
+    node.publish_maps()
+    assert list(published[-1].data) == [0, 100, -1]
+    node.map_callback(reference_map([[0, 0, -1]]))
+    assert node.dirty
+    node.publish_maps()
+    assert list(published[-1].data) == [0, 0, -1]
+    result = node.save_map(Trigger.Request(), Trigger.Response())
+    assert result.success, result.message
+    assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [[0, 0, -1]]
+    assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [[0, 0, -1]]
+    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [[-1]*3]
 
 
-def test_scan_waits_for_timestamped_tf(node):
-    node.scan_callback(scan(1, (1.1,)))
-    assert node.pending_scan is not None
-    assert not node.laser_grid.cells
-    transform(node, 1, 2.0)
-    node.consume_pending_scan()
-    assert node.pending_scan is None
-    assert node.laser_grid.cells == {(3, 0)}
+@pytest.mark.parametrize('invalid', ['length', 'value', 'frame', 'resolution'])
+def test_rejects_invalid_map_without_losing_previous_snapshot(node, invalid):
+    node.map_callback(reference_map([[0, 100]]))
+    node.publish_maps()
+    bad = reference_map([[100, 0]])
+    if invalid == 'length':
+        bad.data = array('b', [0])
+    elif invalid == 'value':
+        bad.data = array('b', [101, 0])
+    elif invalid == 'frame':
+        bad.header.frame_id = 'odom'
+    else:
+        bad.info.resolution = 0.0
+    node.map_callback(bad)
+    assert node.laser_map.tolist() == [[0, 100]]
+    assert not node.dirty
+
+
+def test_new_map_geometry_reprojects_cv_and_replaces_old_laser(node):
+    node.map_callback(reference_map([[100, 0]]))
+    node.grid.update(np.array([[1.5, 0.5]]), np.array([2]))
+    node.publish_maps()
+    updated = reference_map([[0, 100, -1], [0, 0, -1]], resolution=0.5)
+    updated.info.origin.position.x = 2.25
+    updated.info.origin.position.y = -0.25
+    updated.info.origin.orientation.z = np.sin(np.pi / 4)
+    updated.info.origin.orientation.w = np.cos(np.pi / 4)
+    node.map_callback(updated)
+    published = []
+    node.combined_pub = SimpleNamespace(publish=published.append)
+    node.publish_maps()
+    msg = published[-1]
+    assert (msg.info.width, msg.info.height, msg.info.resolution) == (3, 2, 0.5)
+    assert msg.info.origin == updated.info.origin
+    assert list(msg.data) == [0, 100, -1, 0, 60, -1]
 
 
 @pytest.mark.parametrize('road_class', [1, 5])
 def test_road_cloud_clears_obstacle_and_saves_zero_cost(node, tmp_path, road_class):
     node.config['save_directory'] = str(tmp_path)
     node.config['save_median_kernel'] = 1
-    node.map_callback(reference_map([[0, 0]]))
-    node.laser_grid.update(np.array([[1.1, 0.1]]))
+    node.map_callback(reference_map([[0, 100]]))
     for sec in range(1, 16):
         transform(node, sec)
         node.cloud_callback(cloud(sec, (4 if sec <= 10 else road_class,)))
@@ -159,38 +189,37 @@ def test_road_cloud_clears_obstacle_and_saves_zero_cost(node, tmp_path, road_cla
     node.publish_maps()
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
-    assert read_scale_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [[0, 100]]
-    assert read_trinary_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [[0, 100]]
+    assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [[0, 100]]
+    assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [[0, 100]]
     assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [[0, -1]]
 
 
 def test_reset_and_save_exact_costs(node, tmp_path):
     node.map_callback(reference_map([[0, 0, 100, -1, 100]]))
-    node.laser_grid.update(np.array([[2.1, 0.1], [4.1, 0.1]]))
     node.config['save_median_kernel'] = 1
     transform(node, 1)
     node.cloud_callback(cloud())
     node.config['save_directory'] = str(tmp_path)
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
-    assert read_scale_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [
+    assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [
         [0, 60, 100, 90, 100]]
-    assert read_trinary_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [
-        [0, 0, 100, 0, 100]]
+    assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [
+        [0, 0, 100, -1, 100]]
     assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
-        [0, 100, -1, 100, -1]]
+        [0, 100, 100, 100, -1]]
     metadata = (tmp_path / 'limo_map_complete.yaml').read_text(encoding='utf-8')
     assert 'image: limo_map_complete.pgm\n' in metadata
-    assert 'mode: scale\n' in metadata
+    assert 'mode: raw\n' in metadata
     assert 'occupied_thresh: 1.0\n' in metadata
     assert 'free_thresh: 0.0\n' in metadata
     assert 'resolution: 1\n' in metadata
     assert 'origin: [0, 0, 0]\n' in metadata
     laser_metadata = (tmp_path / 'limo_map_laser.yaml').read_text(encoding='utf-8')
     assert 'image: limo_map_laser.pgm\n' in laser_metadata
-    assert 'mode: trinary\n' in laser_metadata
-    assert 'occupied_thresh: 0.65\n' in laser_metadata
-    assert 'free_thresh: 0.196\n' in laser_metadata
+    assert 'mode: raw\n' in laser_metadata
+    assert 'occupied_thresh: 1.0\n' in laser_metadata
+    assert 'free_thresh: 0.0\n' in laser_metadata
     cv_metadata = (tmp_path / 'limo_map_cv_obstacle.yaml').read_text(encoding='utf-8')
     assert 'image: limo_map_cv_obstacle.pgm\n' in cv_metadata
     assert 'mode: trinary\n' in cv_metadata
@@ -206,8 +235,9 @@ def test_reset_and_save_exact_costs(node, tmp_path):
 
 def test_save_median_removes_isolated_black_without_changing_live_map(
         node, tmp_path):
-    node.map_callback(reference_map(np.full((3, 3), -1)))
-    node.laser_grid.update(np.array([[0.1, 0.1]]))
+    laser = np.full((3, 3), -1, dtype=np.int8)
+    laser[0, 0] = 100
+    node.map_callback(reference_map(laser))
     node.grid.update(np.array([[1.1, 1.1]]), np.array([4]))
     node.config['save_directory'] = str(tmp_path)
 
@@ -216,10 +246,10 @@ def test_save_median_removes_isolated_black_without_changing_live_map(
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
 
-    saved = read_scale_costs(tmp_path / 'limo_map_complete.pgm')
-    assert saved[1, 1] == 0
+    saved = read_raw_costs(tmp_path / 'limo_map_complete.pgm')
+    assert saved[1, 1] == -1
     assert (tmp_path / 'limo_map_complete.yaml').is_file()
-    laser = read_trinary_costs(tmp_path / 'limo_map_laser.pgm')
+    laser = read_raw_costs(tmp_path / 'limo_map_laser.pgm')
     assert laser[2, 0] == 100  # PGM rows are vertically flipped.
     assert np.count_nonzero(laser == 100) == 1
     assert not list(tmp_path.glob('*.npz'))
@@ -234,9 +264,8 @@ def test_complete_map_precedence():
 
 
 def test_live_combined_grid_contains_laser_and_cv(node):
-    node.map_callback(reference_map([[0, 0, 0]]))
+    node.map_callback(reference_map([[0, 100, 0]]))
     node.grid.update(np.array([[0.1, 0.1], [1.1, 0.1]]), np.array([2, 4]))
-    node.laser_grid.update(np.array([[1.1, 0.1]]))
     published = []
     node.combined_pub = SimpleNamespace(publish=published.append)
     node.dirty = True
@@ -253,26 +282,26 @@ def test_cv_obstacle_cost_boundaries():
         cv_obstacle_map(complete), [[-1, 0, 0, 100, 100, -1, -1]])
 
 
-def test_save_requires_laser_observations(node, tmp_path):
+def test_save_requires_slam_map(node, tmp_path):
     transform(node, 1)
     node.cloud_callback(cloud(1, (2,)))
     node.config['save_directory'] = str(tmp_path)
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert not result.success
-    assert 'laser observations' in result.message
+    assert 'Waiting for laser map' in result.message
     assert not list(tmp_path.glob('*'))
 
 
 def test_save_before_semantic_observations_produces_three_maps(node, tmp_path):
-    node.laser_grid.update(np.array([[0.1, 0.1], [2.1, 0.1]]))
+    node.map_callback(reference_map([[100, 0, 100]]))
     node.config['save_directory'] = str(tmp_path)
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
     expected = [[100, 0, 100]]
-    assert read_scale_costs(tmp_path / 'limo_map_complete.pgm').tolist() == expected
-    assert read_trinary_costs(tmp_path / 'limo_map_laser.pgm').tolist() == expected
+    assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == expected
+    assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == expected
     assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
-        [-1, 0, -1]]
+        [-1, -1, -1]]
 
 
 def test_cartographer_pose_updates_reposition_old_evidence(node):
@@ -315,3 +344,44 @@ def test_cartographer_insertion_uses_submap_epoch_and_sensor_motion(node):
     node.submaps_callback(SimpleNamespace(
         header=SimpleNamespace(frame_id='map', stamp=cloud(2).header.stamp), submap=[entry]))
     assert node.grid.render()[0].origin[0] == 11.0
+
+
+def test_cv_export_is_independent_of_laser_and_reset_preserves_laser(node, tmp_path):
+    node.config['save_directory'] = str(tmp_path)
+    node.config['save_median_kernel'] = 1
+    node.map_callback(reference_map([[100, 0, -1, -1]]))
+    node.grid.update(np.array([[0.1, 0.1], [2.1, 0.1]]), np.array([4, 5]))
+    result = node.save_map(Trigger.Request(), Trigger.Response())
+    assert result.success, result.message
+    assert read_raw_costs(tmp_path / 'limo_map_laser.pgm').tolist() == [[100, 0, -1, -1]]
+    assert read_raw_costs(tmp_path / 'limo_map_complete.pgm').tolist() == [[100, 0, 0, -1]]
+    cv_before = (tmp_path / 'limo_map_cv_obstacle.pgm').read_bytes()
+    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [
+        [100, -1, 0, -1]]
+    node.map_callback(reference_map([[0, -1, 100, 0]]))
+    result = node.save_map(Trigger.Request(), Trigger.Response())
+    assert result.success, result.message
+    assert (tmp_path / 'limo_map_cv_obstacle.pgm').read_bytes() == cv_before
+    published = []
+    node.combined_pub = SimpleNamespace(publish=published.append)
+    result = node.reset_map(Trigger.Request(), Trigger.Response())
+    assert result.success
+    assert list(published[-1].data) == [0, -1, 100, 0]
+    assert node.laser_map.tolist() == [[0, -1, 100, 0]]
+    result = node.save_map(Trigger.Request(), Trigger.Response())
+    assert result.success, result.message
+    assert read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm').tolist() == [[-1]*4]
+
+
+def test_cv_waits_for_laser_map_before_publication(node, tmp_path):
+    node.config['save_directory'] = str(tmp_path)
+    node.grid.update(np.array([[0.1, 0.1]]), np.array([2]))
+    published = []
+    node.combined_pub = SimpleNamespace(publish=published.append)
+    node.dirty = True
+    node.publish_maps()
+    assert not published
+    assert node.dirty
+    node.map_callback(reference_map([[-1]]))
+    node.publish_maps()
+    assert list(published[-1].data) == [60]

@@ -75,7 +75,7 @@ bool voxelizeCvCloud(
         static_cast<std::size_t>(row) * cloud.row_step +
         static_cast<std::size_t>(column) * cloud.point_step;
       const uint8_t label = point[fields[3]->offset];
-      if (label < 2 || label > 4) {
+      if (label != 2 && label != 3 && label != 4 && label != 6) {
         continue;
       }
       const double x = read_float(point + fields[0]->offset);

@@ -79,6 +79,16 @@ def test_both_blue_classes_are_road_distinct_from_unknown():
     assert layers[:, 0].tolist() == [[0, 0, -1]] * 3
 
 
+def test_interior_boardwalk_contributes_to_boardwalk_evidence():
+    interior, boardwalk = mapper(), mapper()
+    xy = np.array([[0.1, 0.1]])
+    interior.update(xy, np.array([6]))
+    boardwalk.update(xy, np.array([4]))
+    assert interior.render()[2].tolist() == [[90]]
+    for one, canonical in zip(interior.tiles.values(), boardwalk.tiles.values()):
+        np.testing.assert_allclose(one[0], canonical[0])
+
+
 @pytest.mark.parametrize('labels', [[1, 5], [1, 5, 4]])
 def test_blue_labels_share_evidence_without_mutating_input(labels):
     mixed, canonical = mapper(), mapper()
@@ -201,10 +211,10 @@ def test_cloud_layout_and_invalid_points(endian):
     msg, points = cloud(endian)
     points['x'][0, 0] = np.nan
     points['class_id'][1, 0] = 1
-    points['class_id'][1, 1] = 5
+    points['class_id'][1, 1] = 6
     xy, labels = read_class_cloud(msg)
     assert xy.tolist() == [[1, 2], [1, 2], [1, 2]]
-    assert labels.tolist() == [3, 1, 5]
+    assert labels.tolist() == [3, 1, 6]
 
 
 def test_cloud_rejects_bad_schema_and_truncated_buffer():

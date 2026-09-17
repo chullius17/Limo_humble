@@ -41,11 +41,12 @@ CPU_PROFILE_FIELDS = (
 
 
 PUBLISHED_CLASS_COUNTS = (
-    ('published_blue_count', 'blue'),
-    ('published_turquoise_count', 'turquoise'),
-    ('published_background_count', 'white'),
+    ('published_blue_count', 'exterior road'),
+    ('published_turquoise_count', 'yellow lines'),
+    ('published_background_count', 'soft obstacle'),
     ('published_boardwalk_count', 'boardwalk'),
-    ('published_interior_blue_count', 'interior blue'),
+    ('published_interior_blue_count', 'interior road'),
+    ('published_interior_boardwalk_count', 'interior boardwalk'),
 )
 
 
@@ -57,6 +58,7 @@ class VisualPtcld(Node):
     LABEL_BACKGROUND = np.uint8(3)
     LABEL_BOARDWALK = np.uint8(4)
     LABEL_INTERIOR_BLUE = np.uint8(5)
+    LABEL_INTERIOR_BOARDWALK = np.uint8(6)
     CLOUD_DTYPE = np.dtype({
         'names': ('x', 'y', 'z', 'class_id'),
         'formats': ('<f4', '<f4', '<f4', 'u1'),
@@ -310,10 +312,13 @@ class VisualPtcld(Node):
         self.get_logger().info(
             f'Boardwalk classification {"enabled" if self.enable_boardwalk else "disabled"}: '
             f'class_id={int(self.LABEL_BOARDWALK)}, '
-            f'blue distance ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m, '
+            f'interior_class_id={int(self.LABEL_INTERIOR_BOARDWALK)}, '
+            f'exterior-road distance ({self.blue_radius_min:.3f}, '
+            f'{self.blue_radius_max:.3f}] m, '
             f'propagation < {self.boardwalk_propagation_radius:.3f} m; '
             f'CPU cKDTree; two exact point neighbor passes; '
-            f'blue boundary kernel={self.blue_boundary_kernel_size}x{self.blue_boundary_kernel_size}.')
+            f'exterior-road boundary kernel={self.blue_boundary_kernel_size}x'
+            f'{self.blue_boundary_kernel_size}.')
 
     def voxelize_points(self, raw_points, image_width):
         """Replace all points in each 2D cell with their centroid."""
@@ -341,8 +346,8 @@ class VisualPtcld(Node):
         """Downsample finite BEV points independently for every class.
 
         Keeping the class identifier in the voxel key prevents blue,
-        turquoise, white, boardwalk and interior blue points from being averaged
-        together when they occupy the same metric cell.
+        yellow-line, soft-obstacle, boardwalk, interior-road and interior-
+        boardwalk points from being averaged together in one metric cell.
         """
         if len(points) == 0:
             return points, class_ids
@@ -550,11 +555,10 @@ class VisualPtcld(Node):
         t_start = time.perf_counter()
         turquoise_mask = labels == self.LABEL_TURQUOISE
         background_mask = labels == self.LABEL_BACKGROUND
-        # Dilating white before intersecting it with blue selects an inner blue
-        # boundary band. A larger odd kernel keeps a thicker blue band, while
-        # the original class map and the white region remain unchanged.
+        # Dilating soft obstacle before intersecting it with exterior road
+        # selects the road boundary band. A larger odd kernel keeps it thicker.
         # Filter before the ROI so cropping does not affect class adjacency.
-        # OpenCV applies the 7x7 white dilation before the blue intersection.
+        # OpenCV applies the 7x7 soft-obstacle dilation before intersection.
         blue_mask = self.boardwalk_classifier.filter_blue(
             labels, self.blue_boundary_kernel,
             self.LABEL_BLUE, self.LABEL_BACKGROUND)
@@ -694,7 +698,7 @@ class VisualPtcld(Node):
                     self.encode_debug_image(filter_frame, msg.header))
             except Exception as e:
                 self.get_logger().error(
-                    f'Failed to publish blue filter debug image: {str(e)}')
+                    f'Failed to publish exterior-road filter debug image: {str(e)}')
         t['step9_draw_publish'] = (time.perf_counter() - t_start) * 1000.0
 
         t['total'] = (time.perf_counter() - start_total) * 1000.0
@@ -777,8 +781,9 @@ class VisualPtcld(Node):
 
         lines = [
             f'  [Boardwalk class 4: direct points]    Rolling window: {len(samples)} clouds\n',
-            f'    Backend: CPU cKDTree | Blue filter: OpenCV CPU\n',
-            f'    Blue band: ({self.blue_radius_min:.3f}, {self.blue_radius_max:.3f}] m | '
+            f'    Backend: CPU cKDTree | Exterior road filter: OpenCV CPU\n',
+            f'    Exterior road band: ({self.blue_radius_min:.3f}, '
+            f'{self.blue_radius_max:.3f}] m | '
             f'Propagation: < {self.boardwalk_propagation_radius:.3f} m\n',
         ]
         for key, title in BOARDWALK_TIMINGS:
@@ -917,15 +922,18 @@ class VisualPtcld(Node):
         math_ms += transform_ms
 
         # Query metric BEV points directly in two nearest-neighbor passes before
-        # serialization. Only white labels can become boardwalk; coordinates,
-        # point order and the existing PointCloud2 layout remain unchanged.
+        # serialization. Soft-obstacle labels in the exterior-road distance
+        # band become boardwalk; those beyond its maximum radius become
+        # interior boardwalk.
+        # Coordinates, point order and the PointCloud2 layout remain unchanged.
         # Time classification separately so projection timings stay comparable.
         if self.enable_boardwalk:
             boardwalk_stats = self.boardwalk_classifier.classify(
                 bev_points, class_ids,
                 self.blue_radius_min, self.blue_radius_max,
                 self.boardwalk_propagation_radius,
-                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK)
+                self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK,
+                self.LABEL_INTERIOR_BOARDWALK)
 
         # Downsample only the outgoing cloud. The full-resolution points above
         # remain available to both cKDTree passes. Classes use separate 2D
@@ -943,6 +951,8 @@ class VisualPtcld(Node):
                 ('published_background_count', self.LABEL_BACKGROUND),
                 ('published_boardwalk_count', self.LABEL_BOARDWALK),
                 ('published_interior_blue_count', self.LABEL_INTERIOR_BLUE),
+                ('published_interior_boardwalk_count',
+                 self.LABEL_INTERIOR_BOARDWALK),
             )
         })
 

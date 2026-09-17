@@ -46,6 +46,7 @@ TEST(CvCloud, MergesObstacleClassesButIgnoresBothBlueClassesAndInvalidPoints)
   auto cloud = cloudOf(
     {
       {0.01f, 0.01f, 0, 2}, {0.03f, 0.03f, 0, 3}, {0.05f, 0.05f, 0, 4},
+      {0.07f, 0.07f, 0, 6},
       {1, 1, 0, 1}, {2, 2, 0, 5}, {3, 3, 0, 0},
       {std::numeric_limits<float>::quiet_NaN(), 0, 0, 2},
       {0, 0, std::numeric_limits<float>::infinity(), 3}});
@@ -55,8 +56,8 @@ TEST(CvCloud, MergesObstacleClassesButIgnoresBothBlueClassesAndInvalidPoints)
     nav2_amcl::voxelizeCvCloud(
       cloud, tf2::Transform::getIdentity(), 0.075, cells, error));
   ASSERT_EQ(cells.size(), 1u);
-  EXPECT_NEAR(cells[0].x, 0.03, 1e-7);
-  EXPECT_NEAR(cells[0].y, 0.03, 1e-7);
+  EXPECT_NEAR(cells[0].x, 0.04, 1e-7);
+  EXPECT_NEAR(cells[0].y, 0.04, 1e-7);
   EXPECT_DOUBLE_EQ(cells[0].occupancy, 1.0);
 }
 

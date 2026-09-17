@@ -7,7 +7,7 @@ import numpy as np
 
 
 CLASS_IDS = np.array([2, 3, 4, 5], dtype=np.uint8)
-INPUT_CLASS_IDS = np.array([1, 2, 3, 4, 5], dtype=np.uint8)
+INPUT_CLASS_IDS = np.array([1, 2, 3, 4, 5, 6], dtype=np.uint8)
 CLASS_NAMES = ('turquoise', 'white', 'boardwalk')
 DEFAULT_COSTS = (60, 30, 90)
 # Boundary and interior blue share observed-road evidence, represented by
@@ -32,7 +32,8 @@ def read_class_cloud(msg):
 
     Only the fields used by visual_ptcld are required. Invalid labels,
     nonfinite points and empty clouds contribute no evidence, including misses.
-    Both blue classes (1 and 5) contribute observed-road evidence.
+    Exterior road (1) and interior road (5) contribute observed-road evidence.
+    Interior boardwalk (6) contributes to the boardwalk evidence (4).
     """
     fields = {field.name: field for field in msg.fields}
     required = ('x', 'y', 'z', 'class_id')
@@ -182,9 +183,10 @@ class SemanticGrid:
         points, labels = points[valid], labels[valid]
         if not len(points):
             return False
-        # Both blue labels vote for the same road class within the single
+        # Both road labels vote for the same road class within the single
         # normalized update per cell/cloud. Boolean indexing above made a copy.
         labels[labels == 1] = 5
+        labels[labels == 6] = 4
         cells = np.floor(points / self.resolution).astype(np.int64)
         cells, inverse = np.unique(cells, axis=0, return_inverse=True)
         counts = np.stack([

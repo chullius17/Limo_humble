@@ -76,7 +76,7 @@ public:
    * Each observed obstacle is penalized when it lands outside static occupied
    * cells, including unknown and off-map locations (the Humble SAD rule).
    * Unobserved space supplies no negative evidence. All selected semantic
-   * classes, including WHITE, contribute equally after voxelization.
+   * classes, including soft obstacle, contribute equally after voxelization.
    */
   SadScoreResult scoreSad(
     const pf_sample_set_t * set,

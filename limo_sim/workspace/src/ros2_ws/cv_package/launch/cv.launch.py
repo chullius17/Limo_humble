@@ -51,7 +51,7 @@ def generate_launch_description():
             'point_voxel_size': 5,
             # Downsample all published BEV classes in class-aware 2 cm cells.
             'pointcloud_voxel_size_m': 0.02,
-            # 7x7 keeps an approximately three-pixel-wide inner blue boundary.
+            # 7x7 keeps an approximately three-pixel exterior-road boundary.
             'blue_boundary_kernel_size': 7,
             'camera_info_topic': '/rgb/camera_info',
             'depth_topic': (
@@ -67,11 +67,13 @@ def generate_launch_description():
             'pointcloud_max_depth_m': 2.5,
             'blue_radius_min_m': 0.15,
             'blue_radius_max_m': 0.25,
-            # White points in the blue distance band seed class 4 (boardwalk).
+            # Soft-obstacle points in the exterior-road distance band seed
+            # class 4 (boardwalk). Points beyond the maximum radius become 6
+            # (interior boardwalk) in the same first cKDTree pass.
             # Restore exact metric point distances: blue neighbors, then seed neighbors.
             'enable_boardwalk': True,
             'boardwalk_propagation_radius_m': 0.15,
-            # OpenCV applies the 7x7 blue filter; cKDTree runs both point passes.
+            # OpenCV filters exterior road; cKDTree runs both point passes.
             'telemetry_window_size': 60,
             'telemetry_log_interval_frames': 30,
         }]

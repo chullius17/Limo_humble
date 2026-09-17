@@ -3,28 +3,35 @@
 Il launch `map.launch.py` consuma direttamente
 `/limo/cv_package/visual_ptcld/points`: campi `x,y,z` FLOAT32 e
 `class_id` UINT8, coordinate metriche in `base_link`, timestamp del sensore.
-Consuma inoltre `/scan`: ogni endpoint lidar valido viene trasformato nel frame
-`map`, accumulato e salvato con costo 100.
+Consuma inoltre `/map` di SLAM Toolbox come layer laser completo: ogni messaggio
+sostituisce il precedente, incluse le celle libere e sconosciute. Il mapper non
+accumula endpoint da `/scan`; lo scan viene usato direttamente da SLAM Toolbox.
 
 | class_id | Classe | Costo |
 | --- | --- | --- |
-| 1 | blu di bordo / strada osservata | 0 |
-| 2 | turchese | 60 |
-| 3 | bianco | 30 |
+| 1 | exterior road | 0 |
+| 2 | yellow lines | 60 |
+| 3 | soft obstacle | 30 |
 | 4 | boardwalk | 90 |
-| 5 | blu interno / strada osservata | 0 |
+| 5 | interior road | 0 |
+| 6 | interior boardwalk | 90 |
 
-`visual_ptcld` separa i blu interni come `blu_originale & ~blu_di_bordo`,
-prima di applicare la stessa ROI. Il bordo è l'intersezione del blu con la
-dilatazione del bianco. I blu interni vengono voxelizzati nell'immagine con
+`visual_ptcld` separa `interior road` come
+`road_originale & ~exterior_road`, prima di applicare la stessa ROI. Il bordo
+è l'intersezione della strada con la dilatazione di `soft obstacle`.
+I punti `interior road` vengono voxelizzati nell'immagine con
 `point_voxel_size` (5x5 pixel nel launch), proiettati nella BEV con profondità
 valida e mantenuti fuori dalle query KD-tree del boardwalk. Dopo la
 classificazione, tutte le classi vengono voxelizzate separatamente nella griglia
 metrica da `pointcloud_voxel_size_m` (2 cm nel launch) e pubblicate nella cloud.
+Nel primo passaggio KD-tree i punti `soft obstacle` oltre
+`blue_radius_max_m` diventano
+`interior boardwalk` (`class_id=6`). Il mapper conserva l'ID distinto in ingresso
+e lo accumula nello stesso layer e con lo stesso costo del boardwalk.
 
 Il nodo non usa immagini, OpenCV o proiezioni BEV. Legge il buffer della cloud
 con NumPy, trasforma i punti al timestamp del sensore e aggiorna tile sparse.
-Le mappe dense vengono generate a 1 Hz, solo quando cambiano i dati o le pose.
+Le mappe dense vengono generate fino a 4 Hz quando cambiano dati, pose o mappa laser.
 I parametri sono nei due profili `config/mapping_sim.yaml` e
 `config/mapping_real.yaml`. Ciascun file contiene le sezioni `launch`,
 `slam_toolbox`, `semantic_mapper` e `map_save_gui`. Sono profili letti dal
@@ -39,7 +46,7 @@ successive. Più punti nella stessa cella si dividono un solo aggiornamento per 
 Una singola osservazione discordante non cancella una classe consolidata.
 La classe con evidenza maggiore, sopra soglia, determina il costo esatto: la
 confidenza non moltiplica 0, 30, 60 o 90. Parità e confidenza insufficiente danno unknown.
-Blu di bordo e blu interno alimentano un unico punteggio di strada nel mapper,
+Exterior road e interior road alimentano un unico punteggio di strada nel mapper,
 con un solo aggiornamento normalizzato per cella e cloud. Usano gli stessi
 incrementi e decrementi delle altre classi:
 osservazioni ripetute di strada riducono l'evidenza degli ostacoli nella stessa
@@ -47,7 +54,8 @@ cella. Quando prevale la strada, la combinata e tutti e tre i layer diventano 0.
 Un ostacolo osservato successivamente può riprendere il sopravvento.
 
 Questi punti rappresentano superfici classificate: non si cancellano celle lungo
-raggi 2D né nell'intero campo visivo. Un punto bianco indica costo 30; non dimostra
+raggi 2D né nell'intero campo visivo. Un punto soft obstacle indica costo 30;
+non dimostra
 che tutto il segmento dal robot al punto sia privo delle altre classi.
 Celle mai osservate e punti invalidi non generano evidenza negativa.
 Una vecchia classificazione isolata resta finché non viene riosservata o spostata
@@ -64,8 +72,8 @@ ros2 launch offline_map_package map_sim.launch.py
 Il wrapper seleziona `mapping_sim.yaml` e include il launch principale
 `map.launch.py`: avvia SLAM Toolbox, mapping semantico, RViz e GUI di salvataggio
 con il tempo simulato. I valori di tuning sono quelli del precedente launch.
-La computer vision deve essere già attiva; la cloud pubblicata da `visual_ptcld`
-include sempre i punti blu con `class_id=1`.
+Il profilo simulato include anche la computer vision; la cloud di `visual_ptcld`
+include i punti exterior road con `class_id=1`.
 Con lo SLAM già attivo:
 
 ```bash
@@ -136,18 +144,21 @@ o fuori ordine vengono ignorati. Prima di riavvolgere un bag usare `reset_map`.
 Al salvataggio, `save_median_kernel: 3` rimuove le celle boardwalk nere isolate
 con una mediana 3x3; la mappa pubblicata live non viene modificata.
 
-Se `/map` è disponibile, le quattro uscite hanno esattamente la sua geometria
-(risoluzione, dimensioni, origine e rotazione); i punti esterni a questa vista
-rimangono nelle tile e ricompaiono se la mappa si espande. `/map` fornisce solo
-la geometria; i costi laser provengono dagli endpoint accumulati da `/scan`.
-Senza `/map`, il salvataggio calcola i limiti dall'unione delle osservazioni
-laser e semantiche.
+Le uscite hanno esattamente la geometria dell'ultima `/map` valida
+(risoluzione, dimensioni, origine e rotazione); i punti CV esterni a questa vista
+rimangono nelle tile e ricompaiono se la mappa si espande. `/map` fornisce anche
+l'intero layer laser. Aggiornamenti a geometria invariata sostituiscono comunque
+il contenuto: gli ostacoli cancellati da SLAM spariscono dalla combinata e
+dal successivo salvataggio. I messaggi non validi non sostituiscono la mappa.
+Prima della prima `/map`, il nodo accumula la CV ma attende per pubblicare e salvare.
+`reset_map` cancella solo l'evidenza CV; il layer laser resta quello di SLAM.
 Scegliere `resolution` vicina a quella di `/map` per limitare il ricampionamento.
 
 ## Cartographer e loop closure
 
 `pose_source:=tf` accumula nel frame `map` e corregge le classi sulle celle
-riosservate. Non corregge retroattivamente la geometria storica dopo loop closure.
+riosservate. Non corregge retroattivamente la geometria storica della CV dopo
+loop closure. Il layer laser segue invece la mappa aggiornata da SLAM.
 Applicare un solo `map -> odom` alla storia non risolve le correzioni diverse dei
 singoli tratti della traiettoria.
 
@@ -157,7 +168,7 @@ Con Cartographer esterno e `cartographer_ros_msgs` installato:
 ros2 launch offline_map_package map.launch.py start_slam:=false pose_source:=cartographer
 ```
 
-Cartographer deve fornire `/submap_list`, TF e preferibilmente `/map` dal proprio
+Cartographer deve fornire `/submap_list`, TF e `/map` dal proprio
 occupancy-grid node. Configurare `trajectory_id`, `map_frame`, `odom_frame` e
 `submap_topic` secondo il suo setup; `odom_frame` deve essere continuo.
 Il messaggio ufficiale pubblica pose e identificativi delle submap:
@@ -184,11 +195,12 @@ i test inclusi controllano il riposizionamento tramite pose sintetiche.
 
 Prefisso: `/limo/map_package/offline/map/`.
 
-- `turquoise_map`, `white_map`, `boardwalk_map`: costo della classe selezionata,
+- `turquoise_map` (yellow lines), `white_map` (soft obstacle) e
+  `boardwalk_map`: costo della classe selezionata,
   0 nelle celle classificate diversamente, -1 nelle celle sconosciute/incerte.
-- `combined_grid`: mappa live fusa laser + CV, valori 0 / 30 / 60 / 90 / 100;
-  gli ostacoli laser hanno precedenza a 100, i costi semantici CV sono
-  sovrapposti allo spazio libero laser.
+- `combined_grid`: mappa live fusa laser + CV; gli ostacoli laser a 100 hanno
+  precedenza, poi i costi semantici osservati. Le altre celle conservano il
+  valore laser, incluso -1 quando sconosciuto.
 
 Tutti sono `nav_msgs/OccupancyGrid`, QoS reliable/transient-local. Il contenuto
 è un **costo semantico**, non probabilità di occupazione fisica: eventuali
@@ -202,23 +214,30 @@ ros2 service call /limo/map_package/offline/map_saver/save_map std_srvs/srv/Trig
 ros2 service call /limo/map_package/offline/reset_map std_srvs/srv/Trigger '{}'
 ```
 
-Il salvataggio richiede almeno un endpoint valido ricevuto su `/scan` e genera
-tre coppie in
+Il salvataggio richiede una mappa laser valida ricevuta su
+`reference_map_topic` (default `/map`) e genera tre coppie in
 `/workspace/ros2_maps/semantic` (o `save_directory`):
 
-- `limo_map_laser.pgm/.yaml`: mappa `trinary`, con celle lidar occupate a 100
-  e spazio conosciuto libero a 0;
-- `limo_map_complete.pgm/.yaml`: costi semantici 0/30/60/90 con le celle lidar
-  occupate sovrapposte a 100, salvata in modalità `scale`;
-- `limo_map_cv_obstacle.pgm/.yaml`: mappa `trinary` derivata dalla completa;
-  i costi da 10 a 95 inclusi sono occupati, quelli da 0 a 9 sono liberi e i
-  costi da 96 a 100 sono sconosciuti. Le celle lidar a 100 risultano quindi
-  sconosciute in questa mappa.
+- `limo_map_laser.pgm/.yaml`: copia del solo layer laser SLAM in modalità
+  `raw`, con gli stessi valori di occupazione e celle sconosciute.
+- `limo_map_cv_obstacle.pgm/.yaml`: mappa binaria `trinary` ottenuta dal solo
+  layer CV (dopo il filtro di salvataggio). I costi 0..9 sono liberi, 10..95
+  occupati, gli altri sconosciuti. Il laser non modifica questa mappa:
+  una cella laser libera non crea evidenza CV e un ostacolo laser non cancella
+  l'osservazione CV sottostante.
+- `limo_map_complete.pgm/.yaml`: fusione dei layer in modalità `raw`.
+  La precedenza è laser a 100, classe CV osservata, quindi stato del laser.
+  Una cella sconosciuta in entrambi resta sconosciuta.
 
-Il nome base `limo_map` si cambia con `save_map_name`. La mappa completa usa le
-soglie `free_thresh: 0.0` e `occupied_thresh: 1.0`, così Nav2 ricostruisce
-esattamente i costi intermedi in modalità `scale`. Nella mappa completa la
-precedenza è: laser 100, classe semantica osservata, quindi stato libero del laser.
+Il nome base `limo_map` si cambia con `save_map_name`. In modalità `raw`
+il PGM contiene direttamente valori 0..100 e 255 per unknown: Nav2 ricostruisce
+esattamente i costi e gli sconosciuti. La resa del PGM in un visualizzatore di
+immagini generico è diversa dalla scala di grigi tradizionale; usare il YAML
+con il map server per visualizzarlo come mappa.
+I nomi dei file YAML restano invariati e i launch online li caricano normalmente.
+Le vecchie mappe `scale` continuano a essere caricabili; la nuova modalità si
+applica ai salvataggi successivi.
+
 L'orientamento delle righe segue la convenzione del map saver Nav2 e ciascuna
 coppia può essere caricata da `nav2_map_server`. Un salvataggio successivo
 sostituisce tutte e tre le coppie precedenti.

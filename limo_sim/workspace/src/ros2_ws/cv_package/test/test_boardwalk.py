@@ -19,6 +19,7 @@ def reference_labels(points, labels, minimum, maximum, radius):
         return output
     distances = np.linalg.norm(white[:, None, :] - blue[None, :, :], axis=2).min(axis=1)
     eligible = distances <= maximum
+    output[white_indices[distances > maximum]] = 6
     seeds = eligible & (distances > minimum)
     if not np.any(seeds):
         return output
@@ -41,7 +42,10 @@ def test_matches_direct_distances(seed):
     stats = classify_boardwalk(points, labels, 0.12, 0.4, 0.15)
     np.testing.assert_array_equal(labels, expected)
     np.testing.assert_array_equal(points, original_points)
-    assert stats['boardwalk_final_count'] == np.count_nonzero(labels != original_labels)
+    assert stats['boardwalk_final_count'] == np.count_nonzero(
+        (original_labels == 3) & (labels == 4))
+    assert stats['boardwalk_outside_count'] == np.count_nonzero(
+        (original_labels == 3) & (labels == 6))
     assert stats['boardwalk_final_count'] == (
         stats['boardwalk_seed_count'] + stats['boardwalk_propagated_count'])
     assert stats['boardwalk_white_count'] == (
@@ -58,7 +62,7 @@ def test_thresholds_and_nonrecursive_propagation():
     stats = classify_boardwalk(points, labels, 0.5, 1.0, 0.5)
     # 0.125 lies within 0.5 of a newly propagated point, but not a seed.
     # 1.125 lies near a seed but remains beyond the maximum blue distance.
-    np.testing.assert_array_equal(labels, [1, 4, 4, 4, 3, 4, 3])
+    np.testing.assert_array_equal(labels, [1, 4, 4, 4, 6, 4, 3])
     assert stats['boardwalk_seed_count'] == 2
     assert stats['boardwalk_propagated_count'] == 2
 
@@ -103,7 +107,7 @@ def test_distances_use_both_bev_axes():
     points = np.array([[0, 0], [0.05, 0.05], [0.05, 1.0], [0.1, 0.1]])
     labels = np.array([1, 3, 3, 3], dtype=np.uint8)
     classify_boardwalk(points, labels, 0.1, 0.16, 0.1)
-    np.testing.assert_array_equal(labels, [1, 4, 3, 4])
+    np.testing.assert_array_equal(labels, [1, 4, 6, 4])
 
 
 from cv_package.boardwalk import BoardwalkClassifier

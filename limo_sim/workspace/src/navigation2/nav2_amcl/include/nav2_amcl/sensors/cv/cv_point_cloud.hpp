@@ -13,7 +13,8 @@
 namespace nav2_amcl
 {
 
-/// Select turquoise/white/boardwalk (2/3/4), transform to the robot frame at
+/// Select yellow-lines/soft-obstacle/boardwalk/interior-boardwalk (2/3/4/6),
+/// transform to the robot frame at
 /// laser time, then merge all classes into XY voxels. Each centroid votes once.
 /// Supports organized clouds, padded rows, arbitrary field offsets and endian.
 /// Invalid layouts return false; empty or wholly invalid observations return

@@ -1,4 +1,4 @@
-"""Classify observed white BEV points with two CPU nearest-neighbor passes."""
+"""Classify observed soft-obstacle BEV points with two CPU neighbor passes."""
 
 import time
 
@@ -11,19 +11,19 @@ BOARDWALK_TIMINGS = (
     ('boardwalk_total_ms', 'Total'),
     ('boardwalk_prepare_ms', 'Point preparation'),
     ('boardwalk_blue_build_ms', 'Blue tree build'),
-    ('boardwalk_blue_query_ms', 'White -> blue query'),
+    ('boardwalk_blue_query_ms', 'Soft obstacle -> exterior road'),
     ('boardwalk_seed_build_ms', 'Seed tree build'),
-    ('boardwalk_seed_query_ms', 'White -> seed query'),
+    ('boardwalk_seed_query_ms', 'Soft obstacle -> seed query'),
     ('boardwalk_labels_ms', 'Point label update'),
 )
 BOARDWALK_COUNTS = (
-    ('boardwalk_blue_count', 'Blue sources'),
-    ('boardwalk_white_count', 'White input'),
-    ('boardwalk_eligible_count', 'White within max distance'),
+    ('boardwalk_blue_count', 'Exterior road sources'),
+    ('boardwalk_white_count', 'Soft obstacle input'),
+    ('boardwalk_eligible_count', 'Soft obstacle within max'),
     ('boardwalk_seed_count', 'First-pass seeds'),
     ('boardwalk_propagated_count', 'Added by second pass'),
     ('boardwalk_final_count', 'Final boardwalk'),
-    ('boardwalk_outside_count', 'White outside max distance'),
+    ('boardwalk_outside_count', 'Interior boardwalk (pass 1)'),
     ('boardwalk_nonfinite_count', 'Non-finite points ignored'),
 )
 
@@ -33,9 +33,9 @@ class BoardwalkClassifier:
 
     @staticmethod
     def filter_blue(labels, kernel, blue_label=1, white_label=3):
-        """Keep blue pixels inside the square-kernel neighborhood of white."""
-        # OpenCV performs the white dilation efficiently on CPU. Intersecting
-        # with the original blue mask preserves only blue/white boundaries.
+        """Keep exterior-road pixels near the soft-obstacle region."""
+        # OpenCV performs the soft-obstacle dilation efficiently on CPU.
+        # Intersecting it with the source mask preserves only the boundary.
         white_dilated = cv2.dilate(
             (labels == white_label).astype(np.uint8), kernel,
             borderType=cv2.BORDER_CONSTANT, borderValue=0)
@@ -43,8 +43,9 @@ class BoardwalkClassifier:
 
     def classify(
             self, points, class_ids, minimum, maximum, propagation_radius,
-            blue_label=1, white_label=3, boardwalk_label=4):
-        """Relabel only selected whites; preserve coordinates, order and size."""
+            blue_label=1, white_label=3, boardwalk_label=4,
+            interior_boardwalk_label=6):
+        """Relabel selected soft obstacles; preserve coordinates and order."""
         if (not np.isfinite([minimum, maximum, propagation_radius]).all()
                 or not 0 <= minimum <= maximum or propagation_radius < 0):
             raise ValueError('Invalid boardwalk distance thresholds')
@@ -66,6 +67,7 @@ class BoardwalkClassifier:
         stats['boardwalk_prepare_ms'] = (time.perf_counter() - stage) * 1000.0
 
         eligible = np.zeros(len(white), dtype=bool)
+        outside = eligible.copy()
         seeds = eligible.copy()
         selected = eligible.copy()
 
@@ -81,6 +83,7 @@ class BoardwalkClassifier:
                 time.perf_counter() - stage) * 1000.0
 
             eligible = distance_blue <= maximum
+            outside = distance_blue > maximum
             seeds = eligible & (distance_blue > minimum)
             selected = seeds.copy()
             remaining = np.flatnonzero(eligible & ~seeds)
@@ -103,11 +106,11 @@ class BoardwalkClassifier:
         stats['boardwalk_propagated_count'] = int(
             np.count_nonzero(selected & ~seeds))
         stats['boardwalk_final_count'] = int(np.count_nonzero(selected))
-        stats['boardwalk_outside_count'] = (
-            len(white) - stats['boardwalk_eligible_count'])
+        stats['boardwalk_outside_count'] = int(np.count_nonzero(outside))
 
         stage = time.perf_counter()
         class_ids[white_indices[selected]] = boardwalk_label
+        class_ids[white_indices[outside]] = interior_boardwalk_label
         stats['boardwalk_labels_ms'] = (
             time.perf_counter() - stage) * 1000.0
 
@@ -122,8 +125,9 @@ class BoardwalkClassifier:
 
 def classify_boardwalk(
         points, class_ids, minimum, maximum, propagation_radius,
-        blue_label=1, white_label=3, boardwalk_label=4):
+        blue_label=1, white_label=3, boardwalk_label=4,
+        interior_boardwalk_label=6):
     """Compatibility entry point for the point classifier."""
     return BoardwalkClassifier().classify(
         points, class_ids, minimum, maximum, propagation_radius,
-        blue_label, white_label, boardwalk_label)
+        blue_label, white_label, boardwalk_label, interior_boardwalk_label)

@@ -43,7 +43,8 @@ def detector_stub(enabled=True):
         get_logger=lambda: SimpleNamespace(warning=lambda *args, **kwargs: None),
     )
     for name in ('LABEL_BLUE', 'LABEL_TURQUOISE', 'LABEL_BACKGROUND',
-                 'LABEL_BOARDWALK', 'LABEL_INTERIOR_BLUE', 'CLOUD_DTYPE', 'CLOUD_FIELDS'):
+                 'LABEL_BOARDWALK', 'LABEL_INTERIOR_BLUE',
+                 'LABEL_INTERIOR_BOARDWALK', 'CLOUD_DTYPE', 'CLOUD_FIELDS'):
         setattr(detector, name, getattr(VisualPtcld, name))
     detector.voxelize_bev_cloud = (
         lambda points, class_ids: VisualPtcld.voxelize_bev_cloud(
@@ -89,7 +90,7 @@ def test_projected_cloud_preserves_geometry_and_serializes_class_four(enabled):
     cloud = published[0]
     points = np.frombuffer(cloud.data, dtype=VisualPtcld.CLOUD_DTYPE)
     np.testing.assert_array_equal(
-        points['class_id'], [1, 2, 4 if enabled else 3, 3])
+        points['class_id'], [1, 2, 4 if enabled else 3, 6 if enabled else 3])
     np.testing.assert_array_equal(points['x'], [0.0, 0.375, 0.125, 0.25])
     np.testing.assert_array_equal(points['y'], np.zeros(4))
     np.testing.assert_array_equal(points['z'], np.zeros(4))
@@ -107,8 +108,9 @@ def test_projected_cloud_preserves_geometry_and_serializes_class_four(enabled):
         assert 'boardwalk_final_count' not in stats
     assert stats['published_blue_count'] == 1
     assert stats['published_turquoise_count'] == 1
-    assert stats['published_background_count'] == (1 if enabled else 2)
+    assert stats['published_background_count'] == (0 if enabled else 2)
     assert stats['published_boardwalk_count'] == (1 if enabled else 0)
+    assert stats['published_interior_boardwalk_count'] == (1 if enabled else 0)
 
 
 def test_missing_depth_does_not_record_a_zero_classification_sample():
@@ -145,9 +147,9 @@ def test_telemetry_reports_distribution_counts_and_missing_current_sample():
     assert 'First-pass seeds' in output
     assert 'Added by second pass' in output
     assert 'direct points' in output
-    assert 'White -> blue query' in output
-    assert 'White -> seed query' in output
-    assert 'Blue filter: OpenCV CPU' in output
+    assert 'Soft obstacle -> exterior road' in output
+    assert 'Soft obstacle -> seed query' in output
+    assert 'Exterior road filter: OpenCV CPU' in output
 
 
 @pytest.mark.parametrize('debug_enabled', [False, True])
@@ -187,7 +189,7 @@ def test_image_flag_gates_all_images_but_always_publishes_cloud(debug_enabled):
     assert len(clouds) == 1
     assert len(images) == (3 if debug_enabled else 0)
     points = np.frombuffer(clouds[0].data, dtype=VisualPtcld.CLOUD_DTYPE)
-    np.testing.assert_array_equal(points['class_id'], [1, 2, 4, 3])
+    np.testing.assert_array_equal(points['class_id'], [1, 2, 4, 6])
     assert timings[0]['boardwalk_final_count'] == 1
     assert timings[0]['worker_cpu_ms'] >= 0.0
     assert timings[0]['outside_worker_ms'] >= 0.0
