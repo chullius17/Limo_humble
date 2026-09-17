@@ -452,13 +452,16 @@ class SemanticMapper(Node):
         if not self.dirty:
             return
         try:
-            rendered = self.grid.render(self.reference_geometry)
+            # Use one geometry for both sources so the live combined_grid is
+            # the same laser/CV overlay that is written by save_map().
+            geometry = self.save_geometry()
+            rendered = self.grid.render(geometry)
         except (ValueError, MemoryError) as error:
             self.get_logger().error(str(error), throttle_duration_sec=3.0)
             return
-        if rendered is None:
-            return
-        geometry, layers, combined = rendered
+        geometry, layers, semantic = rendered
+        laser = self.laser_grid.render(geometry)
+        combined = combine_semantic_and_laser(semantic, laser)
         self.last_geometry = geometry
         stamp = self.get_clock().now().to_msg()
         for name, layer in zip(CLASS_NAMES, layers):

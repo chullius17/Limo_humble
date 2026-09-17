@@ -29,7 +29,8 @@ def generate_launch_description():
         'cv_min_points': ('5.0', float, 'Minimum occupied voxels required for CV fusion.'),
         'cv_occupied_threshold': ('50', int, 'Occupied threshold in the binary CV map.'),
         'laser_weight_factor': ('1.0', float, 'Exponent of normalized laser weights during fusion.'),
-        'cv_weight_factor': ('0.25', float, 'Exponent of the CV likelihood.'),
+        'cv_weight_factor': (
+            '0.0', float, 'Exponent of the CV likelihood (0 disables CV weight fusion).'),
         'cv_sad_gain': ('20.0', float, 'Gain converting mean positive mismatch to likelihood.'),
         'max_particles': ('2000', int, 'Maximum AMCL particle count.'),
         'min_particles': ('300', int, 'Minimum AMCL particle count.'),

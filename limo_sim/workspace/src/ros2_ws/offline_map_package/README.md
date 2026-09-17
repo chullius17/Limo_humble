@@ -186,8 +186,9 @@ Prefisso: `/limo/map_package/offline/map/`.
 
 - `turquoise_map`, `white_map`, `boardwalk_map`: costo della classe selezionata,
   0 nelle celle classificate diversamente, -1 nelle celle sconosciute/incerte.
-- `combined_grid`: classe selezionata, valori -1 / 0 / 30 / 60 / 90;
-  0 indica strada osservata e -1 indica una cella sconosciuta/incerta.
+- `combined_grid`: mappa live fusa laser + CV, valori 0 / 30 / 60 / 90 / 100;
+  gli ostacoli laser hanno precedenza a 100, i costi semantici CV sono
+  sovrapposti allo spazio libero laser.
 
 Tutti sono `nav_msgs/OccupancyGrid`, QoS reliable/transient-local. Il contenuto
 è un **costo semantico**, non probabilità di occupazione fisica: eventuali

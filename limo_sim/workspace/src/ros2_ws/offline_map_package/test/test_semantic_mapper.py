@@ -233,6 +233,20 @@ def test_complete_map_precedence():
     np.testing.assert_array_equal(complete, [[60, 0, 90, 100]])
 
 
+def test_live_combined_grid_contains_laser_and_cv(node):
+    node.map_callback(reference_map([[0, 0, 0]]))
+    node.grid.update(np.array([[0.1, 0.1], [1.1, 0.1]]), np.array([2, 4]))
+    node.laser_grid.update(np.array([[1.1, 0.1]]))
+    published = []
+    node.combined_pub = SimpleNamespace(publish=published.append)
+    node.dirty = True
+
+    node.publish_maps()
+
+    assert len(published) == 1
+    assert list(published[0].data) == [60, 100, 0]
+
+
 def test_cv_obstacle_cost_boundaries():
     complete = np.array([[-1, 0, 9, 10, 95, 96, 100]], dtype=np.int8)
     np.testing.assert_array_equal(
