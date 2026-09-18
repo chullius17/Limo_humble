@@ -1,6 +1,8 @@
 #ifndef LIMO_INFLATION__BORDER_FOLLOW_LAYER_HPP_
 #define LIMO_INFLATION__BORDER_FOLLOW_LAYER_HPP_
 
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -36,6 +38,7 @@ private:
 
   std::mutex map_mutex_;
   nav_msgs::msg::OccupancyGrid::SharedPtr source_map_;
+  std::shared_ptr<const std::vector<std::uint8_t>> border_costs_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
   std::string source_topic_;
   int obstacle_threshold_{10};

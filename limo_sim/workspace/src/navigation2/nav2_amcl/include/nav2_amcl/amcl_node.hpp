@@ -149,6 +149,7 @@ protected:
   double cv_sync_tolerance_{0.2};
   double cv_voxel_size_{0.075};
   double cv_min_points_{5.0};
+  int cv_min_non_road_voxels_{1};
   double cv_sad_gain_{20.0};
   double laser_weight_factor_{1.0};
   double cv_weight_factor_{0.25};

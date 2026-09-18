@@ -96,8 +96,59 @@ void BorderFollowLayer::onInitialize()
 void BorderFollowLayer::mapCallback(
   const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
+  {
+    std::lock_guard<std::mutex> lock(map_mutex_);
+    if (source_map_ &&
+      source_map_->info.width == msg->info.width &&
+      source_map_->info.height == msg->info.height &&
+      source_map_->info.resolution == msg->info.resolution &&
+      source_map_->info.origin.position.x == msg->info.origin.position.x &&
+      source_map_->info.origin.position.y == msg->info.origin.position.y &&
+      source_map_->data == msg->data)
+    {
+      return;
+    }
+  }
+
+  const int width = static_cast<int>(msg->info.width);
+  const int height = static_cast<int>(msg->info.height);
+  auto costs = std::make_shared<std::vector<std::uint8_t>>(
+    static_cast<std::size_t>(width) * height, 0u);
+  cv::Mat distance_input(height, width, CV_8UC1, cv::Scalar(255));
+  bool has_obstacles = false;
+  for (int y = 0; y < height; ++y) {
+    auto * row = distance_input.ptr<std::uint8_t>(y);
+    for (int x = 0; x < width; ++x) {
+      const auto value = msg->data[y * width + x];
+      if (value >= obstacle_threshold_) {
+        row[x] = 0;
+        has_obstacles = true;
+      }
+    }
+  }
+
+  if (has_obstacles) {
+    cv::Mat distances_px;
+    cv::distanceTransform(
+      distance_input, distances_px, cv::DIST_L2, cv::DIST_MASK_PRECISE);
+    const double resolution = msg->info.resolution;
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        const auto index = static_cast<std::size_t>(y) * width + x;
+        const auto source_value = msg->data[index];
+        if (source_value < 0 || source_value >= obstacle_threshold_) {
+          continue;
+        }
+        const double distance = distances_px.at<float>(y, x) * resolution;
+        (*costs)[index] = computeBorderCost(distance, profile_);
+      }
+    }
+  }
+
   std::lock_guard<std::mutex> lock(map_mutex_);
   source_map_ = msg;
+  border_costs_ = costs;
+  current_ = true;
 }
 
 void BorderFollowLayer::updateBounds(
@@ -136,11 +187,13 @@ void BorderFollowLayer::updateCosts(
   }
 
   nav_msgs::msg::OccupancyGrid::SharedPtr source;
+  std::shared_ptr<const std::vector<std::uint8_t>> border_costs;
   {
     std::lock_guard<std::mutex> lock(map_mutex_);
     source = source_map_;
+    border_costs = border_costs_;
   }
-  if (!source || !geometryMatches(*source, master_grid)) {
+  if (!source || !border_costs || !geometryMatches(*source, master_grid)) {
     if (source) {
       RCLCPP_WARN_THROTTLE(
         node_->get_logger(), *node_->get_clock(), 2000,
@@ -151,42 +204,21 @@ void BorderFollowLayer::updateCosts(
 
   const int width = static_cast<int>(source->info.width);
   const int height = static_cast<int>(source->info.height);
-  cv::Mat distance_input(height, width, CV_8UC1, cv::Scalar(255));
-  bool has_obstacles = false;
-  for (int y = 0; y < height; ++y) {
-    auto * row = distance_input.ptr<std::uint8_t>(y);
-    for (int x = 0; x < width; ++x) {
-      const auto value = source->data[y * width + x];
-      if (value >= obstacle_threshold_) {
-        row[x] = 0;
-        has_obstacles = true;
-      }
-    }
-  }
-  if (!has_obstacles) {
-    return;
-  }
-
-  cv::Mat distances_px;
-  cv::distanceTransform(
-    distance_input, distances_px, cv::DIST_L2, cv::DIST_MASK_PRECISE);
-  const double resolution = master_grid.getResolution();
   const int first_x = std::max(0, min_i);
   const int first_y = std::max(0, min_j);
   const int last_x = std::min(width, max_i);
   const int last_y = std::min(height, max_j);
   for (int y = first_y; y < last_y; ++y) {
     for (int x = first_x; x < last_x; ++x) {
-      const auto source_value = source->data[y * width + x];
-      if (source_value < 0 || source_value >= obstacle_threshold_) {
+      const auto index = static_cast<std::size_t>(y) * width + x;
+      const auto new_cost = (*border_costs)[index];
+      if (new_cost == 0u) {
         continue;
       }
       const auto old_cost = master_grid.getCost(x, y);
       if (old_cost == nav2_costmap_2d::NO_INFORMATION) {
         continue;
       }
-      const double distance = distances_px.at<float>(y, x) * resolution;
-      const auto new_cost = computeBorderCost(distance, profile_);
       master_grid.setCost(x, y, std::max(old_cost, new_cost));
     }
   }
@@ -196,6 +228,7 @@ void BorderFollowLayer::reset()
 {
   std::lock_guard<std::mutex> lock(map_mutex_);
   source_map_.reset();
+  border_costs_.reset();
   current_ = false;
 }
 

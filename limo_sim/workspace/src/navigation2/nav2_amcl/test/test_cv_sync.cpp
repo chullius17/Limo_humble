@@ -17,6 +17,7 @@ public:
   {
     set_parameter(rclcpp::Parameter("cv_enabled", true));
     set_parameter(rclcpp::Parameter("cv_min_points", 1.0));
+    set_parameter(rclcpp::Parameter("cv_min_non_road_voxels", 1));
     // Temporal tests isolate synchronization; quality is exercised separately.
     set_parameter(rclcpp::Parameter("cv_quality_gate_enabled", false));
     set_parameter(rclcpp::Parameter("base_frame_id", "base_link"));
@@ -34,6 +35,7 @@ public:
 
   void setLaserWeight(double weight) {laser_weight_factor_ = weight;}
   void setQualityGate(bool enabled) {cv_quality_gate_enabled_ = enabled;}
+  void setMinNonRoadVoxels(int minimum) {cv_min_non_road_voxels_ = minimum;}
   void setLaserLimits(double minimum, double maximum)
   {
     laser_min_range_ = minimum;
@@ -167,16 +169,26 @@ TEST_F(CvSync, SoftObstaclesDoNotChangeLaserWeights)
   EXPECT_DOUBLE_EQ(samples[1].weight, 0.5);
 }
 
-TEST_F(CvSync, RoadOnlyCloudFavorsFreeSpaceAndIsNotReused)
+TEST_F(CvSync, RoadOnlyCloudIsRejectedByNonRoadGate)
 {
   cloud->data[12] = 1;
   node->cvCloudReceived(cloud);
-  ASSERT_TRUE(node->applyCvFusion(&set, stamp));
-  // Compensated road is in occupied cell 1 for particle 0, free cell 2 for 1.
-  EXPECT_GT(samples[1].weight, 0.99);
-  const double weight = samples[1].weight;
   EXPECT_FALSE(node->applyCvFusion(&set, stamp));
-  EXPECT_DOUBLE_EQ(samples[1].weight, weight);
+  EXPECT_DOUBLE_EQ(samples[0].weight, 0.5);
+  EXPECT_DOUBLE_EQ(samples[1].weight, 0.5);
+}
+
+TEST_F(CvSync, NonRoadGateIsConfigurable)
+{
+  node->setMinNonRoadVoxels(2);
+  node->cvCloudReceived(cloud);
+  EXPECT_FALSE(node->applyCvFusion(&set, stamp));
+  EXPECT_DOUBLE_EQ(samples[0].weight, 0.5);
+  EXPECT_DOUBLE_EQ(samples[1].weight, 0.5);
+
+  node->setMinNonRoadVoxels(1);
+  ASSERT_TRUE(node->applyCvFusion(&set, stamp));
+  EXPECT_GT(samples[0].weight, 0.99);
 }
 
 TEST_F(CvSync, ReusesOnlyWithoutValidLidarUntilOriginalCloudTimeout)

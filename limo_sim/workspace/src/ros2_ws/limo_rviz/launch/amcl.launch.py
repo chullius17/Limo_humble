@@ -27,6 +27,8 @@ def generate_launch_description():
         'cv_sync_tolerance': ('0.20', float, 'Maximum cloud/laser timestamp difference, seconds.'),
         'cv_voxel_size': ('0.075', float, 'XY voxel size in metres after class filtering.'),
         'cv_min_points': ('5.0', float, 'Minimum obstacle/road voxels required for CV fusion.'),
+        'cv_min_non_road_voxels': (
+            '20', int, 'Minimum class 2/4/6 voxels required for CV fusion.'),
         'cv_occupied_threshold': ('50', int, 'Occupied threshold in the binary CV map.'),
         'laser_weight_factor': ('1.0', float, 'Laser exponent; zero skips laser likelihood updates.'),
         'cv_weight_factor': (

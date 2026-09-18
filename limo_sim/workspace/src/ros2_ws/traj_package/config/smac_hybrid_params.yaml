@@ -66,9 +66,11 @@ planner_server:
 
       change_penalty: 0.0
       non_straight_penalty: 1.15
-      # A moderate value still prefers the corridor center but does not reject
-      # narrow, high-inflation passages created by small map inaccuracies.
-      cost_penalty: 1.5
+      # Preserve cells up to 85 as traversable, but make semantic costs above
+      # 25 increasingly unattractive. A strong cost weight makes SMAC prefer a
+      # longer low-cost detour while still allowing the 26-85 band when it is
+      # the only feasible route. Values >= 86 are made lethal by StaticLayer.
+      cost_penalty: 4.0
 
       # A 15 m lookup window gives the non-holonomic heuristic useful coverage
       # on longer routes without returning to the generic 20 m memory cost.
@@ -110,16 +112,18 @@ global_costmap:
       # Publish complete grids to bypass that bug (about 38 kB at 1 Hz here).
       always_send_full_costmap: true
 
-      # These are StaticLayer-wide parameters in Humble. Keeping trinary mode
-      # disabled preserves the intermediate semantic costs from OccupancyGrid.
+      # These are costmap-wide StaticLayer inputs in Foxy/Humble. Keeping
+      # trinary mode disabled preserves intermediate OccupancyGrid costs.
       trinary_costmap: false
-      lethal_cost_threshold: 100
+      # Source-map values strictly greater than 85 are hard obstacles for
+      # SMAC. StaticLayer treats values >= this threshold as lethal.
+      lethal_cost_threshold: 86
       unknown_cost_value: 255
       use_maximum: false
 
-      # Use the physical 0.32 x 0.20 m LIMO footprint, matching the local
+      # Use the physical 0.322 x 0.220 m LIMO footprint, matching the local
       # controller costmap and the goal-validation footprint.
-      footprint: "[[-0.16, -0.10], [-0.16, 0.10], [0.16, 0.10], [0.16, -0.10]]"
+      footprint: "[[-0.161, -0.110], [-0.161, 0.110], [0.161, 0.110], [0.161, -0.110]]"
       footprint_padding: 0.0
 
       plugins: ["static_layer", "border_follow_layer"]
@@ -134,12 +138,14 @@ global_costmap:
         plugin: "limo_inflation::BorderFollowLayer"
         source_topic: "/limo/map_package/online/map/combined_grid"
         obstacle_threshold: 10
-        robot_width: 0.20
+        robot_width: 0.220
         safety_margin: 0.05
         # The plugin derives the second preferred distance as 1.5 * robot_width
-        # (0.30 m with the current footprint).
+        # (0.33 m with the physical 0.220 m width).
         distance_tolerance: 0.02
         near_max_cost: 120
-        inter_lane_peak_cost: 40
+        # Strongly discourage crossing between the two preferred lanes while
+        # keeping the ridge traversable when no lower-cost route exists.
+        inter_lane_peak_cost: 100
         far_cost_slope: 10.0
         far_max_cost: 8

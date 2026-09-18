@@ -230,6 +230,7 @@ AmclNode::AmclNode()
   add_parameter("cv_sync_tolerance", rclcpp::ParameterValue(0.2));
   add_parameter("cv_voxel_size", rclcpp::ParameterValue(0.075));
   add_parameter("cv_min_points", rclcpp::ParameterValue(5.0));
+  add_parameter("cv_min_non_road_voxels", rclcpp::ParameterValue(1));
   add_parameter("cv_occupied_threshold", rclcpp::ParameterValue(50));
   add_parameter("cv_sad_gain", rclcpp::ParameterValue(20.0));
   add_parameter("laser_weight_factor", rclcpp::ParameterValue(1.0));
@@ -1169,6 +1170,7 @@ AmclNode::initParameters()
   get_parameter("cv_sync_tolerance", cv_sync_tolerance_);
   get_parameter("cv_voxel_size", cv_voxel_size_);
   get_parameter("cv_min_points", cv_min_points_);
+  get_parameter("cv_min_non_road_voxels", cv_min_non_road_voxels_);
   get_parameter("cv_occupied_threshold", cv_occupied_threshold_);
   get_parameter("cv_sad_gain", cv_sad_gain_);
   get_parameter("laser_weight_factor", laser_weight_factor_);
@@ -1197,6 +1199,11 @@ AmclNode::initParameters()
   valid_double(cv_quality_limits_.max_yaw_stddev, 0.5, 1e-6, "cv_max_yaw_stddev");
   if (cv_buffer_size_ < 1) {
     cv_buffer_size_ = 10;
+  }
+  if (cv_min_non_road_voxels_ < 0) {
+    RCLCPP_WARN(
+      get_logger(), "Invalid cv_min_non_road_voxels; using 1");
+    cv_min_non_road_voxels_ = 1;
   }
   if (cv_occupied_threshold_ < 1 || cv_occupied_threshold_ > 100) {
     cv_occupied_threshold_ = 50;
@@ -1391,8 +1398,10 @@ AmclNode::initPubSub()
       std::bind(&AmclNode::cvCloudReceived, this, std::placeholders::_1));
     RCLCPP_INFO(
       get_logger(),
-      "CV cloud fusion: %s -> %s, XY voxel %.3f m, obstacles 2/4/6, roads 1/5 (soft 3 excluded)",
-      cv_cloud_topic_.c_str(), cv_map_topic_.c_str(), cv_voxel_size_);
+      "CV cloud fusion: %s -> %s, XY voxel %.3f m, obstacles 2/4/6, roads 1/5 "
+      "(soft 3 excluded), minimum non-road voxels=%d",
+      cv_cloud_topic_.c_str(), cv_map_topic_.c_str(), cv_voxel_size_,
+      cv_min_non_road_voxels_);
   }
   RCLCPP_INFO(get_logger(), "Subscribed to map topic.");
 }

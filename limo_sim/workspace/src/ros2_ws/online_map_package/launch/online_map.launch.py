@@ -28,6 +28,7 @@ AMCL_PARAMETER_TYPES = {
     'cv_sync_tolerance': float,
     'cv_voxel_size': float,
     'cv_min_points': float,
+    'cv_min_non_road_voxels': int,
     'cv_occupied_threshold': int,
     'laser_weight_factor': float,
     'cv_weight_factor': float,

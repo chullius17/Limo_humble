@@ -137,6 +137,17 @@ bool AmclNode::applyCvFusion(
       cells.size(), cv_min_points_);
     return false;
   }
+  const auto non_road_voxels = static_cast<std::size_t>(std::count_if(
+      cells.begin(), cells.end(), [](const CvTemplateCell2D & cell) {
+        return cell.occupancy > 0.5;
+      }));
+  if (non_road_voxels < static_cast<std::size_t>(cv_min_non_road_voxels_)) {
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "CV cloud has %zu non-road voxels, minimum %d; skipping CV update",
+      non_road_voxels, cv_min_non_road_voxels_);
+    return false;
+  }
   std::lock_guard<std::mutex> lock(cv_mutex_);
   const auto score = cv_likelihood_model_->scoreSad(set, cells);
   CvLikelihoodModel::QualityReport quality;
@@ -159,10 +170,10 @@ bool AmclNode::applyCvFusion(
   if (workload_logging_enabled_) {
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "CV cloud fusion: dt=%.4f s input=%llu voxels=%zu particles=%d evaluations=%llu "
-      "reused=%s lidar_valid=%s laser_weight=%.3f",
+      "CV cloud fusion: dt=%.4f s input=%llu voxels=%zu non_road=%zu particles=%d "
+      "evaluations=%llu reused=%s lidar_valid=%s laser_weight=%.3f",
       time_error, static_cast<unsigned long long>(cloud->width) * cloud->height,
-      cells.size(), set->sample_count,
+      cells.size(), non_road_voxels, set->sample_count,
       static_cast<unsigned long long>(cells.size()) * set->sample_count,
       reused ? "true" : "false", lidar_information_valid ? "true" : "false",
       laser_weight_factor_);

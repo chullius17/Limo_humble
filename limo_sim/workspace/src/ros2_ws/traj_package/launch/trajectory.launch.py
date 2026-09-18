@@ -78,8 +78,10 @@ def generate_launch_description():
             'follow_path_action': '/follow_path',
             'controller_id': 'FollowPath',
             'goal_checker_id': 'goal_checker',
-            'enable_control': True,
-            # Keep the accepted path ready until the control GUI starts it.
+            # Planner-only by default: selecting a 2D Goal Pose computes the
+            # path without requiring a controller or moving the robot.
+            'enable_control': False,
+            # Never start execution as a side effect of selecting an RViz goal.
             'auto_start_control': False,
             'costmap_topic': '/global_costmap/costmap',
             'adjusted_goal_topic': '/adjusted_goal_pose',
@@ -95,8 +97,8 @@ def generate_launch_description():
             'angle_search_step_deg': 22.5,
             'max_planning_attempts': 48,
             # Match the physical, unpadded footprint used by SMAC.
-            'footprint_length': 0.32,
-            'footprint_width': 0.20,
+            'footprint_length': 0.322,
+            'footprint_width': 0.220,
             # OccupancyGrid value 99 represents Nav2's inscribed cost.
             'collision_cost_threshold': 99,
         }],

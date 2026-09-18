@@ -59,7 +59,9 @@ class RvizGoalBridge(Node):
         self.declare_parameter('planner_id', 'GridBased')
         self.declare_parameter('controller_id', 'FollowPath')
         self.declare_parameter('goal_checker_id', 'goal_checker')
-        self.declare_parameter('enable_control', True)
+        # Path execution is optional.  In planner-only deployments the bridge
+        # must still accept RViz goals when no FollowPath server is running.
+        self.declare_parameter('enable_control', False)
         self.declare_parameter('auto_start_control', False)
         self.declare_parameter(
             'costmap_topic',
@@ -82,8 +84,8 @@ class RvizGoalBridge(Node):
         self.declare_parameter('angle_search_step_deg', 22.5)
         self.declare_parameter('orientation_score_weight', 0.10)
         self.declare_parameter('max_planning_attempts', 48)
-        self.declare_parameter('footprint_length', 0.32)
-        self.declare_parameter('footprint_width', 0.20)
+        self.declare_parameter('footprint_length', 0.322)
+        self.declare_parameter('footprint_width', 0.220)
         self.declare_parameter('collision_cost_threshold', 99)
 
         goal_topic = str(self.get_parameter('goal_topic').value)
@@ -115,6 +117,9 @@ class RvizGoalBridge(Node):
         )
         self.goal_checker_id = str(
             self.get_parameter('goal_checker_id').value
+        )
+        self.enable_control = bool(
+            self.get_parameter('enable_control').value
         )
         self.enable_goal_adjustment = bool(
             self.get_parameter('enable_goal_adjustment').value
@@ -188,11 +193,27 @@ class RvizGoalBridge(Node):
             ComputePathToPose,
             action_name,
         )
-        self.follow_path_client = ActionClient(
-            self,
-            FollowPath,
-            follow_path_action,
+        action_probe = ComputePathToPose.Goal()
+        self.supports_explicit_start = (
+            hasattr(action_probe, 'start')
+            and hasattr(action_probe, 'use_start')
         )
+        if hasattr(action_probe, 'goal'):
+            self.compute_path_goal_field = 'goal'
+        elif hasattr(action_probe, 'pose'):
+            self.compute_path_goal_field = 'pose'
+        else:
+            raise RuntimeError(
+                'Unsupported ComputePathToPose action: expected a goal or '
+                'pose field.'
+            )
+        self.follow_path_client = None
+        if self.enable_control:
+            self.follow_path_client = ActionClient(
+                self,
+                FollowPath,
+                follow_path_action,
+            )
 
         control_qos = QoSProfile(
             depth=1,
@@ -241,11 +262,16 @@ class RvizGoalBridge(Node):
 
         self._publish_control_state('IDLE: waiting for a planned path')
 
+        control_description = (
+            follow_path_action if self.enable_control else 'disabled'
+        )
         self.get_logger().info(
             'RViz goal bridge started to simplify graphical goal selection: '
             f'{goal_topic} -> {action_name} '
             f'(planner={self.planner_id}, '
-            f'control={follow_path_action}, '
+            f'control={control_description}, '
+            f'explicit_start={self.supports_explicit_start}, '
+            f'goal_field={self.compute_path_goal_field}, '
             f'adjustment={self.enable_goal_adjustment}, '
             f'radius={self.position_search_radius:.2f} m, '
             f'max_attempts={self.max_planning_attempts})'
@@ -292,6 +318,11 @@ class RvizGoalBridge(Node):
 
     def _set_control_active(self, request, response):
         """Start the stored path or abort the current control action."""
+        if not self.enable_control:
+            response.success = False
+            response.message = 'Path control is disabled in this bridge.'
+            return response
+
         if request.data:
             if self.control_path is None:
                 response.success = False
@@ -369,15 +400,6 @@ class RvizGoalBridge(Node):
                 'The ComputePathToPose action server is not available.'
             )
             return
-        if (
-            bool(self.get_parameter('enable_control').value)
-            and not self.follow_path_client.wait_for_server(timeout_sec=1.0)
-        ):
-            self.get_logger().error(
-                'The FollowPath action server is not available.'
-            )
-            return
-
         self.search_generation += 1
         generation = self.search_generation
         self.control_path = None
@@ -410,7 +432,21 @@ class RvizGoalBridge(Node):
             )
             return
 
-        self.start_candidates = self._find_valid_start_candidates(robot_pose)
+        if self.supports_explicit_start:
+            self.start_candidates = self._find_valid_start_candidates(
+                robot_pose
+            )
+        elif self._is_footprint_free(robot_pose):
+            # Foxy's ComputePathToPose action has no start/use_start fields.
+            # planner_server obtains the current robot pose from TF itself.
+            self.start_candidates = [GoalCandidate(
+                pose=robot_pose,
+                position_delta=0.0,
+                angle_delta=0.0,
+                score=0.0,
+            )]
+        else:
+            self.start_candidates = []
         if not self.start_candidates:
             self.get_logger().error(
                 'No collision-free start pose found near the robot.'
@@ -694,11 +730,12 @@ class RvizGoalBridge(Node):
         candidate.pose.header.stamp = self.get_clock().now().to_msg()
 
         request = ComputePathToPose.Goal()
-        request.start = copy.deepcopy(start_candidate.pose)
-        request.start.header.stamp = self.get_clock().now().to_msg()
-        request.goal = candidate.pose
+        if self.supports_explicit_start:
+            request.start = copy.deepcopy(start_candidate.pose)
+            request.start.header.stamp = self.get_clock().now().to_msg()
+            request.use_start = True
+        setattr(request, self.compute_path_goal_field, candidate.pose)
         request.planner_id = self.planner_id
-        request.use_start = True
         future = self.compute_path_client.send_goal_async(request)
         future.add_done_callback(
             lambda response, current_generation=generation,
@@ -799,7 +836,7 @@ class RvizGoalBridge(Node):
                 f'READY: path contains {pose_count} poses'
             )
             if (
-                bool(self.get_parameter('enable_control').value)
+                self.enable_control
                 and bool(self.get_parameter('auto_start_control').value)
             ):
                 self.control_requested = True
@@ -807,7 +844,7 @@ class RvizGoalBridge(Node):
                     self.control_path,
                     generation,
                 )
-            elif not bool(self.get_parameter('enable_control').value):
+            elif not self.enable_control:
                 self.get_logger().info(
                     'Controller activation is disabled by enable_control.'
                 )
@@ -818,6 +855,22 @@ class RvizGoalBridge(Node):
     def _send_control_goal(self, path, generation: int) -> None:
         """Send a successful SMAC path to the configured Nav2 controller."""
         if generation != self.search_generation:
+            return
+        if self.follow_path_client is None:
+            self.control_requested = False
+            self.get_logger().error(
+                'Cannot execute the path: control is disabled.'
+            )
+            self._publish_control_state('ERROR: path control is disabled')
+            return
+        if not self.follow_path_client.wait_for_server(timeout_sec=1.0):
+            self.control_requested = False
+            self.get_logger().error(
+                'Cannot execute the path: the FollowPath server is unavailable.'
+            )
+            self._publish_control_state(
+                'ERROR: FollowPath server is unavailable'
+            )
             return
         request = FollowPath.Goal()
         request.path = path

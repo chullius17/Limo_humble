@@ -30,6 +30,8 @@ amcl:
   cv_sync_tolerance: 0.20
   cv_voxel_size: 0.075
   cv_min_points: 5.0
+  # Ignore CV localization updates without enough independent non-road evidence.
+  cv_min_non_road_voxels: 20
   cv_occupied_threshold: 50
   # Equal laser/CV factors; unusable CV leaves the laser update intact.
   laser_weight_factor: 1.0
