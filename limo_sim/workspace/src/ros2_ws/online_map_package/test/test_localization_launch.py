@@ -65,7 +65,7 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
     nodes, includes = online(monkeypatch)
     assert set(nodes) == {
         'complete_map_server', 'laser_map_server', 'cv_map_server',
-        'lifecycle_manager_online_maps', 'rviz2',
+        'lifecycle_manager_online_maps', 'local_map_final', 'rviz2',
     }
     assert all(node['values']['use_sim_time'] is True
                for node in nodes.values())
@@ -88,13 +88,18 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
         'autostart': 'true',
     }
     assert nodes['rviz2']['arguments'][-2:] == ['-f', 'map']
+    assert nodes['local_map_final']['values']['base_frame'] == 'base_link'
+    assert nodes['local_map_final']['values']['maximum_points'] == 300
+    assert nodes['local_map_final']['values']['grid_resolution'] == 0.02
+    assert nodes['local_map_final']['values']['yellow_line_cost'] == 60
+    assert nodes['local_map_final']['values']['boardwalk_cost'] == 90
 
 
 def test_real_profile_is_headless_and_does_not_restart_cv(monkeypatch):
     nodes, includes = online(monkeypatch, 'real', mode='backend')
     assert set(nodes) == {
         'complete_map_server', 'laser_map_server', 'cv_map_server',
-        'lifecycle_manager_online_maps',
+        'lifecycle_manager_online_maps', 'local_map_final',
     }
     assert all(node['values']['use_sim_time'] is False
                for node in nodes.values())
@@ -130,7 +135,9 @@ def test_custom_profile_and_cli_overrides_reach_consumers(
     config.write_text(yaml.safe_dump(profile))
     nodes, includes = online(
         monkeypatch, config_file=str(config),
-        map_directory=str(tmp_path), max_particles='600')
+        map_directory=str(tmp_path), max_particles='600',
+        local_map_maximum_points='123')
+    assert nodes['local_map_final']['values']['maximum_points'] == 123
     assert nodes['complete_map_server']['values']['yaml_filename'] == str(
         tmp_path / 'custom_complete.yaml')
     assert ('map', '/test/laser_map') in (

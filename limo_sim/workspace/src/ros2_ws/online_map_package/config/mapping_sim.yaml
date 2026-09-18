@@ -6,6 +6,7 @@ launch:
   start_maps: true
   start_amcl: true
   start_trajectory: true
+  start_local_map_final: true
   start_rviz: true
   rviz_config: online_map.rviz  # Relative to limo_rviz/config, or absolute.
   fixed_frame: map
@@ -17,6 +18,19 @@ map_servers:
   complete_topic: /map
   laser_topic: /limo/map_package/online/maps/laser_map
   cv_obstacle_topic: /limo/map_package/online/maps/cv_obstacle
+
+local_map_final:
+  inner_trapezoid_inset: 0.20  # Perpendicular distance from each yellow edge, m.
+  maximum_points: 300  # Total persistent points, classes 2 and 4 together.
+  minimum_confidence: 0.30
+  confidence_decay_per_sec: 0.10
+  yellow_decay_multiplier: 3.0
+  voxel_size: 0.03
+  grid_resolution: 0.02
+  grid_publish_rate: 10.0
+  live_cloud_timeout_sec: 0.50
+  yellow_line_cost: 60
+  boardwalk_cost: 90
 
 amcl:
   base_frame_id: base_link

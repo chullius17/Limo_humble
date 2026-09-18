@@ -41,6 +41,7 @@ setup(
             'cv_2_ptcld = online_map_package.cv_2_ptcld:main',
             'online_map = online_map_package.online_map:main',
             'local_ptcld = online_map_package.local_ptcld:main',
+            'local_map_final = online_map_package.local_map_final:main',
         ],
     },
 )

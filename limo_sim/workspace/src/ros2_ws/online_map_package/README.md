@@ -134,6 +134,58 @@ planner di traiettoria e RViz opzionali: i vecchi nodi `online_metric_bev`,
 I relativi sorgenti restano disponibili, ma non sono stati convertiti in questa
 modifica alla localizzazione.
 
+`local_map_final` viene invece avviato dal profilo online e pubblica su
+`/limo/map_package/online/local_map_final/markers` i limiti di lavoro in
+`base_link`: il rettangolo persistente rosso da 2,50 x 2,66 m e il trapezio ROI
+giallo alto 1,95 m, largo da 0,60 a 2,66 m. La base maggiore del trapezio ha
+sempre la stessa larghezza del rettangolo e coincide con il suo lato anteriore,
+a 2,50 m da `base_link`. Il display **Local Map Regions** è già abilitato in
+`online_map.rviz`. In modalità desktop il nodo resta sul backend e RViz
+visualizza il topic ricevuto dalla LIMO.
+
+Un terzo contorno verde mostra il trapezio interno: ogni lato è parallelo al
+corrispondente lato giallo e arretrato di 20 cm verso l'interno, misurati
+perpendicolarmente al lato (`inner_trapezoid_inset: 0.20`). È un riferimento
+visivo in `base_link`; la memoria dei punti usa il trapezio giallo.
+Vertici e messaggi dei tre contorni sono precalcolati una sola volta durante
+l'inizializzazione; la pubblicazione aggiorna soltanto i timestamp.
+
+`local_map_final` fonde la cloud CV corrente e la memoria dei punti riproiettati
+e pubblica direttamente `/limo/map_package/online/local_costmap` come
+`nav_msgs/OccupancyGrid`. La griglia coincide con il rettangolo rosso: misura
+2,50 x 2,66 m, ha origine `(0, -1.33)` in `base_link` e, con risoluzione 2 cm,
+contiene esattamente 125 x 133 celle. Le celle libere valgono 0; yellow line
+(classe 2) vale 60 e boardwalk (classe 4) vale 90, come nella costruzione della
+mappa semantica offline. Se più punti cadono nella stessa cella viene conservato
+il costo maggiore. I costi sono fissi: la confidenza regola la persistenza dei
+punti, ma non riduce il loro costo.
+
+A ogni frame CV i punti delle due classi vengono conservati come sorgente live
+per 0,50 s. In parallelo, i punti situati **dentro il trapezio giallo ma fuori
+da quello verde** vengono convertiti subito in coordinate `odom` usando la TF
+dello stesso timestamp e inseriti nella memoria. Non si attende che escano dal
+trapezio: la fascia fra i due contorni è la zona di ammissione. Un frame senza
+TF viene ignorato senza alterare né la sorgente live né la memoria esistente.
+
+I punti persistenti sono riproiettati a 10 Hz anche senza nuovi frame CV.
+Sono cancellati quando entrano nel trapezio verde, escono dal rettangolo oppure
+scendono sotto `minimum_confidence` (0,30). Alla nascita la confidenza vale 1:
+il decadimento viene integrato a ogni riproiezione in base alla regione attuale.
+Nel rettangolo rosso, fuori dal giallo, usa il tasso standard
+`confidence_decay_per_sec` (0,10/s). Dentro il giallo e fuori dal verde usa
+`yellow_decay_multiplier: 3.0`, quindi decade tre volte più rapidamente.
+Dentro il verde viene cancellata immediatamente. Con soglia 0,30, un punto mai
+riosservato dura circa 12 secondi nella regione rossa e 4 secondi in quella
+gialla. Impostare il tasso standard a 0 disabilita il decadimento temporale.
+Questa confidenza descrive la memoria, non la certezza del classificatore CV.
+Un filtro voxel da 3 cm separato per classe evita
+duplicati e il campionamento spaziale impone `maximum_points: 300` totali tra
+le due classi. Parametri nella sezione `local_map_final` dei profili; override
+del limite dal launch: `local_map_maximum_points:=300` (riavviare per applicare).
+RViz mostra la griglia risultante nel display **Local Semantic Costmap**, oltre
+alla cloud CV originale e ai tre contorni. Il launch del controller non avvia
+più un convertitore separato: questa griglia è già pronta per il controller.
+
 I log `CV cloud fusion` mostrano differenza temporale, punti in ingresso,
 voxel, particelle ed effettivo numero di confronti voxel × particelle.
 

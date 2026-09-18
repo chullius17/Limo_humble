@@ -88,7 +88,7 @@ def _launch_online(context):
     settings = dict(profile['launch'])
     for name in (
             'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
-            'start_trajectory', 'start_rviz'):
+            'start_trajectory', 'start_local_map_final', 'start_rviz'):
         settings[name] = _override(context, name, settings[name], bool)
     for name in ('rviz_config', 'fixed_frame'):
         settings[name] = _override(context, name, settings[name], str)
@@ -100,6 +100,7 @@ def _launch_online(context):
             start_maps=False,
             start_amcl=False,
             start_trajectory=False,
+            start_local_map_final=False,
         )
         override = LaunchConfiguration('start_rviz').perform(context)
         settings['start_rviz'] = _boolean(override) if override else True
@@ -139,6 +140,19 @@ def _launch_online(context):
         ('cv_map_server', '_cv_obstacle.yaml', maps['cv_obstacle_topic']),
     )
     actions = []
+    if settings['start_local_map_final']:
+        local_map = dict(profile.get('local_map_final', {}))
+        local_map['maximum_points'] = _override(
+            context, 'local_map_maximum_points',
+            local_map.get('maximum_points', 300), int)
+        actions.append(Node(
+            package='online_map_package', executable='local_map_final',
+            name='local_map_final', output='screen', parameters=[{
+                **local_map,
+                **clock,
+                'base_frame': amcl['base_frame_id'],
+                'odometry_frame': amcl['odom_frame_id'],
+            }]))
     if settings['start_cv']:
         actions.append(IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
@@ -218,8 +232,9 @@ def generate_launch_description():
         'config', 'mapping_sim.yaml')
     launch_overrides = (
         'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
-        'start_trajectory', 'start_rviz', 'rviz_config', 'fixed_frame',
-        'map_directory', 'map_name',
+        'start_trajectory', 'start_local_map_final', 'start_rviz',
+        'rviz_config', 'fixed_frame', 'map_directory', 'map_name',
+        'local_map_maximum_points',
     )
     return LaunchDescription([
         DeclareLaunchArgument(
