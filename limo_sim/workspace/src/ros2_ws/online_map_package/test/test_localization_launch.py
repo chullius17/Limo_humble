@@ -69,14 +69,24 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
     }
     assert all(node['values']['use_sim_time'] is True
                for node in nodes.values())
-    assert len(includes) == 2
+    assert len(includes) == 3
     include_arguments = [dict(action.launch_arguments) for action in includes]
-    assert {'use_sim_time': 'true', 'visual_ptcld_enable_telemetry': 'false'} in include_arguments
+    assert {
+        'use_sim_time': 'true',
+        'visual_ptcld_enable_telemetry': 'false',
+    } in include_arguments
     amcl = next(values for values in include_arguments
                 if 'cv_voxel_size' in values)
     assert amcl['cv_voxel_size'] == '0.075'
     assert amcl['map_topic'].endswith('/laser_map')
     assert amcl['cv_map_topic'].endswith('/cv_obstacle')
+    trajectory = next(values for values in include_arguments
+                      if 'autostart' in values)
+    assert trajectory == {
+        'use_sim_time': 'true',
+        'map_topic': '/map',
+        'autostart': 'true',
+    }
     assert nodes['rviz2']['arguments'][-2:] == ['-f', 'map']
 
 
@@ -88,10 +98,16 @@ def test_real_profile_is_headless_and_does_not_restart_cv(monkeypatch):
     }
     assert all(node['values']['use_sim_time'] is False
                for node in nodes.values())
-    assert len(includes) == 1
-    amcl = dict(includes[0].launch_arguments)
+    assert len(includes) == 2
+    include_arguments = [dict(action.launch_arguments) for action in includes]
+    amcl = next(values for values in include_arguments
+                if 'cv_voxel_size' in values)
     assert amcl['use_sim_time'] == 'false'
     assert amcl['cv_enabled'] == 'true'
+    trajectory = next(values for values in include_arguments
+                      if 'autostart' in values)
+    assert trajectory['use_sim_time'] == 'false'
+    assert trajectory['map_topic'] == '/map'
 
 
 def test_desktop_online_starts_only_rviz(monkeypatch):
@@ -107,6 +123,7 @@ def test_custom_profile_and_cli_overrides_reach_consumers(
     profile = yaml.safe_load(
         (PACKAGE / 'config' / 'mapping_sim.yaml').read_text())
     profile['map_servers']['name'] = 'custom'
+    profile['map_servers']['complete_topic'] = '/test/complete_map'
     profile['map_servers']['laser_topic'] = '/test/laser_map'
     profile['amcl']['cv_voxel_size'] = 0.12
     config = tmp_path / 'profile.yaml'
@@ -123,6 +140,9 @@ def test_custom_profile_and_cli_overrides_reach_consumers(
     assert amcl['cv_voxel_size'] == '0.12'
     assert amcl['max_particles'] == '600'
     assert amcl['map_topic'] == '/test/laser_map'
+    trajectory = next(dict(action.launch_arguments) for action in includes
+                      if 'autostart' in dict(action.launch_arguments))
+    assert trajectory['map_topic'] == '/test/complete_map'
 
 
 @pytest.mark.parametrize('filename,profile,mode', [
@@ -145,6 +165,7 @@ def test_wrappers_select_profile_and_role(filename, profile, mode):
 
 @pytest.mark.parametrize('overrides', [
     {'use_sim_time': 'typo'},
+    {'start_trajectory': 'typo'},
     {'mode': 'typo'},
     {'max_particles': 'not-an-integer'},
 ])

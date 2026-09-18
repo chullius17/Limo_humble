@@ -2,14 +2,24 @@
 
 I profili `config/mapping_sim.yaml` e `config/mapping_real.yaml` configurano
 avvio, map server e AMCL. `online_map.launch.py` contiene la logica condivisa e
-usa la pipeline CV ottimizzata e le tre mappe esportate
+usa la pipeline CV ottimizzata, il planner di traiettoria e le tre mappe esportate
 in `ros2_maps/semantic` dal mapper offline:
 
 | File | Topic | Uso |
 | --- | --- | --- |
 | `limo_map_laser.yaml` | `/limo/map_package/online/maps/laser_map` | confronto laser AMCL |
 | `limo_map_cv_obstacle.yaml` | `/limo/map_package/online/maps/cv_obstacle` | confronto CV AMCL |
-| `limo_map_complete.yaml` | `/map` | riferimento completo per visualizzazione/navigation |
+| `limo_map_complete.yaml` | `/map` | sorgente completa per planner e costmap globale |
+
+`trajectory.launch.py` riceve `/map` dal profilo online. Il relativo
+`BorderFollowLayer` costruisce `/global_costmap/costmap`, visualizzata in RViz
+come **Global Costmap (Inflation)** con lo schema colori `costmap` e alpha 0.35,
+come nel ramo `humble-navigation`.
+
+Su Foxy `always_send_full_costmap: true` evita un bug di RViz negli aggiornamenti
+`OccupancyGridUpdate`: la prima riga viene ripetuta su tutte le righe, facendo
+comparire strisce dopo la prima mappa corretta. La costmap completa viene
+pubblicata a 1 Hz; la palette non causa questo problema.
 
 La cloud `/limo/cv_package/visual_ptcld/points` contiene `x,y,z` FLOAT32 e
 `class_id` UINT8. AMCL seleziona **yellow lines=2, boardwalk=4, interior
@@ -77,12 +87,13 @@ finché il lidar o una posa iniziale non restringono le ipotesi.
 
 ## Avvio
 
-Dopo la build di `nav2_amcl`, `limo_rviz`, `cv_package`, `online_map_package`
-e il source del workspace:
+Dopo la build di `nav2_amcl`, `limo_inflation`, `traj_package`, `limo_rviz`,
+`cv_package`, `online_map_package` e il source del workspace:
 
 ```bash
 cd /workspace
-colcon build --packages-select nav2_amcl limo_rviz cv_package online_map_package --symlink-install
+colcon build --packages-select nav2_amcl limo_inflation traj_package \
+  limo_rviz cv_package online_map_package --symlink-install
 source install/setup.bash
 ros2 launch online_map_package online_map_sim.launch.py
 ```
@@ -110,12 +121,15 @@ ros2 launch online_map_package online_map_sim.launch.py \
 I valori persistenti si modificano nei due YAML; gli argomenti della riga di
 comando servono per prove temporanee. Il profilo reale non riavvia la CV e non
 apre finestre. `desktop_online.launch.py` usa lo stesso profilo reale in modalità
-desktop e avvia esclusivamente RViz.
+desktop e avvia esclusivamente RViz. Il planner e la costmap vengono avviati
+dal profilo online sul backend; si possono disabilitare temporaneamente con
+`start_trajectory:=false`.
 
 AMCL pubblica `map -> odom`; fornire una posa iniziale tramite RViz oppure il
 servizio AMCL di localizzazione globale. Non avviare contemporaneamente SLAM
-che pubblichi lo stesso TF. Il launch avvia localizzazione, map server, CV e RViz
-opzionali: i vecchi nodi `online_metric_bev`, `cv_2_ptcld`, `cv_amcl_debug`,
+che pubblichi lo stesso TF. Il launch avvia localizzazione, map server, CV,
+planner di traiettoria e RViz opzionali: i vecchi nodi `online_metric_bev`,
+`cv_2_ptcld`, `cv_amcl_debug`,
 `online_map` e `local_ptcld`, basati sulle vecchie griglie, non vengono avviati.
 I relativi sorgenti restano disponibili, ma non sono stati convertiti in questa
 modifica alla localizzazione.

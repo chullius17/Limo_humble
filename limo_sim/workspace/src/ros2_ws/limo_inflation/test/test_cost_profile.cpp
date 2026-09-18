@@ -32,15 +32,15 @@ TEST(CostProfileTest, RisesSlowlyAndSaturatesFarFromObstacle)
 TEST(CostProfileTest, CreatesSecondLaneWhenClearanceIsAvailable)
 {
   const CostProfile profile;
-  EXPECT_EQ(computeBorderCost(0.33, profile), 0);
-  EXPECT_EQ(computeBorderCost(0.35, profile), 0);
-  EXPECT_EQ(computeBorderCost(0.37, profile), 0);
+  EXPECT_EQ(computeBorderCost(0.28, profile), 0);
+  EXPECT_EQ(computeBorderCost(0.30, profile), 0);
+  EXPECT_EQ(computeBorderCost(0.32, profile), 0);
 }
 
 TEST(CostProfileTest, SeparatesPreferredLanesWithBoundedRidge)
 {
   const CostProfile profile;
-  EXPECT_EQ(computeBorderCost(0.25, profile), 15);
+  EXPECT_EQ(computeBorderCost(0.225, profile), 15);
   EXPECT_LT(computeBorderCost(0.18, profile), 15);
   EXPECT_LT(computeBorderCost(0.27, profile), 15);
 }

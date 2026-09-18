@@ -27,7 +27,6 @@ void BorderFollowLayer::onInitialize()
   declareParameter("obstacle_threshold", rclcpp::ParameterValue(10));
   declareParameter("robot_width", rclcpp::ParameterValue(0.20));
   declareParameter("safety_margin", rclcpp::ParameterValue(0.05));
-  declareParameter("second_lane_distance", rclcpp::ParameterValue(0.35));
   declareParameter("distance_tolerance", rclcpp::ParameterValue(0.02));
   declareParameter("near_max_cost", rclcpp::ParameterValue(60));
   declareParameter("inter_lane_peak_cost", rclcpp::ParameterValue(15));
@@ -41,8 +40,6 @@ void BorderFollowLayer::onInitialize()
   node->get_parameter(name_ + ".obstacle_threshold", obstacle_threshold_);
   node->get_parameter(name_ + ".robot_width", robot_width);
   node->get_parameter(name_ + ".safety_margin", safety_margin);
-  node->get_parameter(
-    name_ + ".second_lane_distance", profile_.second_lane_distance);
   node->get_parameter(name_ + ".distance_tolerance", profile_.tolerance);
   int near_max_cost;
   int inter_lane_peak_cost;
@@ -53,6 +50,7 @@ void BorderFollowLayer::onInitialize()
   node->get_parameter(name_ + ".far_cost_slope", profile_.far_cost_slope);
   node->get_parameter(name_ + ".far_max_cost", far_max_cost);
   profile_.target_distance = 0.5 * robot_width + safety_margin;
+  profile_.second_lane_distance = 1.5 * robot_width;
   profile_.near_max_cost = static_cast<std::uint8_t>(near_max_cost);
   profile_.inter_lane_peak_cost =
     static_cast<std::uint8_t>(inter_lane_peak_cost);
@@ -85,7 +83,8 @@ void BorderFollowLayer::onInitialize()
 
   RCLCPP_INFO(
     node->get_logger(),
-    "Border-follow layer: source=%s threshold=%d lanes=%.3f/%.3f +/- %.3f m "
+    "Border-follow layer: source=%s threshold=%d lanes=%.3f/%.3f (1.5 x width) "
+    "+/- %.3f m "
     "costs=near:%u inter-lane:%u far:%u slope:%.1f",
     source_topic_.c_str(), obstacle_threshold_, profile_.target_distance,
     profile_.second_lane_distance, profile_.tolerance,

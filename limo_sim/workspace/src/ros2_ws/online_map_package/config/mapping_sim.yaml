@@ -5,6 +5,7 @@ launch:
   start_cv: true
   start_maps: true
   start_amcl: true
+  start_trajectory: true
   start_rviz: true
   rviz_config: online_map.rviz  # Relative to limo_rviz/config, or absolute.
   fixed_frame: map

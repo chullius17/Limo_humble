@@ -87,14 +87,19 @@ def _launch_online(context):
     settings = dict(profile['launch'])
     for name in (
             'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
-            'start_rviz'):
+            'start_trajectory', 'start_rviz'):
         settings[name] = _override(context, name, settings[name], bool)
     for name in ('rviz_config', 'fixed_frame'):
         settings[name] = _override(context, name, settings[name], str)
 
     mode = LaunchConfiguration('mode').perform(context)
     if mode == 'desktop':
-        settings.update(start_cv=False, start_maps=False, start_amcl=False)
+        settings.update(
+            start_cv=False,
+            start_maps=False,
+            start_amcl=False,
+            start_trajectory=False,
+        )
         override = LaunchConfiguration('start_rviz').perform(context)
         settings['start_rviz'] = _boolean(override) if override else True
     elif mode == 'backend':
@@ -181,6 +186,17 @@ def _launch_online(context):
                 'launch', 'amcl.launch.py')),
             launch_arguments=arguments.items(),
         ))
+    if settings['start_trajectory']:
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory('traj_package'),
+                'launch', 'trajectory.launch.py')),
+            launch_arguments={
+                'use_sim_time': str(settings['use_sim_time']).lower(),
+                'map_topic': maps['complete_topic'],
+                'autostart': 'true',
+            }.items(),
+        ))
     if settings['start_rviz']:
         rviz_config = os.path.expanduser(settings['rviz_config'])
         if not os.path.isabs(rviz_config):
@@ -201,7 +217,7 @@ def generate_launch_description():
         'config', 'mapping_sim.yaml')
     launch_overrides = (
         'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
-        'start_rviz', 'rviz_config', 'fixed_frame',
+        'start_trajectory', 'start_rviz', 'rviz_config', 'fixed_frame',
         'map_directory', 'map_name',
     )
     return LaunchDescription([

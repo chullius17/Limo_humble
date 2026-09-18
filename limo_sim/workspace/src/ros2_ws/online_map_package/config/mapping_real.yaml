@@ -5,6 +5,7 @@ launch:
   start_cv: false
   start_maps: true
   start_amcl: true
+  start_trajectory: true
   start_rviz: false
   rviz_config: online_map.rviz  # Used by desktop_online.launch.py on the PC.
   fixed_frame: map

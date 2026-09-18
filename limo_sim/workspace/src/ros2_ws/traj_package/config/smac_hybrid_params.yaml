@@ -21,8 +21,8 @@ planner_server:
     planner_plugins: ["GridBased"]
 
     GridBased:
-      # The Humble nav2_smac_planner package exports this legacy pluginlib name.
-      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      # Foxy's SE2 SMAC plugin implements Hybrid A* with Dubins primitives.
+      plugin: "smac_planner/SmacPlanner"
 
       # Keep the map at 5 cm: at 10 cm, the small LIMO footprint and narrow
       # passages would be represented by too few cells.
@@ -105,7 +105,10 @@ global_costmap:
       rolling_window: false
       resolution: 0.05
       track_unknown_space: true
-      always_send_full_costmap: false
+      # RViz Foxy repeats the first update row across every row when applying
+      # OccupancyGridUpdate, producing stripes after the first good frame.
+      # Publish complete grids to bypass that bug (about 38 kB at 1 Hz here).
+      always_send_full_costmap: true
 
       # These are StaticLayer-wide parameters in Humble. Keeping trinary mode
       # disabled preserves the intermediate semantic costs from OccupancyGrid.
@@ -133,7 +136,8 @@ global_costmap:
         obstacle_threshold: 10
         robot_width: 0.20
         safety_margin: 0.05
-        second_lane_distance: 0.40
+        # The plugin derives the second preferred distance as 1.5 * robot_width
+        # (0.30 m with the current footprint).
         distance_tolerance: 0.02
         near_max_cost: 120
         inter_lane_peak_cost: 40
