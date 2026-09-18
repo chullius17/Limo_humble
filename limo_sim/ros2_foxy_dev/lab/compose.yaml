@@ -1,0 +1,29 @@
+services:
+  foxy:
+    image: limo-foxy-lab:latest
+    container_name: limo-foxy-lab
+    build:
+      context: .
+      args:
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
+    network_mode: host
+    ipc: host
+    privileged: true
+    gpus: all
+    stdin_open: true
+    tty: true
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: "1"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    volumes:
+      - ../../workspace:/workspace
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
