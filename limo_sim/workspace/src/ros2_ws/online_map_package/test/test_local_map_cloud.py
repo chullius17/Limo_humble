@@ -66,17 +66,17 @@ def make_cloud(xy, classes, stamp, bigendian=False):
 
 
 def grid_cell(node, grid, x, y):
-    cell_x = int(np.floor(x / node.grid_resolution))
+    cell_x = int(np.floor(x / node.local_grid.resolution))
     cell_y = int(np.floor(
-        (y - node.grid_origin_y) / node.grid_resolution))
+        (y - node.local_grid.origin_y) / node.local_grid.resolution))
     return int(grid[cell_y, cell_x])
 
 
 def test_grid_geometry_matches_green_rectangle(node):
-    assert node.cells_x == 125
-    assert node.cells_y == 133
-    assert node.grid_resolution == pytest.approx(0.02)
-    assert node.grid_origin_y == pytest.approx(-1.33)
+    assert node.local_grid.width == 125
+    assert node.local_grid.height == 133
+    assert node.local_grid.resolution == pytest.approx(0.02)
+    assert node.local_grid.origin_y == pytest.approx(-1.33)
 
 
 def test_red_trapezoid_keeps_front_edge_aligned_with_yellow(node):
@@ -132,7 +132,7 @@ def test_live_and_memory_clouds_fuse_with_offline_costs_and_maximum(node):
     points = np.concatenate((live_points, memory_points))
     classes = np.concatenate((live_classes, memory_classes))
 
-    grid = node._rasterize(points, classes)
+    grid = node.local_grid.rasterize(points, classes)
 
     assert grid_cell(node, grid, 0.60, 0.10) == 90
     assert grid_cell(node, grid, 1.00, 0.00) == 60
@@ -141,9 +141,9 @@ def test_live_and_memory_clouds_fuse_with_offline_costs_and_maximum(node):
 
 
 def test_inflation_is_circular_clipped_and_keeps_maximum_cost(node):
-    grid = node._rasterize(
-        np.array([[0.01, node.grid_origin_y + 0.01],
-                  [0.13, node.grid_origin_y + 0.01]]),
+    grid = node.local_grid.rasterize(
+        np.array([[0.01, node.local_grid.origin_y + 0.01],
+                  [0.13, node.local_grid.origin_y + 0.01]]),
         np.array([3, 4]),
     )
     assert grid[0, 0] == 30
@@ -155,10 +155,11 @@ def test_inflation_is_circular_clipped_and_keeps_maximum_cost(node):
 
 
 def test_occupancy_grid_message_has_expected_frame_geometry_and_data(node):
-    costs = node._rasterize(np.array([[0.60, 0.10]]), np.array([4]))
+    costs = node.local_grid.rasterize(
+        np.array([[0.60, 0.10]]), np.array([4]))
     stamp = Time(seconds=10.0).to_msg()
 
-    msg = node._make_grid(costs, stamp)
+    msg = node.local_grid.make_message(costs, stamp, node.base_frame)
 
     assert msg.header.frame_id == 'base_link'
     assert msg.header.stamp == stamp
@@ -188,12 +189,14 @@ def test_final_grid_contains_all_live_classes_and_reprojected_memory(
     monkeypatch.setattr(node, 'grid_pub', SimpleNamespace(publish=grids.append))
     node.publish_grid()
 
-    costs = np.asarray(grids[0].data).reshape(node.cells_y, node.cells_x)
+    costs = np.asarray(grids[0].data).reshape(
+        node.local_grid.height, node.local_grid.width)
     assert [grid_cell(node, costs, x, y) for x, y in xy] == [
         0, 60, 30, 90, 0, 90]
     assert grid_cell(node, costs, 0.6, -0.3) == 90
     # A free-road observation must not erase a higher cost in the same cell.
-    merged = node._rasterize(np.array([[1.0, 0.0]] * 3), np.array([6, 3, 1]))
+    merged = node.local_grid.rasterize(
+        np.array([[1.0, 0.0]] * 3), np.array([6, 3, 1]))
     assert grid_cell(node, merged, 1.0, 0.0) == 90
 
 

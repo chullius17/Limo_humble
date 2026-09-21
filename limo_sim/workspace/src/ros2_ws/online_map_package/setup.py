@@ -36,11 +36,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'online_metric_bev = online_map_package.online_metric_bev:main',
-            'cv_amcl_debug = online_map_package.cv_amcl_debug:main',
-            'cv_2_ptcld = online_map_package.cv_2_ptcld:main',
-            'online_map = online_map_package.online_map:main',
-            'local_ptcld = online_map_package.local_ptcld:main',
             'local_map_final = online_map_package.local_map_final:main',
         ],
     },

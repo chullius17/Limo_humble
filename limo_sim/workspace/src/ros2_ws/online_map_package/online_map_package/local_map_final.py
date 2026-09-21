@@ -33,6 +33,7 @@ from sensor_msgs.msg import PointCloud2, PointField
 from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
+from online_map_package.local_grid import LocalGrid
 from online_map_package.semantic_memory import SemanticMemory, transform_xy
 
 
@@ -198,30 +199,15 @@ class LocalMapFinal(Node):
             self.maximum_points, self.minimum_confidence,
             self.confidence_decay_per_sec,
             self.yellow_decay_multiplier, self.voxel_size)
+        self.local_grid = LocalGrid(
+            self.rectangle_length, self.rectangle_width,
+            self.grid_resolution, self.inflation_radius,
+            self.yellow_line_cost, self.soft_obstacle_cost,
+            self.boardwalk_cost)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.last_clock_ns = None
         self.pending_clouds = []
-        self.cells_x = int(round(self.rectangle_length / self.grid_resolution))
-        self.cells_y = int(round(self.rectangle_width / self.grid_resolution))
-        if (not math.isclose(
-                self.cells_x * self.grid_resolution,
-                self.rectangle_length, abs_tol=1e-9)
-                or not math.isclose(
-                    self.cells_y * self.grid_resolution,
-                    self.rectangle_width, abs_tol=1e-9)):
-            raise ValueError(
-                'grid_resolution must divide rectangle dimensions exactly')
-        self.grid_origin_y = -0.5 * self.rectangle_width
-        radius_cells = int(math.ceil(
-            self.inflation_radius / self.grid_resolution))
-        self.inflation_offsets = [
-            (dy, dx)
-            for dy in range(-radius_cells, radius_cells + 1)
-            for dx in range(-radius_cells, radius_cells + 1)
-            if math.hypot(dx, dy) * self.grid_resolution
-            <= self.inflation_radius + 1e-12
-        ]
         self.live_points_odom = np.empty((0, 2), dtype=np.float64)
         self.live_classes = np.empty(0, dtype=np.uint8)
         self.live_stamp_sec = None
@@ -278,7 +264,7 @@ class LocalMapFinal(Node):
             f'motion_decay={self.cmd_vel_topic} '
             f'(linear={self.linear_speed_at_max_decay:g}m/s, '
             f'angular={self.angular_speed_at_max_decay:g}rad/s at maximum); '
-            f'geometry={self.cells_x}x{self.cells_y} at '
+            f'geometry={self.local_grid.width}x{self.local_grid.height} at '
             f'{self.grid_resolution:.3f}m, '
             f'inflation={self.inflation_radius:g}m; costs=1/5:0,'
             f'2:{self.yellow_line_cost},3:{self.soft_obstacle_cost},'
@@ -426,74 +412,6 @@ class LocalMapFinal(Node):
             0.0, 1.0)
         return max(float(linear_ratio), float(angular_ratio))
 
-    def _rasterize(self, points, classes):
-        """Rasterize fixed semantic costs, retaining the maximum per cell."""
-        grid = np.zeros((self.cells_y, self.cells_x), dtype=np.int16)
-        if not len(points):
-            return grid
-        valid = (
-            np.isfinite(points).all(axis=1)
-            & np.isin(classes, [1, 2, 3, 4, 5, 6])
-            & (points[:, 0] >= 0.0)
-            & (points[:, 0] < self.rectangle_length)
-            & (points[:, 1] >= self.grid_origin_y)
-            & (points[:, 1] < -self.grid_origin_y)
-        )
-        if not np.any(valid):
-            return grid
-        selected = points[valid]
-        selected_classes = classes[valid]
-        cell_x = np.floor(
-            selected[:, 0] / self.grid_resolution).astype(np.int64)
-        cell_y = np.floor(
-            (selected[:, 1] - self.grid_origin_y) /
-            self.grid_resolution).astype(np.int64)
-        # Match the offline semantic map: both road classes are free,
-        # and interior boardwalk (6) has the same cost as boundary (4).
-        class_costs = np.array([
-            0, 0, self.yellow_line_cost, self.soft_obstacle_cost,
-            self.boardwalk_cost, 0, self.boardwalk_cost,
-        ], dtype=np.int16)
-        costs = class_costs[selected_classes]
-        flat_indices = cell_y * self.cells_x + cell_x
-        np.maximum.at(grid.ravel(), flat_indices, costs)
-        return self._inflate(grid)
-
-    def _inflate(self, grid):
-        """Dilate nonzero semantic costs within the configured radius."""
-        if self.inflation_radius <= 0.0 or not np.any(grid):
-            return grid
-        inflated = grid.copy()
-        height, width = grid.shape
-        for dy, dx in self.inflation_offsets:
-            if dx == 0 and dy == 0:
-                continue
-            source_y0, source_y1 = max(0, -dy), min(height, height - dy)
-            source_x0, source_x1 = max(0, -dx), min(width, width - dx)
-            target_y0, target_y1 = source_y0 + dy, source_y1 + dy
-            target_x0, target_x1 = source_x0 + dx, source_x1 + dx
-            np.maximum(
-                inflated[target_y0:target_y1, target_x0:target_x1],
-                grid[source_y0:source_y1, source_x0:source_x1],
-                out=inflated[target_y0:target_y1, target_x0:target_x1],
-            )
-        return inflated
-
-    def _make_grid(self, costs, stamp):
-        grid = OccupancyGrid()
-        grid.header.stamp = stamp
-        grid.header.frame_id = self.base_frame
-        grid.info.map_load_time = stamp
-        grid.info.resolution = self.grid_resolution
-        grid.info.width = self.cells_x
-        grid.info.height = self.cells_y
-        grid.info.origin.position.x = 0.0
-        grid.info.origin.position.y = self.grid_origin_y
-        grid.info.origin.orientation.w = 1.0
-        grid.data = array.array(
-            'b', costs.astype(np.int8, copy=False).ravel().tobytes())
-        return grid
-
     def _make_cloud(self, points, classes, stamp):
         """Serialize every finite live or reprojected semantic point."""
         valid = np.isfinite(points).all(axis=1)
@@ -540,8 +458,9 @@ class LocalMapFinal(Node):
             points = np.empty((0, 2))
             classes = np.empty(0, dtype=np.uint8)
             stamp = now.to_msg()
-            self.grid_pub.publish(self._make_grid(
-                self._rasterize(points, classes), stamp))
+            self.grid_pub.publish(self.local_grid.make_message(
+                self.local_grid.rasterize(points, classes),
+                stamp, self.base_frame))
             self.cloud_pub.publish(self._make_cloud(points, classes, stamp))
             return
         try:
@@ -559,8 +478,9 @@ class LocalMapFinal(Node):
             classes = np.concatenate((self.live_classes, memory_classes))
         else:
             points, classes = memory_xy, memory_classes
-        self.grid_pub.publish(self._make_grid(
-            self._rasterize(points, classes), stamp))
+        self.grid_pub.publish(self.local_grid.make_message(
+            self.local_grid.rasterize(points, classes),
+            stamp, self.base_frame))
         self.cloud_pub.publish(self._make_cloud(points, classes, stamp))
 
     def _line_marker(self, marker_id, namespace, points, red, green, z):

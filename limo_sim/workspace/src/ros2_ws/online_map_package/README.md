@@ -128,11 +128,9 @@ dal profilo online sul backend; si possono disabilitare temporaneamente con
 AMCL pubblica `map -> odom`; fornire una posa iniziale tramite RViz oppure il
 servizio AMCL di localizzazione globale. Non avviare contemporaneamente SLAM
 che pubblichi lo stesso TF. Il launch avvia localizzazione, map server, CV,
-planner di traiettoria e RViz opzionali: i vecchi nodi `online_metric_bev`,
-`cv_2_ptcld`, `cv_amcl_debug`,
-`online_map` e `local_ptcld`, basati sulle vecchie griglie, non vengono avviati.
-I relativi sorgenti restano disponibili, ma non sono stati convertiti in questa
-modifica alla localizzazione.
+planner di traiettoria e RViz opzionali. La pipeline semantica temporale usa
+direttamente `local_map_final`, con `local_grid` come modulo di supporto per la
+costmap e `semantic_memory` per la memoria temporale.
 
 `local_map_final` viene invece avviato dal profilo online e pubblica su
 `/limo/map_package/online/local_map_final/markers` i limiti di lavoro in
@@ -195,7 +193,7 @@ I punti persistenti sono riproiettati a 10 Hz anche senza nuovi frame CV.
 Sono cancellati quando entrano nel trapezio rosso, escono dal rettangolo oppure
 scendono sotto `minimum_confidence` (0,30). Alla nascita la confidenza vale 1:
 il decadimento viene integrato a ogni riproiezione in base alla regione e al
-comando `/cmd_vel` attuali. Come in `local_ptcld`, il maggiore fra i rapporti
+comando `/cmd_vel` attuali. Il maggiore fra i rapporti
 di velocità lineare e angolare scala il decadimento da zero a uno: sotto le
 soglie di quiete (0,01 m/s e 0,02 rad/s) la memoria non decade; raggiunge il
 tasso massimo rispettivamente a 0,50 m/s o 1,00 rad/s. Nel rettangolo verde,
