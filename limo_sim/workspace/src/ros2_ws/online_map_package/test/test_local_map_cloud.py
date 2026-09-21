@@ -105,12 +105,13 @@ def test_commanded_speed_scales_decay_like_local_pointcloud(node):
 def test_callback_keeps_live_cloud_and_admits_only_yellow_red_band(node):
     stamp = Time(seconds=10.0).to_msg()
     add_pose(node, stamp, 0.0)
-    msg = make_cloud([[1.0, 0.0], [0.6, 0.1]], [2, 4], stamp)
+    msg = make_cloud(
+        [[1.0, 0.0], [0.6, 0.1], [0.8, 0.0]], [2, 4, 6], stamp)
 
     node.cloud_callback(msg)
 
-    assert len(node.live_points_odom) == 2
-    np.testing.assert_array_equal(node.live_classes, [2, 4])
+    assert len(node.live_points_odom) == 3
+    np.testing.assert_array_equal(node.live_classes, [2, 4, 6])
     assert len(node.memory.points) == 1
     np.testing.assert_allclose(node.memory.points, [[0.6, 0.1]])
     np.testing.assert_array_equal(node.memory.classes, [4])
@@ -135,7 +136,22 @@ def test_live_and_memory_clouds_fuse_with_offline_costs_and_maximum(node):
 
     assert grid_cell(node, grid, 0.60, 0.10) == 90
     assert grid_cell(node, grid, 1.00, 0.00) == 60
-    assert np.count_nonzero(grid) == 2
+    assert grid_cell(node, grid, 0.68, 0.10) == 90
+    assert grid_cell(node, grid, 0.74, 0.10) == 0
+
+
+def test_inflation_is_circular_clipped_and_keeps_maximum_cost(node):
+    grid = node._rasterize(
+        np.array([[0.01, node.grid_origin_y + 0.01],
+                  [0.13, node.grid_origin_y + 0.01]]),
+        np.array([3, 4]),
+    )
+    assert grid[0, 0] == 30
+    assert grid[0, 1] == 90
+    assert grid[0, 6] == 90
+    assert grid[5, 0] == 30
+    assert grid[5, 6] == 90
+    assert grid[6, 0] == 0
 
 
 def test_occupancy_grid_message_has_expected_frame_geometry_and_data(node):
@@ -155,28 +171,54 @@ def test_occupancy_grid_message_has_expected_frame_geometry_and_data(node):
     assert max(msg.data) == 90
 
 
-def test_output_cloud_contains_only_points_contributing_to_grid(node):
+def test_final_grid_contains_all_live_classes_and_reprojected_memory(
+        node, monkeypatch):
+    from types import SimpleNamespace
+
+    stamp = Time(seconds=10.0)
+    monkeypatch.setattr(node, '_check_clock', lambda: stamp)
+    add_pose(node, stamp.to_msg(), 0.0)
+    # Historical boundary evidence, then a fresh frame containing all classes.
+    node.memory.observe(
+        np.array([[0.6, -0.3]]), np.array([4]), (0.0, 0.0, 0.0), 9.9)
+    xy = np.array([[0.2, 0.0], [0.6, 0.0], [1.0, 0.0],
+                   [1.4, 0.0], [1.8, 0.0], [2.2, 0.0]])
+    node.cloud_callback(make_cloud(xy, [1, 2, 3, 4, 5, 6], stamp.to_msg()))
+    grids = []
+    monkeypatch.setattr(node, 'grid_pub', SimpleNamespace(publish=grids.append))
+    node.publish_grid()
+
+    costs = np.asarray(grids[0].data).reshape(node.cells_y, node.cells_x)
+    assert [grid_cell(node, costs, x, y) for x, y in xy] == [
+        0, 60, 30, 90, 0, 90]
+    assert grid_cell(node, costs, 0.6, -0.3) == 90
+    # A free-road observation must not erase a higher cost in the same cell.
+    merged = node._rasterize(np.array([[1.0, 0.0]] * 3), np.array([6, 3, 1]))
+    assert grid_cell(node, merged, 1.0, 0.0) == 90
+
+
+def test_output_cloud_contains_all_finite_combined_points(node):
     stamp = Time(seconds=10.0).to_msg()
     msg = node._make_cloud(
         np.array([[0.60, 0.10], [1.00, 0.00], [-0.01, 0.00],
                   [2.50, 0.00]]),
-        np.array([2, 4, 4, 2]),
+        np.array([2, 4, 6, 1]),
         stamp,
     )
 
     assert msg.header.frame_id == 'base_link'
     assert msg.header.stamp == stamp
     assert msg.height == 1
-    assert msg.width == 2
+    assert msg.width == 4
     assert msg.point_step == INPUT_DTYPE.itemsize
     points = np.frombuffer(msg.data, dtype=INPUT_DTYPE)
-    np.testing.assert_allclose(points['x'], [0.60, 1.00])
-    np.testing.assert_allclose(points['y'], [0.10, 0.00])
-    np.testing.assert_array_equal(points['class_id'], [2, 4])
+    np.testing.assert_allclose(points['x'], [0.60, 1.00, -0.01, 2.50])
+    np.testing.assert_allclose(points['y'], [0.10, 0.00, 0.00, 0.00])
+    np.testing.assert_array_equal(points['class_id'], [2, 4, 6, 1])
 
 
 @pytest.mark.parametrize('bigendian', [False, True])
-def test_read_organized_padded_cloud_filters_classes(node, bigendian):
+def test_read_organized_padded_cloud_preserves_all_classes(node, bigendian):
     stamp = Time(seconds=1).to_msg()
     msg = make_cloud(np.zeros((4, 2)), [2, 4, 6, 1], stamp, bigendian)
     dtype = INPUT_DTYPE.newbyteorder('>' if bigendian else '<')
@@ -188,8 +230,9 @@ def test_read_organized_padded_cloud_filters_classes(node, bigendian):
 
     xy, labels = node._read_cloud(msg)
 
-    np.testing.assert_allclose(xy, [[0.6, 0], [0.7, 0]])
-    np.testing.assert_array_equal(labels, [2, 4])
+    np.testing.assert_allclose(
+        xy, [[0.6, 0], [0.7, 0], [0.8, 0], [0.9, 0]])
+    np.testing.assert_array_equal(labels, [2, 4, 6, 1])
 
 
 def test_missing_tf_does_not_change_live_cloud_or_memory(node):
@@ -310,5 +353,6 @@ def test_waiting_for_tf_does_not_stop_memory_publication(node, monkeypatch):
     node.publish_grid()
     assert len(node.pending_clouds) == 1
     assert len(grids) == len(clouds) == 1
-    assert clouds[0].width == 1
+    # The debug cloud exposes both the live source and persistent memory.
+    assert clouds[0].width == 2
     assert max(grids[0].data) == 60

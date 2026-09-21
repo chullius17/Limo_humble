@@ -132,11 +132,13 @@ class LocalMapFinal(Node):
             'cmd_vel_timeout_sec': 0.0,
             'voxel_size': 0.08,
             'grid_resolution': 0.02,
+            'inflation_radius': 0.10,
             'grid_publish_rate': 10.0,
             'live_cloud_timeout_sec': 0.50,
             'tf_wait_timeout_sec': 0.20,
             'max_pending_clouds': 10,
             'yellow_line_cost': 60,
+            'soft_obstacle_cost': 30,
             'boardwalk_cost': 90,
         }
         for name, default in defaults.items():
@@ -154,11 +156,14 @@ class LocalMapFinal(Node):
                 'tf_wait_timeout_sec'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'{name} must be finite and greater than zero')
+        if (not math.isfinite(self.inflation_radius)
+                or self.inflation_radius < 0.0):
+            raise ValueError('inflation_radius must be finite and >= 0')
         if (not isinstance(self.max_pending_clouds, int)
                 or isinstance(self.max_pending_clouds, bool)
                 or self.max_pending_clouds <= 0):
             raise ValueError('max_pending_clouds must be a positive integer')
-        for name in ('yellow_line_cost', 'boardwalk_cost'):
+        for name in ('yellow_line_cost', 'soft_obstacle_cost', 'boardwalk_cost'):
             value = getattr(self, name)
             if not isinstance(value, int) or value < 1 or value > 100:
                 raise ValueError(f'{name} must be an integer in [1, 100]')
@@ -208,6 +213,15 @@ class LocalMapFinal(Node):
             raise ValueError(
                 'grid_resolution must divide rectangle dimensions exactly')
         self.grid_origin_y = -0.5 * self.rectangle_width
+        radius_cells = int(math.ceil(
+            self.inflation_radius / self.grid_resolution))
+        self.inflation_offsets = [
+            (dy, dx)
+            for dy in range(-radius_cells, radius_cells + 1)
+            for dx in range(-radius_cells, radius_cells + 1)
+            if math.hypot(dx, dy) * self.grid_resolution
+            <= self.inflation_radius + 1e-12
+        ]
         self.live_points_odom = np.empty((0, 2), dtype=np.float64)
         self.live_classes = np.empty(0, dtype=np.uint8)
         self.live_stamp_sec = None
@@ -255,7 +269,8 @@ class LocalMapFinal(Node):
         self.get_logger().info(
             f'Local semantic grid: {self.input_topic} -> {self.output_topic} '
             f'and {self.output_cloud_topic}, '
-            f'classes=2/4, maximum_points={self.maximum_points}; '
+            f'live/grid_classes=1..6, persistent_classes=2/4, '
+            f'maximum_points={self.maximum_points}; '
             f'tf_wait={self.tf_wait_timeout_sec:g}s, '
             f'pending_clouds<={self.max_pending_clouds}; '
             'admission=inside yellow and outside red trapezoid; '
@@ -264,8 +279,10 @@ class LocalMapFinal(Node):
             f'(linear={self.linear_speed_at_max_decay:g}m/s, '
             f'angular={self.angular_speed_at_max_decay:g}rad/s at maximum); '
             f'geometry={self.cells_x}x{self.cells_y} at '
-            f'{self.grid_resolution:.3f}m; costs=2:{self.yellow_line_cost},'
-            f'4:{self.boardwalk_cost}')
+            f'{self.grid_resolution:.3f}m, '
+            f'inflation={self.inflation_radius:g}m; costs=1/5:0,'
+            f'2:{self.yellow_line_cost},3:{self.soft_obstacle_cost},'
+            f'4/6:{self.boardwalk_cost}')
 
     def _check_clock(self):
         now = self.get_clock().now()
@@ -321,7 +338,7 @@ class LocalMapFinal(Node):
             (msg.height, msg.width), dtype=dtype, buffer=msg.data,
             strides=(msg.row_step, msg.point_step)).reshape(-1)
         valid = (np.isfinite(points['x']) & np.isfinite(points['y'])
-                 & np.isfinite(points['z']) & np.isin(points['class_id'], [2, 4]))
+                 & np.isfinite(points['z']))
         return (np.column_stack((points['x'][valid], points['y'][valid])),
                 points['class_id'][valid])
 
@@ -416,7 +433,7 @@ class LocalMapFinal(Node):
             return grid
         valid = (
             np.isfinite(points).all(axis=1)
-            & np.isin(classes, [2, 4])
+            & np.isin(classes, [1, 2, 3, 4, 5, 6])
             & (points[:, 0] >= 0.0)
             & (points[:, 0] < self.rectangle_length)
             & (points[:, 1] >= self.grid_origin_y)
@@ -431,14 +448,36 @@ class LocalMapFinal(Node):
         cell_y = np.floor(
             (selected[:, 1] - self.grid_origin_y) /
             self.grid_resolution).astype(np.int64)
-        costs = np.where(
-            selected_classes == 2,
-            self.yellow_line_cost,
-            self.boardwalk_cost,
-        ).astype(np.int16)
+        # Match the offline semantic map: both road classes are free,
+        # and interior boardwalk (6) has the same cost as boundary (4).
+        class_costs = np.array([
+            0, 0, self.yellow_line_cost, self.soft_obstacle_cost,
+            self.boardwalk_cost, 0, self.boardwalk_cost,
+        ], dtype=np.int16)
+        costs = class_costs[selected_classes]
         flat_indices = cell_y * self.cells_x + cell_x
         np.maximum.at(grid.ravel(), flat_indices, costs)
-        return grid
+        return self._inflate(grid)
+
+    def _inflate(self, grid):
+        """Dilate nonzero semantic costs within the configured radius."""
+        if self.inflation_radius <= 0.0 or not np.any(grid):
+            return grid
+        inflated = grid.copy()
+        height, width = grid.shape
+        for dy, dx in self.inflation_offsets:
+            if dx == 0 and dy == 0:
+                continue
+            source_y0, source_y1 = max(0, -dy), min(height, height - dy)
+            source_x0, source_x1 = max(0, -dx), min(width, width - dx)
+            target_y0, target_y1 = source_y0 + dy, source_y1 + dy
+            target_x0, target_x1 = source_x0 + dx, source_x1 + dx
+            np.maximum(
+                inflated[target_y0:target_y1, target_x0:target_x1],
+                grid[source_y0:source_y1, source_x0:source_x1],
+                out=inflated[target_y0:target_y1, target_x0:target_x1],
+            )
+        return inflated
 
     def _make_grid(self, costs, stamp):
         grid = OccupancyGrid()
@@ -456,15 +495,8 @@ class LocalMapFinal(Node):
         return grid
 
     def _make_cloud(self, points, classes, stamp):
-        """Serialize reprojected memory points that can enter the grid."""
-        valid = (
-            np.isfinite(points).all(axis=1)
-            & np.isin(classes, [2, 4])
-            & (points[:, 0] >= 0.0)
-            & (points[:, 0] < self.rectangle_length)
-            & (points[:, 1] >= self.grid_origin_y)
-            & (points[:, 1] < -self.grid_origin_y)
-        )
+        """Serialize every finite live or reprojected semantic point."""
+        valid = np.isfinite(points).all(axis=1)
         selected = points[valid]
         selected_classes = classes[valid]
         cloud_data = np.empty(len(selected), dtype=OUTPUT_CLOUD_DTYPE)
@@ -521,8 +553,6 @@ class LocalMapFinal(Node):
             return
         memory_xy, memory_classes, _ = self.memory.prune(
             pose, now_sec, self._motion_ratio(now.nanoseconds))
-        self.cloud_pub.publish(self._make_cloud(
-            memory_xy, memory_classes, stamp))
         if has_live:
             live_xy = transform_xy(self.live_points_odom, pose, inverse=True)
             points = np.concatenate((live_xy, memory_xy))
@@ -531,6 +561,7 @@ class LocalMapFinal(Node):
             points, classes = memory_xy, memory_classes
         self.grid_pub.publish(self._make_grid(
             self._rasterize(points, classes), stamp))
+        self.cloud_pub.publish(self._make_cloud(points, classes, stamp))
 
     def _line_marker(self, marker_id, namespace, points, red, green, z):
         marker = Marker()

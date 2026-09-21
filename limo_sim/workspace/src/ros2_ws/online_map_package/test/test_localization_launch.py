@@ -91,6 +91,7 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
     assert nodes['local_map_final']['values']['base_frame'] == 'base_link'
     assert nodes['local_map_final']['values']['maximum_points'] == 300
     assert nodes['local_map_final']['values']['grid_resolution'] == 0.02
+    assert nodes['local_map_final']['values']['inflation_radius'] == 0.10
     assert nodes['local_map_final']['values']['output_cloud_topic'] == (
         '/limo/map_package/online/local_map_final/points')
     assert nodes['local_map_final']['values']['cmd_vel_topic'] == '/cmd_vel'

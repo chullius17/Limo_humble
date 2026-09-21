@@ -156,20 +156,28 @@ l'inizializzazione; la pubblicazione aggiorna soltanto i timestamp.
 e pubblica direttamente `/limo/map_package/online/local_costmap` come
 `nav_msgs/OccupancyGrid`. La griglia coincide con il rettangolo verde: misura
 2,50 x 2,66 m, ha origine `(0, -1.33)` in `base_link` e, con risoluzione 2 cm,
-contiene esattamente 125 x 133 celle. Le celle libere valgono 0; yellow line
-(classe 2) vale 60 e boardwalk (classe 4) vale 90, come nella costruzione della
+contiene esattamente 125 x 133 celle. Tutte le classi live 1--6 contribuiscono:
+strada (classi 1/5) vale 0, yellow line (classe 2) vale 60, soft obstacle
+(classe 3) vale 30 e boardwalk (classi 4/6) vale 90, come nella costruzione della
 mappa semantica offline. Se più punti cadono nella stessa cella viene conservato
-il costo maggiore. I costi sono fissi: la confidenza regola la persistenza dei
-punti, ma non riduce il loro costo.
+il costo maggiore. Ogni cella con costo non nullo viene inflazionata in un disco
+di raggio `inflation_radius` (0,10 m di default), propagando lo stesso costo;
+nelle sovrapposizioni prevale ancora il massimo. L'inflazione è ritagliata ai
+bordi della griglia e può essere disabilitata impostando il raggio a zero. I
+costi sono fissi: la confidenza regola la persistenza dei punti, ma non riduce
+il loro costo.
 
-I punti della memoria, riproiettati nel frame corrente e già sottoposti al cap
-di 300 elementi, sono pubblicati a 10 Hz anche come `sensor_msgs/PointCloud2` su
-`/limo/map_package/online/local_map_final/points`. La cloud è in `base_link`,
-contiene i campi `x`, `y`, `z` e `class_id`. Il display RViz
-**Local Reprojected Semantic Points** è abilitato e colora le classi 2 e 4
-tramite `class_id`; la cloud CV live resta visibile nel display separato.
+Tutti i punti usati per costruire la griglia sono pubblicati a 10 Hz anche come
+`sensor_msgs/PointCloud2` su
+`/limo/map_package/online/local_map_final/points`: tutti i punti e tutte le
+classi della sorgente live recente, più la memoria delle classi 2/4 riproiettata
+nel frame corrente e sottoposta al cap di 300 elementi. La cloud è in
+`base_link` e contiene i campi `x`, `y`, `z` e `class_id`. Il topic resta
+disponibile per il debug, ma i due display PointCloud2 sono rimossi dalla
+configurazione RViz online. La griglia rasterizza tutte le classi live nel
+rettangolo insieme alla memoria 2/4.
 
-A ogni frame CV i punti delle due classi vengono conservati come sorgente live
+A ogni frame CV i punti di tutte le classi vengono conservati come sorgente live
 per 0,50 s. In parallelo, i punti situati **dentro il trapezio giallo ma fuori
 da quello rosso** vengono convertiti subito in coordinate `odom` usando la TF
 dello stesso timestamp e inseriti nella memoria. Non si attende che escano dal

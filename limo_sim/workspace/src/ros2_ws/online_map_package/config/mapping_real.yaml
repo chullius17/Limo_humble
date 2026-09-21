@@ -34,11 +34,13 @@ local_map_final:
   cmd_vel_timeout_sec: 0.0
   voxel_size: 0.03
   grid_resolution: 0.02
+  inflation_radius: 0.10  # Circular fixed-cost inflation around nonzero cells.
   grid_publish_rate: 10.0
   live_cloud_timeout_sec: 0.50
   tf_wait_timeout_sec: 0.20  # Bounded non-blocking wait for exact cloud TF.
   max_pending_clouds: 10
   yellow_line_cost: 60
+  soft_obstacle_cost: 30
   boardwalk_cost: 90
 
 amcl:
