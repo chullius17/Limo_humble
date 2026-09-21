@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 rclpy = pytest.importorskip('rclpy')
-from geometry_msgs.msg import TransformStamped  # noqa: E402
+from geometry_msgs.msg import TransformStamped, Twist  # noqa: E402
 from rclpy.time import Time  # noqa: E402
 from sensor_msgs.msg import PointCloud2, PointField  # noqa: E402
 
@@ -72,14 +72,37 @@ def grid_cell(node, grid, x, y):
     return int(grid[cell_y, cell_x])
 
 
-def test_grid_geometry_matches_red_rectangle(node):
+def test_grid_geometry_matches_green_rectangle(node):
     assert node.cells_x == 125
     assert node.cells_y == 133
     assert node.grid_resolution == pytest.approx(0.02)
     assert node.grid_origin_y == pytest.approx(-1.33)
 
 
-def test_callback_keeps_live_cloud_and_admits_only_yellow_green_band(node):
+def test_red_trapezoid_keeps_front_edge_aligned_with_yellow(node):
+    yellow = np.asarray(node.yellow_vertices)
+    inner = np.asarray(node.inner_vertices)
+    assert inner[0, 0] > yellow[0, 0]
+    np.testing.assert_allclose(inner[1:3, 0], node.rectangle_length)
+    assert np.all(np.abs(inner[1:3, 1]) < np.abs(yellow[1:3, 1]))
+
+
+def test_commanded_speed_scales_decay_like_local_pointcloud(node):
+    assert node._motion_ratio() == 0.0
+    command = Twist()
+    command.linear.x = 0.255
+    node.cmd_vel_callback(command)
+    assert node._motion_ratio() == pytest.approx(0.5)
+    command.linear.x = 0.0
+    command.angular.z = -1.0
+    node.cmd_vel_callback(command)
+    assert node._motion_ratio() == pytest.approx(1.0)
+    node.cmd_vel_timeout_sec = 0.1
+    assert node._motion_ratio(
+        node.last_cmd_vel_time_ns + 100_000_001) == 0.0
+
+
+def test_callback_keeps_live_cloud_and_admits_only_yellow_red_band(node):
     stamp = Time(seconds=10.0).to_msg()
     add_pose(node, stamp, 0.0)
     msg = make_cloud([[1.0, 0.0], [0.6, 0.1]], [2, 4], stamp)
@@ -130,6 +153,26 @@ def test_occupancy_grid_message_has_expected_frame_geometry_and_data(node):
     assert msg.info.origin.position.y == pytest.approx(-1.33)
     assert len(msg.data) == 125 * 133
     assert max(msg.data) == 90
+
+
+def test_output_cloud_contains_only_points_contributing_to_grid(node):
+    stamp = Time(seconds=10.0).to_msg()
+    msg = node._make_cloud(
+        np.array([[0.60, 0.10], [1.00, 0.00], [-0.01, 0.00],
+                  [2.50, 0.00]]),
+        np.array([2, 4, 4, 2]),
+        stamp,
+    )
+
+    assert msg.header.frame_id == 'base_link'
+    assert msg.header.stamp == stamp
+    assert msg.height == 1
+    assert msg.width == 2
+    assert msg.point_step == INPUT_DTYPE.itemsize
+    points = np.frombuffer(msg.data, dtype=INPUT_DTYPE)
+    np.testing.assert_allclose(points['x'], [0.60, 1.00])
+    np.testing.assert_allclose(points['y'], [0.10, 0.00])
+    np.testing.assert_array_equal(points['class_id'], [2, 4])
 
 
 @pytest.mark.parametrize('bigendian', [False, True])

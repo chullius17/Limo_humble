@@ -56,15 +56,14 @@ class SemanticMemory:
                 & (np.abs(xy[:, 1]) <= width / 2.0 + 1e-9))
 
     def inside_inner_trapezoid(self, xy):
-        """Return membership in the trapezoid offset inward on all sides."""
+        """Test the inset trapezoid whose front edge stays on the yellow one."""
         yellow_near_half = self.near_width / 2.0
         slope = (self.width / 2.0 - yellow_near_half) / self.height
         lateral_shift = self.inner_inset * math.hypot(1.0, slope)
         near_half = (
             yellow_near_half + slope * self.inner_inset - lateral_shift)
-        far_half = (
-            self.width / 2.0 - slope * self.inner_inset - lateral_shift)
-        inner_height = self.height - 2.0 * self.inner_inset
+        far_half = self.width / 2.0 - lateral_shift
+        inner_height = self.height - self.inner_inset
         distance = xy[:, 0] - (
             self.length - self.height + self.inner_inset)
         width = 2.0 * (
@@ -73,7 +72,7 @@ class SemanticMemory:
                 & (np.abs(xy[:, 1]) <= width / 2.0 + 1e-9))
 
     def observe(self, xy, classes, pose, stamp):
-        """Immediately admit class 2/4 points in the yellow-green band."""
+        """Immediately admit class 2/4 points in the yellow-red band."""
         if (self.last_observation_stamp is not None
                 and stamp <= self.last_observation_stamp):
             return
@@ -111,21 +110,31 @@ class SemanticMemory:
         _, first = np.unique(keys[newest], axis=0, return_index=True)
         self._keep(newest[first])
         if len(self.points) > self.maximum_points:
-            # Spatially spread representatives instead of retaining an
-            # arbitrary contiguous prefix of the source cloud.
-            order = np.lexsort((
-                self.points[:, 1], self.points[:, 0], self.classes))
-            indices = np.linspace(
-                0, len(order) - 1, self.maximum_points, dtype=int)
-            self._keep(order[indices])
+            # Always discard lower-confidence evidence first. If the cutoff
+            # contains ties (normally fresh observations at confidence 1),
+            # sample those spatially instead of keeping an arbitrary prefix.
+            cutoff = np.sort(self.confidences)[-self.maximum_points]
+            preferred = np.flatnonzero(self.confidences > cutoff)
+            tied = np.flatnonzero(self.confidences == cutoff)
+            needed = self.maximum_points - len(preferred)
+            tie_order = np.lexsort((
+                self.points[tied, 1],
+                self.points[tied, 0],
+                self.classes[tied],
+            ))
+            positions = np.linspace(
+                0, len(tie_order) - 1, needed, dtype=int)
+            self._keep(np.concatenate((preferred, tied[tie_order[positions]])))
 
-    def prune(self, pose, stamp):
-        """Reproject survivors and delete expired, green or out-of-bounds points."""
+    def prune(self, pose, stamp, motion_ratio=1.0):
+        """Reproject survivors and delete expired, red or out-of-bounds points."""
         xy = transform_xy(self.points, pose, inverse=True)
         elapsed = np.maximum(0.0, stamp - self.last_update)
         decay_factor = np.where(
             self.inside_trapezoid(xy), self.yellow_decay_multiplier, 1.0)
-        self.confidences *= np.exp(-self.decay * decay_factor * elapsed)
+        motion_ratio = float(np.clip(motion_ratio, 0.0, 1.0))
+        self.confidences *= np.exp(
+            -self.decay * motion_ratio * decay_factor * elapsed)
         self.last_update = np.maximum(self.last_update, stamp)
         keep = (self.inside_rectangle(xy) & ~self.inside_inner_trapezoid(xy)
                 & (self.confidences >= self.minimum_confidence))

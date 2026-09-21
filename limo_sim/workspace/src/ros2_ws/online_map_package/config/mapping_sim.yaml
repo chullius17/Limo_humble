@@ -20,12 +20,19 @@ map_servers:
   cv_obstacle_topic: /limo/map_package/online/maps/cv_obstacle
 
 local_map_final:
-  inner_trapezoid_inset: 0.20  # Perpendicular distance from each yellow edge, m.
-  maximum_points: 300  # Total persistent points, classes 2 and 4 together.
+  output_cloud_topic: /limo/map_package/online/local_map_final/points
+  inner_trapezoid_inset: 0.20  # Inset of near and sloped edges; front stays aligned.
+  maximum_points: 300  # Highest-confidence persistent points across classes 2/4.
   minimum_confidence: 0.30
   confidence_decay_per_sec: 0.10
   yellow_decay_multiplier: 3.0
-  voxel_size: 0.03
+  cmd_vel_topic: /cmd_vel
+  linear_speed_at_max_decay: 0.50
+  angular_speed_at_max_decay: 1.00
+  linear_stationary_threshold: 0.01
+  angular_stationary_threshold: 0.02
+  cmd_vel_timeout_sec: 0.0
+  voxel_size: 0.10
   grid_resolution: 0.02
   grid_publish_rate: 10.0
   live_cloud_timeout_sec: 0.50
