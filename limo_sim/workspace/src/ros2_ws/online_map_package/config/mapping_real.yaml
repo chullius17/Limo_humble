@@ -36,6 +36,8 @@ local_map_final:
   grid_resolution: 0.02
   grid_publish_rate: 10.0
   live_cloud_timeout_sec: 0.50
+  tf_wait_timeout_sec: 0.20  # Bounded non-blocking wait for exact cloud TF.
+  max_pending_clouds: 10
   yellow_line_cost: 60
   boardwalk_cost: 90
 

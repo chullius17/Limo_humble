@@ -173,8 +173,15 @@ A ogni frame CV i punti delle due classi vengono conservati come sorgente live
 per 0,50 s. In parallelo, i punti situati **dentro il trapezio giallo ma fuori
 da quello rosso** vengono convertiti subito in coordinate `odom` usando la TF
 dello stesso timestamp e inseriti nella memoria. Non si attende che escano dal
-trapezio: la fascia fra i due contorni è la zona di ammissione. Un frame senza
-TF viene ignorato senza alterare né la sorgente live né la memoria esistente.
+trapezio: la fascia fra i due contorni è la zona di ammissione. Se la TF al
+timestamp della cloud non è ancora disponibile, il frame attende in una coda
+limitata a `max_pending_clouds: 10`. Il nodo ritenta ogni 20 ms senza bloccare
+le altre callback, per un massimo di `tf_wait_timeout_sec: 0.20` secondi di
+tempo ROS dalla ricezione. I frame sono elaborati in ordine di timestamp;
+quelli scaduti o più vecchi in caso di saturazione vengono scartati con un
+avviso. Il timestamp originale resta invariato, anche per il timeout live.
+Il reset del clock svuota anche la coda. Durante l'attesa la memoria esistente
+continua a essere riproiettata e pubblicata quando la TF corrente è disponibile.
 
 I punti persistenti sono riproiettati a 10 Hz anche senza nuovi frame CV.
 Sono cancellati quando entrano nel trapezio rosso, escono dal rettangolo oppure

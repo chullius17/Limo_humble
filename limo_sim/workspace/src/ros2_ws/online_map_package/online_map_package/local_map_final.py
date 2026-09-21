@@ -134,6 +134,8 @@ class LocalMapFinal(Node):
             'grid_resolution': 0.02,
             'grid_publish_rate': 10.0,
             'live_cloud_timeout_sec': 0.50,
+            'tf_wait_timeout_sec': 0.20,
+            'max_pending_clouds': 10,
             'yellow_line_cost': 60,
             'boardwalk_cost': 90,
         }
@@ -148,9 +150,14 @@ class LocalMapFinal(Node):
                 'cmd_vel_topic and odometry_frame must not be empty')
         for name in (
                 'maximum_points', 'voxel_size', 'grid_resolution',
-                'grid_publish_rate', 'live_cloud_timeout_sec'):
+                'grid_publish_rate', 'live_cloud_timeout_sec',
+                'tf_wait_timeout_sec'):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f'{name} must be finite and greater than zero')
+        if (not isinstance(self.max_pending_clouds, int)
+                or isinstance(self.max_pending_clouds, bool)
+                or self.max_pending_clouds <= 0):
+            raise ValueError('max_pending_clouds must be a positive integer')
         for name in ('yellow_line_cost', 'boardwalk_cost'):
             value = getattr(self, name)
             if not isinstance(value, int) or value < 1 or value > 100:
@@ -189,6 +196,7 @@ class LocalMapFinal(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.last_clock_ns = None
+        self.pending_clouds = []
         self.cells_x = int(round(self.rectangle_length / self.grid_resolution))
         self.cells_y = int(round(self.rectangle_width / self.grid_resolution))
         if (not math.isclose(
@@ -229,6 +237,8 @@ class LocalMapFinal(Node):
             Twist, self.cmd_vel_topic, self.cmd_vel_callback, 10)
         self.grid_timer = self.create_timer(
             1.0 / self.grid_publish_rate, self.publish_grid)
+        # Retry without blocking the executor that also receives TF and /clock.
+        self.tf_retry_timer = self.create_timer(0.02, self.retry_pending_clouds)
         self.timer = self.create_timer(
             1.0 / self.publish_rate,
             self.publish_markers,
@@ -246,6 +256,8 @@ class LocalMapFinal(Node):
             f'Local semantic grid: {self.input_topic} -> {self.output_topic} '
             f'and {self.output_cloud_topic}, '
             f'classes=2/4, maximum_points={self.maximum_points}; '
+            f'tf_wait={self.tf_wait_timeout_sec:g}s, '
+            f'pending_clouds<={self.max_pending_clouds}; '
             'admission=inside yellow and outside red trapezoid; '
             f'yellow_decay={self.yellow_decay_multiplier:g}x; '
             f'motion_decay={self.cmd_vel_topic} '
@@ -259,6 +271,7 @@ class LocalMapFinal(Node):
         now = self.get_clock().now()
         if self.last_clock_ns is not None and now.nanoseconds < self.last_clock_ns:
             self.memory.reset()
+            self.pending_clouds.clear()
             self.live_points_odom = np.empty((0, 2), dtype=np.float64)
             self.live_classes = np.empty(0, dtype=np.uint8)
             self.live_stamp_sec = None
@@ -313,22 +326,60 @@ class LocalMapFinal(Node):
                 points['class_id'][valid])
 
     def cloud_callback(self, msg):
-        """Admit current semantic observations from the yellow-red band."""
-        self._check_clock()
+        """Queue observations until their exact timestamp TF is available."""
+        now = self._check_clock()
         stamp = Time.from_msg(msg.header.stamp)
         seconds = stamp.nanoseconds * 1e-9
         try:
             xy, classes = self._read_cloud(msg)
-            pose, _ = self._odom_pose(stamp)
-        except (ValueError, TransformException) as error:
+        except ValueError as error:
             self.get_logger().warn(
-                f'Cannot reproject semantic cloud: {error}',
+                f'Invalid semantic cloud: {error}',
                 throttle_duration_sec=2.0)
             return
-        self.memory.observe(xy, classes, pose, seconds)
-        self.live_points_odom = transform_xy(xy, pose)
-        self.live_classes = classes.copy()
-        self.live_stamp_sec = seconds
+        self._process_pending_clouds(now)
+        if (self.memory.last_observation_stamp is not None
+                and seconds <= self.memory.last_observation_stamp):
+            return
+        if any(entry[0].nanoseconds == stamp.nanoseconds
+               for entry in self.pending_clouds):
+            return
+        self.pending_clouds.append((stamp, xy, classes, now.nanoseconds))
+        self.pending_clouds.sort(key=lambda entry: entry[0].nanoseconds)
+        if len(self.pending_clouds) > self.max_pending_clouds:
+            self.pending_clouds.pop(0)
+            self.get_logger().warn(
+                'Semantic TF queue full: dropped oldest cloud',
+                throttle_duration_sec=2.0)
+        self._process_pending_clouds(now)
+
+    def retry_pending_clouds(self):
+        """Recover delayed TF even if no more sensor frames arrive."""
+        self._process_pending_clouds(self._check_clock())
+
+    def _process_pending_clouds(self, now):
+        """Drain in timestamp order, with a bounded ROS-time wait on arrival."""
+        while self.pending_clouds:
+            stamp, xy, classes, received_ns = self.pending_clouds[0]
+            if ((now.nanoseconds - received_ns) * 1e-9
+                    >= self.tf_wait_timeout_sec):
+                self.pending_clouds.pop(0)
+                self.get_logger().warn(
+                    'Semantic cloud expired while waiting for timestamp TF',
+                    throttle_duration_sec=2.0)
+                continue
+            try:
+                pose, _ = self._odom_pose(stamp)
+            except TransformException:
+                # Do not let newer observations overtake a pending frame.
+                return
+            self.pending_clouds.pop(0)
+            seconds = stamp.nanoseconds * 1e-9
+            self.memory.observe(xy, classes, pose, seconds)
+            self.live_points_odom = transform_xy(xy, pose)
+            self.live_classes = classes.copy()
+            # Preserve sensor time: waiting must not extend the live lifetime.
+            self.live_stamp_sec = seconds
 
     def cmd_vel_callback(self, msg):
         """Cache commanded planar speeds for confidence decay."""

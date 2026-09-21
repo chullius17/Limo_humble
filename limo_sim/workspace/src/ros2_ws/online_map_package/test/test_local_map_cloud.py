@@ -206,3 +206,109 @@ def test_missing_tf_does_not_change_live_cloud_or_memory(node):
     np.testing.assert_array_equal(node.live_points_odom, saved_live)
     np.testing.assert_array_equal(node.memory.points, saved_memory)
     assert node.memory.last_observation_stamp == 10.0
+
+
+def test_delayed_tf_recovers_cloud_without_another_sensor_frame(node, monkeypatch):
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.05))
+    stamp = Time(seconds=10.0).to_msg()
+    add_pose(node, Time(seconds=9.95).to_msg(), 1.0)
+    node.cloud_callback(make_cloud([[0.6, 0.0]], [2], stamp))
+    assert len(node.pending_clouds) == 1
+    assert node.live_stamp_sec is None
+
+    # The exact transform is interpolated when the next TF arrives.
+    add_pose(node, Time(seconds=10.05).to_msg(), 1.2)
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.10))
+    node.retry_pending_clouds()
+
+    assert not node.pending_clouds
+    np.testing.assert_allclose(node.memory.points, [[1.7, 0.0]])
+    np.testing.assert_allclose(node.live_points_odom, [[1.7, 0.0]])
+    assert node.live_stamp_sec == 10.0
+
+
+def test_pending_frames_are_processed_in_timestamp_order(node, monkeypatch):
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.1))
+    for seconds, label in [(10.05, 4), (10.0, 2), (10.0, 2)]:
+        node.cloud_callback(make_cloud(
+            [[0.6, 0.0]], [label], Time(seconds=seconds).to_msg()))
+    assert len(node.pending_clouds) == 2  # Duplicate frame ignored.
+    add_pose(node, Time(seconds=9.9).to_msg(), 0.0)
+    add_pose(node, Time(seconds=10.1).to_msg(), 0.0)
+    node.retry_pending_clouds()
+    assert not node.pending_clouds
+    assert set(node.memory.classes) == {2, 4}
+    assert node.live_stamp_sec == pytest.approx(10.05)
+    np.testing.assert_array_equal(node.live_classes, [4])
+
+
+def test_expired_head_does_not_block_ready_newer_frame(node, monkeypatch):
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.0))
+    node.cloud_callback(make_cloud(
+        [[0.6, 0.0]], [2], Time(seconds=10.0).to_msg()))
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.1))
+    stamp = Time(seconds=10.1).to_msg()
+    add_pose(node, stamp, 0.0)
+    node.cloud_callback(make_cloud([[0.6, 0.1]], [4], stamp))
+    assert node.live_stamp_sec is None
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.21))
+    node.retry_pending_clouds()
+    assert not node.pending_clouds
+    np.testing.assert_array_equal(node.memory.classes, [4])
+
+
+def test_pending_queue_is_bounded_and_expires_without_tf(node, monkeypatch):
+    node.max_pending_clouds = 2
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.1))
+    for seconds in [10.0, 10.01, 10.02]:
+        node.cloud_callback(make_cloud(
+            [[0.6, 0.0]], [2], Time(seconds=seconds).to_msg()))
+    assert len(node.pending_clouds) == 2
+    assert node.pending_clouds[0][0].nanoseconds == 10_010_000_000
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.31))
+    node.retry_pending_clouds()
+    assert not node.pending_clouds
+    assert node.live_stamp_sec is None
+    assert len(node.memory.points) == 0
+
+
+def test_older_frame_cannot_replace_newer_live_cloud(node):
+    add_pose(node, Time(seconds=10.0).to_msg(), 0.0)
+    add_pose(node, Time(seconds=10.1).to_msg(), 0.0)
+    node.cloud_callback(make_cloud(
+        [[0.6, 0.0]], [4], Time(seconds=10.1).to_msg()))
+    node.cloud_callback(make_cloud(
+        [[0.6, 0.1]], [2], Time(seconds=10.0).to_msg()))
+    assert not node.pending_clouds
+    assert node.live_stamp_sec == pytest.approx(10.1)
+    np.testing.assert_array_equal(node.live_classes, [4])
+
+
+def test_clock_reset_clears_pending_clouds(node):
+    node.cloud_callback(make_cloud(
+        [[0.6, 0.0]], [2], Time(seconds=10.0).to_msg()))
+    assert node.pending_clouds
+    node.last_clock_ns = node.get_clock().now().nanoseconds + 10_000_000_000
+    node._check_clock()
+    assert not node.pending_clouds
+    assert node.live_stamp_sec is None
+
+
+def test_waiting_for_tf_does_not_stop_memory_publication(node, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.0))
+    add_pose(node, Time(seconds=10.0).to_msg(), 0.0)
+    node.cloud_callback(make_cloud(
+        [[0.6, 0.0]], [2], Time(seconds=10.0).to_msg()))
+    monkeypatch.setattr(node, '_check_clock', lambda: Time(seconds=10.05))
+    node.cloud_callback(make_cloud(
+        [[0.6, 0.1]], [4], Time(seconds=10.05).to_msg()))
+    grids, clouds = [], []
+    monkeypatch.setattr(node, 'grid_pub', SimpleNamespace(publish=grids.append))
+    monkeypatch.setattr(node, 'cloud_pub', SimpleNamespace(publish=clouds.append))
+    node.publish_grid()
+    assert len(node.pending_clouds) == 1
+    assert len(grids) == len(clouds) == 1
+    assert clouds[0].width == 1
+    assert max(grids[0].data) == 60
