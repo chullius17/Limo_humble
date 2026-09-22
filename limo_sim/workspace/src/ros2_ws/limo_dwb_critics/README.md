@@ -67,8 +67,8 @@ is actually located on the rear axle.
 
 ### Gazebo model and command conversion
 
-`limo_app.launch.py profile:=sim` passes `robot_model:=sim` to the controller
-launch. This overrides the bicycle wheelbase to 0.24 m and rear-axle offset to
+`limo_app_sim.launch.py` passes `robot_model:=sim` to the controller launch.
+This overrides the bicycle wheelbase to 0.24 m and rear-axle offset to
 0.12 m, matching `limo_car/gazebo/ackermann.xacro`. Its minimum radius is 0.55 m,
 leaving margin for the wheel collision-center offsets when enforcing the
 simulated inner steering joint's 30-degree limit.

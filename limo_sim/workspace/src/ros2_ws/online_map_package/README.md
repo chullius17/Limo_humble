@@ -111,8 +111,10 @@ ros2 launch online_map_package online_map_sim.launch.py \
 Change persistent values in the two YAML profiles; command-line arguments are
 for temporary trials. The real profile does not restart CV or open windows.
 'desktop_online.launch.py' uses that profile in desktop mode and launches RViz
-only. Planner and controller are started independently; 'user_package/limo_app.launch.py'
-orchestrates all three packages for the complete simulation.
+only. Planner and controller are started independently;
+`user_package/limo_app_sim.launch.py` and
+`user_package/limo_app_real.launch.py` orchestrate all three packages for the
+complete simulation and physical-robot stacks, respectively.
 
 AMCL publishes 'map -> odom'; provide an initial pose through RViz or AMCL's
 global-localization service. Do not start SLAM concurrently if it publishes the

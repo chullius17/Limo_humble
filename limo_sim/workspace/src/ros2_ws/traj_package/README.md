@@ -34,4 +34,5 @@ path and handles START, pause, resume, and cancellation through
 interrupts the active one and requires a new START. The GUI also displays the
 planning state.
 
-`user_package/limo_app.launch.py` composes mapping, planning, and control.
+`user_package/limo_app_sim.launch.py` and `limo_app_real.launch.py` compose
+mapping, planning, and control for the two runtime profiles.

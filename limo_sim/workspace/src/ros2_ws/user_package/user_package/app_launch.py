@@ -1,4 +1,4 @@
-"""Orchestrate mapping, planning and control for the LIMO application."""
+"""Compose mapping, planning, and control for a LIMO application profile."""
 
 import os
 
@@ -38,9 +38,8 @@ def _optional_boolean(context, name, default):
     return default if value == '' else _boolean(value)
 
 
-def _launch_app(context):
-    """Resolve the application profile and compose its three subsystems."""
-    profile = LaunchConfiguration('profile').perform(context)
+def _launch_app(context, profile):
+    """Resolve overrides and compose the selected application's subsystems."""
     if profile not in ('sim', 'real'):
         raise ValueError('profile must be sim or real')
 
@@ -77,17 +76,17 @@ def _launch_app(context):
     ]
 
 
-def generate_launch_description():
-    """Declare the application-level interface and launch all subsystems."""
+def generate_app_launch_description(profile):
+    """Create the complete application launch for ``sim`` or ``real``."""
+    if profile not in ('sim', 'real'):
+        raise ValueError('profile must be sim or real')
+
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'profile', default_value='sim',
-            description='Application profile: sim or real.'),
         DeclareLaunchArgument(
             'map_topic', default_value='/map',
             description='Global OccupancyGrid consumed by traj_package.'),
         DeclareLaunchArgument(
             'start_control_gui', default_value='',
             description='Override the profile default for the control GUI.'),
-        OpaqueFunction(function=_launch_app),
+        OpaqueFunction(function=_launch_app, args=[profile]),
     ])
