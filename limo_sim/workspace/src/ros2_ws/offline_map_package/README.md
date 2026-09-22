@@ -1,13 +1,13 @@
-# Mapping semantico da PointCloud2
+# Semantic mapping from PointCloud2
 
-Il launch `map.launch.py` consuma direttamente
-`/limo/cv_package/visual_ptcld/points`: campi `x,y,z` FLOAT32 e
-`class_id` UINT8, coordinate metriche in `base_link`, timestamp del sensore.
-Consuma inoltre `/map` di SLAM Toolbox come layer laser completo: ogni messaggio
-sostituisce il precedente, incluse le celle libere e sconosciute. Il mapper non
-accumula endpoint da `/scan`; lo scan viene usato direttamente da SLAM Toolbox.
+'map.launch.py' consumes '/limo/cv_package/visual_ptcld/points' directly: 'x,y,z'
+FLOAT32 fields, a 'class_id' UINT8 field, metric coordinates in 'base_link', and
+the sensor timestamp. It also consumes the complete SLAM Toolbox laser layer on
+'/map': each message replaces the preceding one, including free and unknown
+cells. The mapper does not accumulate '/scan' endpoints; scans are consumed by
+SLAM Toolbox.
 
-| class_id | Classe | Costo |
+| class_id | Class | Cost |
 | --- | --- | --- |
 | 1 | exterior road | 0 |
 | 2 | yellow lines | 60 |
@@ -16,249 +16,193 @@ accumula endpoint da `/scan`; lo scan viene usato direttamente da SLAM Toolbox.
 | 5 | interior road | 0 |
 | 6 | interior boardwalk | 90 |
 
-`visual_ptcld` separa `interior road` come
-`road_originale & ~exterior_road`, prima di applicare la stessa ROI. Il bordo
-è l'intersezione della strada con la dilatazione di `soft obstacle`.
-I punti `interior road` vengono voxelizzati nell'immagine con
-`point_voxel_size` (5x5 pixel nel launch), proiettati nella BEV con profondità
-valida e mantenuti fuori dalle query KD-tree del boardwalk. Dopo la
-classificazione, tutte le classi vengono voxelizzate separatamente nella griglia
-metrica da `pointcloud_voxel_size_m` (2 cm nel launch) e pubblicate nella cloud.
-Nel primo passaggio KD-tree i punti `soft obstacle` oltre
-`blue_radius_max_m` diventano
-`interior boardwalk` (`class_id=6`). Il mapper conserva l'ID distinto in ingresso
-e lo accumula nello stesso layer e con lo stesso costo del boardwalk.
+'visual_ptcld' separates 'interior road' as 'original_road & ~exterior_road'
+before applying the same ROI. The boundary is the intersection of the road with
+the 'soft obstacle' dilation. Interior-road points are voxelized in the image
+with 'point_voxel_size' (5x5 pixels in the launch), projected into the BEV with
+valid depth, and excluded from boardwalk KD-tree queries. After classification,
+each class is voxelized separately in the metric grid using
+'pointcloud_voxel_size_m' (2 cm in the launch) and published in the cloud.
+During the first KD-tree pass, soft-obstacle points beyond 'blue_radius_max_m'
+become interior boardwalk ('class_id=6'). The mapper retains this input ID and
+accumulates it in the boardwalk layer with the same cost.
 
-Il nodo non usa immagini, OpenCV o proiezioni BEV. Legge il buffer della cloud
-con NumPy, trasforma i punti al timestamp del sensore e aggiorna tile sparse.
-Le mappe dense vengono generate fino a 4 Hz quando cambiano dati, pose o mappa laser.
-I parametri sono nei due profili `config/mapping_sim.yaml` e
-`config/mapping_real.yaml`. Ciascun file contiene le sezioni `launch`,
-`slam_toolbox`, `semantic_mapper` e `map_save_gui`. Sono profili letti dal
-launch principale, non file da passare direttamente a ROS con `--params-file`.
+The node uses no images, OpenCV, or BEV projections. It reads the cloud buffer
+with NumPy, transforms points at the sensor timestamp, and updates sparse tiles.
+Dense maps are generated up to 4 Hz when data, poses, or the laser map change.
+Parameters are in 'config/mapping_sim.yaml' and 'config/mapping_real.yaml'.
+Each file contains 'launch', 'slam_toolbox', 'semantic_mapper', and
+'map_save_gui' sections. They are profiles read by the main launch, not files
+to pass directly to ROS with '--params-file'.
 
-## Evidenza e correzioni
+## Evidence and correction
 
-Per ciascuna cella e classe si conservano punteggi log-odds separati dai costi.
-Un'osservazione incrementa la propria classe e riduce quelle incompatibili nella
-stessa cella; i punteggi sono saturati per poter correggere errori con osservazioni
-successive. Più punti nella stessa cella si dividono un solo aggiornamento per cloud.
-Una singola osservazione discordante non cancella una classe consolidata.
-La classe con evidenza maggiore, sopra soglia, determina il costo esatto: la
-confidenza non moltiplica 0, 30, 60 o 90. Parità e confidenza insufficiente danno unknown.
-Exterior road e interior road alimentano un unico punteggio di strada nel mapper,
-con un solo aggiornamento normalizzato per cella e cloud. Usano gli stessi
-incrementi e decrementi delle altre classi:
-osservazioni ripetute di strada riducono l'evidenza degli ostacoli nella stessa
-cella. Quando prevale la strada, la combinata e tutti e tre i layer diventano 0.
-Un ostacolo osservato successivamente può riprendere il sopravvento.
+Separate log-odds scores, independent from costs, are retained for every cell
+and class. An observation increases its own class and reduces incompatible
+classes in that cell; scores are saturated so later observations can correct
+errors. Multiple points in one cell share one update per cloud. The class with
+the greatest evidence above threshold determines the exact cost; confidence
+does not multiply 0, 30, 60, or 90. Ties and insufficient confidence produce
+unknown.
 
-Questi punti rappresentano superfici classificate: non si cancellano celle lungo
-raggi 2D né nell'intero campo visivo. Un punto soft obstacle indica costo 30;
-non dimostra
-che tutto il segmento dal robot al punto sia privo delle altre classi.
-Celle mai osservate e punti invalidi non generano evidenza negativa.
-Una vecchia classificazione isolata resta finché non viene riosservata o spostata
-da una correzione della posa; non si applica decadimento temporale indiscriminato.
+Exterior and interior road feed one road score, with one normalized update per
+cell and cloud. Repeated road observations reduce obstacle evidence in the same
+cell. When road prevails, the combined map and all three layers become 0; a
+later obstacle observation can prevail again. Points represent classified
+surfaces: cells are not cleared along 2D rays or over the full field of view.
+Invalid or never-observed points provide no negative evidence. An old isolated
+classification remains until it is observed again or moved by pose correction;
+no indiscriminate time decay is applied.
 
-## Avvio in Foxy
+## Running on Foxy
 
-Nel container `limo_sim`, dopo la build e il source di `/workspace/install/setup.bash`:
+Inside the 'limo_sim' container, after building and sourcing
+'/workspace/install/setup.bash':
 
-```bash
+~~~bash
 ros2 launch offline_map_package map_sim.launch.py
-```
+~~~
 
-Il wrapper seleziona `mapping_sim.yaml` e include il launch principale
-`map.launch.py`: avvia SLAM Toolbox, mapping semantico, RViz e GUI di salvataggio
-con il tempo simulato. I valori di tuning sono quelli del precedente launch.
-Il profilo simulato include anche la computer vision; la cloud di `visual_ptcld`
-include i punti exterior road con `class_id=1`.
-Con lo SLAM già attivo:
+The wrapper selects 'mapping_sim.yaml' and includes 'map.launch.py'. It starts
+SLAM Toolbox, semantic mapping, RViz, and the save-map GUI with simulated time.
+The simulation profile includes computer vision; 'visual_ptcld' contains
+exterior-road points with 'class_id=1'.
 
-```bash
+With SLAM already running:
+
+~~~bash
 ros2 launch offline_map_package map.launch.py start_slam:=false
-```
+~~~
 
-Per un replay/headless aggiungere `mode:=backend`.
+Add 'mode:=backend' for replay or headless use. On the physical robot, with
+sensors, EKF, and computer vision already active:
 
-Sul robot reale (sensori, EKF e computer vision già attivi):
-
-```bash
+~~~bash
 ros2 launch offline_map_package map_real.launch.py
-```
+~~~
 
-Questo launch usa `mapping_real.yaml` e forza `mode:=backend`: avvia SLAM e
-mapper con tempo reale, `base_link` e nessuna finestra sul robot. Il tuning
-semantico/SLAM resta quello esistente; i due YAML permettono di modificarlo
-indipendentemente dopo le prove sul robot.
+This uses 'mapping_real.yaml' and forces 'mode:=backend': SLAM and the mapper
+run with real time and 'base_link', without a robot-side window. On a PC, start
+only RViz and Save Map, connected to robot topics and service:
 
-Sul PC, nel container Foxy con i pacchetti aggiornati, le sole interfacce:
-
-```bash
+~~~bash
 ros2 launch offline_map_package desktop_offline.launch.py
-```
+~~~
 
-`desktop_offline.launch.py` apre solo RViz e Save Map, collegati ai topic e al servizio
-del robot; non avvia SLAM o mapper. I file salvati restano sulla LIMO.
-Il container deve avere accesso al display del PC e alla rete del robot
-(nel setup attuale `limo_sim` usa la rete host). Usare lo stesso `ROS_DOMAIN_ID`
-su entrambe le macchine, normalmente `0`, e `ROS_LOCALHOST_ONLY=0`.
+Saved files remain on the LIMO. The container needs PC display and robot-network
+access. Use the same 'ROS_DOMAIN_ID' on both machines, normally '0', and
+'ROS_LOCALHOST_ONLY=0'.
 
-Prima del primo avvio, aggiornare questo pacchetto nel workspace di entrambe
-le macchine, poi dalla radice di ciascun workspace eseguire:
+Before the first launch, update this package in both workspaces:
 
-```bash
+~~~bash
 source /opt/ros/foxy/setup.bash
 colcon build --symlink-install --packages-select offline_map_package
 source install/setup.bash
-```
+~~~
 
-Il workspace montato nel Docker del PC può essere una copia diversa da questo
-checkout: verificare che contenga i launch aggiornati. Per fermare la mappatura
-e le finestre, premere `Ctrl-C` nei rispettivi terminali.
+The workspace mounted in the PC Docker container can differ from this checkout;
+make sure it contains the updated launch files. Press 'Ctrl-C' in the respective
+terminals to stop mapping and windows. 'map.launch.py' without arguments keeps
+the simulation profile. To use a custom file:
 
-`map.launch.py` senza argomenti mantiene il profilo simulato. Per un file proprio:
+~~~bash
+ros2 launch offline_map_package map.launch.py config_file:=/path/to/mapping.yaml
+~~~
 
-```bash
-ros2 launch offline_map_package map.launch.py config_file:=/percorso/mapping.yaml
-```
+The CLI overrides 'start_slam', 'start_mapper', 'start_rviz', 'start_gui',
+'use_sim_time', 'rviz_config', 'fixed_frame', 'pose_source', 'trajectory_id',
+'resolution', and 'save_directory' remain available. An empty value uses YAML;
+'resolution' overrides both SLAM and mapper resolution, while 'use_sim_time'
+overrides every node. 'mode:=backend' disables GUIs; 'mode:=desktop' disables
+SLAM and mapper. Relative RViz paths refer to 'limo_rviz/config'.
 
-Gli override CLI `start_slam`, `start_mapper`, `start_rviz`, `start_gui`,
-`use_sim_time`, `rviz_config`, `fixed_frame`, `pose_source`, `trajectory_id`,
-`resolution` e `save_directory` restano disponibili. Il valore vuoto usa il YAML;
-`resolution` sovrascrive sia SLAM sia mapper, `use_sim_time` tutti i nodi.
-`mode:=backend` forza le GUI spente; `mode:=desktop` forza SLAM/mapper spenti
-e permette di disabilitare singole finestre con `start_rviz`/`start_gui`.
-I percorsi RViz relativi si riferiscono a `limo_rviz/config`.
+The node publishes no TF. A missing TF is awaited for 'tf_wait_sec', then the
+cloud is discarded; it does not fall back to the latest pose. Duplicate or
+out-of-order timestamps are ignored. Call 'reset_map' before rewinding a bag.
+At save time, 'save_median_kernel: 3' removes isolated black boardwalk cells
+with a 3x3 median; the live map is unchanged.
 
-SLAM viene avviato direttamente con i parametri del profilo, quindi non serve
-più il workaround Foxy `params_file:=...` e non si usano i default con
-`base_footprint`. I due ingressi per il robot reale sono `map_real.launch.py`
-sulla LIMO e `desktop_offline.launch.py` nel Docker del PC; `map.launch.py` contiene la
-logica condivisa e `map_sim.launch.py` resta l'ingresso per la simulazione.
+Outputs have exactly the geometry of the latest valid '/map'. CV points outside
+that view remain in tiles and reappear if the map expands. Updates with unchanged
+geometry still replace contents: obstacles cleared by SLAM disappear from the
+combined map and the next saved map. Before the first '/map', CV is accumulated
+but publishing and saving wait. 'reset_map' clears only CV evidence; the laser
+layer remains from SLAM.
 
-Il nodo non pubblica TF. Un TF mancante viene atteso fino a `tf_wait_sec`, poi la
-cloud viene scartata; non si ripiega sulla posa più recente. Timestamp duplicati
-o fuori ordine vengono ignorati. Prima di riavvolgere un bag usare `reset_map`.
-Al salvataggio, `save_median_kernel: 3` rimuove le celle boardwalk nere isolate
-con una mediana 3x3; la mappa pubblicata live non viene modificata.
+## Cartographer and loop closure
 
-Le uscite hanno esattamente la geometria dell'ultima `/map` valida
-(risoluzione, dimensioni, origine e rotazione); i punti CV esterni a questa vista
-rimangono nelle tile e ricompaiono se la mappa si espande. `/map` fornisce anche
-l'intero layer laser. Aggiornamenti a geometria invariata sostituiscono comunque
-il contenuto: gli ostacoli cancellati da SLAM spariscono dalla combinata e
-dal successivo salvataggio. I messaggi non validi non sostituiscono la mappa.
-Prima della prima `/map`, il nodo accumula la CV ma attende per pubblicare e salvare.
-`reset_map` cancella solo l'evidenza CV; il layer laser resta quello di SLAM.
-Scegliere `resolution` vicina a quella di `/map` per limitare il ricampionamento.
+'pose_source:=tf' accumulates in the 'map' frame and corrects classes in
+re-observed cells, but does not retroactively correct historic CV geometry after
+loop closure. The laser layer follows the SLAM-updated map. Applying one
+'map -> odom' transform to history cannot resolve differing corrections along
+trajectory segments.
 
-## Cartographer e loop closure
+With external Cartographer and 'cartographer_ros_msgs' installed:
 
-`pose_source:=tf` accumula nel frame `map` e corregge le classi sulle celle
-riosservate. Non corregge retroattivamente la geometria storica della CV dopo
-loop closure. Il layer laser segue invece la mappa aggiornata da SLAM.
-Applicare un solo `map -> odom` alla storia non risolve le correzioni diverse dei
-singoli tratti della traiettoria.
-
-Con Cartographer esterno e `cartographer_ros_msgs` installato:
-
-```bash
+~~~bash
 ros2 launch offline_map_package map.launch.py start_slam:=false pose_source:=cartographer
-```
+~~~
 
-Cartographer deve fornire `/submap_list`, TF e `/map` dal proprio
-occupancy-grid node. Configurare `trajectory_id`, `map_frame`, `odom_frame` e
-`submap_topic` secondo il suo setup; `odom_frame` deve essere continuo.
-Il messaggio ufficiale pubblica pose e identificativi delle submap:
-[API Cartographer](https://google-cartographer-ros.readthedocs.io/en/latest/ros_api.html).
+Cartographer must provide '/submap_list', TF, and '/map' from its occupancy-grid
+node. Configure 'trajectory_id', 'map_frame', 'odom_frame', and 'submap_topic'
+for the installation; 'odom_frame' must be continuous. The official message
+publishes submap poses and IDs: [Cartographer API](https://google-cartographer-ros.readthedocs.io/en/latest/ros_api.html).
 
-Il mapper associa le osservazioni alla submap più recente non congelata della
-traiettoria selezionata e conserva evidenza nelle sue coordinate locali. Risolve
-la posa della cloud e la posa della submap allo stesso istante del frame globale
-usando `lookup_transform_full` e il frame continuo. Quando arrivano pose di
-submap aggiornate, rigenera la vista globale dalle tile locali: le posizioni
-precedenti non restano impresse nella mappa. Submap rimosse dalla lista non
-contribuiscono alla vista. Nelle sovrapposizioni vince la cella osservata più di
-recente, per permettere alle rivisite di correggere evidenze più vecchie.
+The mapper associates observations with the most recent non-frozen submap of
+the selected trajectory and retains evidence in local coordinates. It resolves
+cloud and submap poses at the same global-frame instant using
+'lookup_transform_full'. Updated submap poses rebuild the global view from local
+tiles; former positions are not imprinted. In overlaps, the most recently
+observed cell wins. This semantic layer does not alter Cartographer scan matching
+or use costs as lidar measurements. Final export should wait for poses after
+the final optimization.
 
-Questo è un livello semantico agganciato alle submap: non modifica lo scan
-matching di Cartographer e non usa i costi come misure lidar. L'associazione
-esterna e il ricampionamento ai centri cella sono approssimazioni; deformazioni
-interne a una submap richiedono il replay delle osservazioni originali con pose
-ottimizzate. Per un export finale attendere le pose dopo l'ottimizzazione finale.
-Il percorso Cartographer richiede una verifica end-to-end su bag/SLAM reale;
-i test inclusi controllano il riposizionamento tramite pose sintetiche.
+## Topics and saving
 
-## Topic e salvataggio
+Prefix: '/limo/map_package/offline/map/'.
 
-Prefisso: `/limo/map_package/offline/map/`.
+- 'turquoise_map' (yellow lines), 'white_map' (soft obstacle), and
+  'boardwalk_map': selected-class cost, 0 in differently classified cells, and
+  -1 in unknown or uncertain cells.
+- 'combined_grid': live laser-plus-CV map; laser obstacles at 100 take
+  precedence, then observed semantic costs. Other cells retain the laser value,
+  including -1 when unknown.
 
-- `turquoise_map` (yellow lines), `white_map` (soft obstacle) e
-  `boardwalk_map`: costo della classe selezionata,
-  0 nelle celle classificate diversamente, -1 nelle celle sconosciute/incerte.
-- `combined_grid`: mappa live fusa laser + CV; gli ostacoli laser a 100 hanno
-  precedenza, poi i costi semantici osservati. Le altre celle conservano il
-  valore laser, incluso -1 quando sconosciuto.
+All are 'nav_msgs/OccupancyGrid' with reliable/transient-local QoS. Their
+content is a **semantic cost**, not physical occupancy probability. The former
+binary 'cv_map' and 'street_map' topics are not produced.
 
-Tutti sono `nav_msgs/OccupancyGrid`, QoS reliable/transient-local. Il contenuto
-è un **costo semantico**, non probabilità di occupazione fisica: eventuali
-consumatori AMCL/Nav2 devono interpretarlo esplicitamente. I vecchi topic binari
-`cv_map`/`street_map` non sono prodotti da questa pipeline.
-
-Servizi disponibili:
-
-```bash
+~~~bash
 ros2 service call /limo/map_package/offline/map_saver/save_map std_srvs/srv/Trigger '{}'
 ros2 service call /limo/map_package/offline/reset_map std_srvs/srv/Trigger '{}'
-```
+~~~
 
-Il salvataggio richiede una mappa laser valida ricevuta su
-`reference_map_topic` (default `/map`) e genera tre coppie in
-`/workspace/ros2_maps/semantic` (o `save_directory`):
+Saving requires a valid laser map on 'reference_map_topic' (default '/map') and
+creates three pairs in '/workspace/ros2_maps/semantic' (or 'save_directory'):
 
-- `limo_map_laser.pgm/.yaml`: copia del solo layer laser SLAM in modalità
-  `raw`, con gli stessi valori di occupazione e celle sconosciute.
-- `limo_map_cv_obstacle.pgm/.yaml`: mappa binaria `trinary` ottenuta dal
-  layer CV (dopo il filtro di salvataggio). I costi 0..39 sono liberi, 40..95
-  occupati, gli altri sconosciuti. Le celle CV non osservate (-1) diventano
-  libere solo se il laser vale esattamente 0; con laser sconosciuto o positivo
-  restano sconosciute. I valori CV osservati non vengono sovrascritti dal laser.
-  Questo riempimento viene ricalcolato a ogni salvataggio e non modifica
-  l'evidenza CV accumulata.
-- `limo_map_complete.pgm/.yaml`: fusione dei layer in modalità `raw`.
-  La precedenza è laser a 100, classe CV osservata, quindi stato del laser.
-  Una cella sconosciuta in entrambi resta sconosciuta.
+- 'limo_map_laser.pgm/.yaml': a raw copy of the SLAM laser layer, preserving
+  occupancy values and unknown cells.
+- 'limo_map_cv_obstacle.pgm/.yaml': a binary 'trinary' CV-layer map after the
+  save filter. Costs 0..39 are free, 40..95 occupied, and other values unknown.
+  Unobserved CV cells (-1) become free only if laser is exactly 0.
+- 'limo_map_complete.pgm/.yaml': raw layer fusion. Priority is laser at 100,
+  observed CV class, then laser state.
 
-Il nome base `limo_map` si cambia con `save_map_name`. In modalità `raw`
-il PGM contiene direttamente valori 0..100 e 255 per unknown: Nav2 ricostruisce
-esattamente i costi e gli sconosciuti. La resa del PGM in un visualizzatore di
-immagini generico è diversa dalla scala di grigi tradizionale; usare il YAML
-con il map server per visualizzarlo come mappa.
-I nomi dei file YAML restano invariati e i launch online li caricano normalmente.
-Le vecchie mappe `scale` continuano a essere caricabili; la nuova modalità si
-applica ai salvataggi successivi.
+Change the 'limo_map' basename with 'save_map_name'. Raw PGM stores values
+0..100 directly and 255 for unknown, so Nav2 reconstructs exact costs and
+unknown cells. YAML filenames are unchanged and online launches load them
+normally. A later save replaces all three pairs; no '.npz' file is produced.
 
-L'orientamento delle righe segue la convenzione del map saver Nav2 e ciascuna
-coppia può essere caricata da `nav2_map_server`. Un salvataggio successivo
-sostituisce tutte e tre le coppie precedenti.
-Non viene più prodotto alcun `.npz`.
+## Verification and resources
 
-Questa è una fotografia della mappa combinata, non un `.pbstream` o un checkpoint
-per riprendere l'accumulo. Salvare separatamente stato Cartographer e bag se serve
-un successivo riallineamento/replay.
-
-## Verifica e risorse
-
-```bash
+~~~bash
 colcon build --symlink-install --packages-select offline_map_package
 python3 -m pytest src/ros2_ws/offline_map_package/test/test_semantic_grid.py src/ros2_ws/offline_map_package/test/test_semantic_mapper.py
 python3 -m pytest src/ros2_ws/offline_map_package/test/test_mapping_launch.py
-```
+~~~
 
-`max_cells` limita le tile allocate (circa 20 byte/cella più overhead);
-`max_output_cells` limita la vista densa. Superato un limite viene segnalato un
-errore, senza cancellare la mappa esistente. Le allocazioni temporanee durante
-pubblicazione/salvataggio richiedono ulteriore memoria. L'efficienza effettiva
-va misurata sulla Jetson Nano con il flusso camera reale.
+'max_cells' limits allocated tiles (about 20 bytes per cell plus overhead);
+'max_output_cells' limits the dense view. Exceeding a limit reports an error
+without clearing the map. Actual efficiency must be measured on Jetson Nano with
+the real camera stream.

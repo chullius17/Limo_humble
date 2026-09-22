@@ -1,244 +1,215 @@
-# Localizzazione AMCL con laser e pointcloud semantica
+# AMCL localization with laser and semantic point clouds
 
-I profili `config/mapping_sim.yaml` e `config/mapping_real.yaml` configurano
-avvio, map server e AMCL. `online_map.launch.py` contiene la logica condivisa e
-usa la pipeline CV ottimizzata e le tre mappe esportate in
-`ros2_maps/semantic` dal mapper offline:
+The 'config/mapping_sim.yaml' and 'config/mapping_real.yaml' profiles configure
+startup, map server, and AMCL. 'online_map.launch.py' contains shared logic and
+uses the optimized CV pipeline and three maps exported by the offline mapper in
+'ros2_maps/semantic':
 
-| File | Topic | Uso |
+| File | Topic | Use |
 | --- | --- | --- |
-| `limo_map_laser.yaml` | `/limo/map_package/online/maps/laser_map` | confronto laser AMCL |
-| `limo_map_cv_obstacle.yaml` | `/limo/map_package/online/maps/cv_obstacle` | confronto CV AMCL |
-| `limo_map_complete.yaml` | `/map` | sorgente completa per planner e costmap globale |
+| 'limo_map_laser.yaml' | '/limo/map_package/online/maps/laser_map' | AMCL laser comparison |
+| 'limo_map_cv_obstacle.yaml' | '/limo/map_package/online/maps/cv_obstacle' | AMCL CV comparison |
+| 'limo_map_complete.yaml' | '/map' | Complete source for planner and global costmap |
 
-`traj_package` può ricevere `/map` pubblicata dal profilo online. Il relativo
-`BorderFollowLayer` costruisce `/global_costmap/costmap`, visualizzata in RViz
-come **Global Costmap (Inflation)** con lo schema colori `costmap` e alpha 0.35,
-come nel ramo `humble-navigation`.
+'traj_package' can consume the '/map' published by the online profile. Its
+'BorderFollowLayer' builds '/global_costmap/costmap', displayed in RViz as
+**Global Costmap (Inflation)** with the 'costmap' color scheme and alpha 0.35,
+as in the 'humble-navigation' branch.
 
-Su Foxy `always_send_full_costmap: true` evita un bug di RViz negli aggiornamenti
-`OccupancyGridUpdate`: la prima riga viene ripetuta su tutte le righe, facendo
-comparire strisce dopo la prima mappa corretta. La costmap completa viene
-pubblicata a 1 Hz; la palette non causa questo problema.
+On Foxy, 'always_send_full_costmap: true' avoids an RViz
+'OccupancyGridUpdate' bug: the first row is repeated over every row, creating
+stripes after the first correct map. The complete costmap is published at 1 Hz;
+the palette does not cause the issue.
 
-La cloud `/limo/cv_package/visual_ptcld/points` contiene `x,y,z` FLOAT32 e
-`class_id` UINT8. AMCL seleziona **yellow lines=2, boardwalk=4, interior
-boardwalk=6** come ostacoli e **exterior road=1, interior road=5** come strada.
-**Soft obstacle=3**, unknown e le altre classi non votano. Nessuna immagine
-o griglia BEV locale entra in AMCL.
+The '/limo/cv_package/visual_ptcld/points' cloud contains 'x,y,z' FLOAT32 and
+'class_id' UINT8. AMCL selects **yellow lines=2, boardwalk=4, interior
+boardwalk=6** as obstacles and **exterior road=1, interior road=5** as road.
+**Soft obstacle=3**, unknown, and all other classes do not vote. No image or
+local BEV grid enters AMCL.
 
-Per ogni aggiornamento laser:
+For every laser update:
 
-1. AMCL aggiorna le particelle con il modello laser sulla sola mappa laser.
-2. Sceglie la cloud col timestamp più vicino, entro `cv_sync_tolerance`.
-3. Trasforma la cloud nel frame base al timestamp laser usando `odom` come
-   frame fisso, senza dipendere dalla posa globale stimata da AMCL.
-4. Dopo il filtro delle classi, aggrega in voxel **XY** da `cv_voxel_size`
-   (default 0.075 m), separando strada e ostacoli. Usa il centroide dei punti
-   di ciascun gruppo nel voxel, con peso 1.
-   La riduzione da 2 cm in `visual_ptcld` resta il primo stadio. Non si
-   moltiplica il peso per il numero di punti o classi della stessa polarità.
-   Se strada e ostacolo condividono un voxel, mantengono due voti distinti.
-5. Trasforma questo insieme con **ogni posa candidata** e calcola la frazione
-   di voti non corrispondenti: ostacoli su celle occupate, strada su celle
-   esattamente a costo 0 della stessa mappa CV. Il mismatch è normalizzato
-   sul totale dei voti strada + ostacoli, senza pesi aggiuntivi tra i due gruppi.
-6. Applica la formula del riferimento Humble e normalizza prima del resampling:
-   `w_final ∝ w_laser^laser_weight_factor × exp(-cv_weight_factor × cv_sad_gain × mismatch)`.
+1. AMCL updates particles with the laser model using only the laser map.
+2. It selects the closest cloud timestamp within 'cv_sync_tolerance'.
+3. It transforms that cloud into the base frame at the laser timestamp, using
+   'odom' as fixed frame and without depending on AMCL's estimated global pose.
+4. After class filtering, it aggregates road and obstacle points separately in
+   **XY** voxels of 'cv_voxel_size' (default 0.075 m). Each group contributes
+   its centroid with weight 1. The 2 cm 'visual_ptcld' reduction remains the
+   first stage. A road and obstacle sharing a voxel retain distinct votes.
+5. It transforms this set with **every candidate pose** and computes the
+   fraction of mismatching votes: obstacles on occupied cells and road on cells
+   whose corresponding CV-map cost is exactly 0. Mismatch is normalized over
+   all road plus obstacle votes, with no group-specific additional weights.
+6. It applies the Humble-reference formula and normalizes before resampling:
+   'w_final ∝ w_laser^laser_weight_factor × exp(-cv_weight_factor × cv_sad_gain × mismatch)'.
 
-Il mismatch conserva la regola SAD positiva di Humble: libero, sconosciuto e
-fuori mappa danno disaccordo rispetto a un ostacolo osservato. La nuova componente
-"negative SAD" usa solo le classi strada esplicitamente osservate: qualsiasi
-cella diversa da 0, sconosciuto e fuori mappa danno disaccordo. L'assenza di punti
-non prova spazio libero. Non viene usata una mappa street separata e i soft
-obstacles non partecipano al confronto. La componente negativa estende il
-modello positivo del riferimento Humble disponibile nel repository.
+Mismatch keeps Humble's positive-SAD rule: free, unknown, and out-of-map cells
+disagree with an observed obstacle. The negative-SAD component uses only
+explicitly observed road: any cell other than cost 0, unknown, or out of map
+disagrees. Missing points do not prove free space. No separate street map is
+used, and soft obstacles do not participate.
 
-Cloud assente, troppo distante nel tempo, malformata, TF indisponibile o meno di
-`cv_min_points` voxel (default 5) impediscono l'aggiornamento CV.
-Come nel launch online Humble, `cv_sync_tolerance` vale 0.20 s: la stessa cloud
-può essere riutilizzata entro questo limite **solo se il lidar non contiene
-ritorni validi oppure `laser_weight_factor` è zero**. Un ritorno valido è una
-distanza finita strettamente interna ai limiti utili del sensore e configurati.
-Con lidar valido e peso positivo ogni frame CV viene usato una sola volta.
-Il limite temporale parte sempre dal timestamp originale della cloud; il
-riutilizzo non lo rinnova. Ogni riutilizzo ricompensa il movimento tramite TF
-odom e conserva il guadagno CV configurato, come nel riferimento Humble.
+A missing, temporally distant, malformed, TF-unavailable cloud, or fewer than
+'cv_min_points' voxels (default 5), prevents the CV update. As in Humble's
+online launch, 'cv_sync_tolerance' is 0.20 s. A cloud may be reused within that
+limit **only if the lidar has no valid returns or 'laser_weight_factor' is
+zero**. With valid lidar and a positive weight, every CV frame is used only
+once. Reuse never renews the original-cloud time limit; TF odometry compensates
+motion and configured CV gain is retained.
 
-I profili attuali usano `laser_weight_factor: 1.0` e `cv_weight_factor: 1.0`.
-Il peso laser zero salta il modello laser anche quando manca la CV. Il topic
-`/scan` resta necessario per scandire gli aggiornamenti e valutarne la validità:
-se smette completamente di arrivare, questo meccanismo non avvia aggiornamenti
-autonomi. `cv_enabled:=false` o `cv_weight_factor:=0.0` disabilitano la fusione CV.
-I parametri CV si leggono alla configurazione del nodo: per cambiarli riavviare.
+Current profiles use 'laser_weight_factor: 1.0' and 'cv_weight_factor: 1.0'.
+A zero laser weight skips the laser model even if CV is absent. '/scan' is still
+required to trigger updates and assess validity. 'cv_enabled:=false' or
+'cv_weight_factor:=0.0' disables CV fusion. CV parameters are read at node
+configuration, so restart after changing them.
 
-Prima della fusione, `cv_quality_gate_enabled: true` valuta la probabilità
-prodotta dalla sola CV sulle pose delle particelle correnti. Un confronto quasi
-uniforme viene scartato (`cv_min_information: 0.02` nats di divergenza KL dalla
-distribuzione uniforme). Si scartano anche ipotesi CV con deviazione standard
-superiore a `cv_max_position_stddev: 0.5` m lungo l'asse XY più disperso oppure
-`cv_max_yaw_stddev: 0.5` rad per l'orientamento circolare. Le strade restano attive.
-Il rifiuto avviene prima di modificare qualsiasi peso: con laser attivo viene
-conservato il suo aggiornamento. Il log `CV update rejected` mostra motivo e
-misure. Questi valori descrivono l'ambiguità CV sulle particelle disponibili,
-non la covarianza del sensore; le soglie iniziali richiedono verifica sul circuito.
-Una distribuzione globale molto dispersa può restare esclusa dalla fusione CV
-finché il lidar o una posa iniziale non restringono le ipotesi.
+Before fusion, 'cv_quality_gate_enabled: true' evaluates the CV-only
+probability on current particle poses. A nearly uniform comparison is rejected
+when KL divergence from uniform is below 'cv_min_information: 0.02' nats.
+CV hypotheses are also rejected if XY spread exceeds
+'cv_max_position_stddev: 0.5' m on the most dispersed axis or circular yaw
+spread exceeds 'cv_max_yaw_stddev: 0.5' rad. Road remains active. Rejection
+happens before any weight change, retaining a laser update when active. The
+'CV update rejected' log reports the reason and measures. These values describe
+CV ambiguity over available particles, not sensor covariance; validate the
+initial thresholds on the circuit.
 
-## Avvio
+## Launching
 
-Dopo la build di `nav2_amcl`, `limo_rviz`, `cv_package`,
-`online_map_package` e il source del workspace:
+After building 'nav2_amcl', 'limo_rviz', 'cv_package', and
+'online_map_package', and sourcing the workspace:
 
-```bash
+~~~bash
 cd /workspace
 colcon build --packages-select nav2_amcl limo_rviz cv_package \
   online_map_package --symlink-install
 source install/setup.bash
 ros2 launch online_map_package online_map_sim.launch.py
-```
+~~~
 
-Con sensori, odometria e CV già attivi, sulla LIMO:
+With sensors, odometry, and CV already active on the LIMO:
 
-```bash
+~~~bash
 ros2 launch online_map_package online_map_real.launch.py
-```
+~~~
 
-Sul PC, per aprire solo RViz collegato ai topic della LIMO:
+On a PC, to open only RViz connected to LIMO topics:
 
-```bash
+~~~bash
 ros2 launch online_map_package desktop_online.launch.py
-```
+~~~
 
-Per override temporanei di mappe o voxel in simulazione:
+Temporary simulation map or voxel overrides:
 
-```bash
+~~~bash
 ros2 launch online_map_package online_map_sim.launch.py \
   map_directory:=/workspace/ros2_maps/semantic map_name:=limo_map \
   cv_voxel_size:=0.10 cv_min_points:=5.0
-```
+~~~
 
-I valori persistenti si modificano nei due YAML; gli argomenti della riga di
-comando servono per prove temporanee. Il profilo reale non riavvia la CV e non
-apre finestre. `desktop_online.launch.py` usa lo stesso profilo reale in modalità
-desktop e avvia esclusivamente RViz. Planner e controller sono avviati
-separatamente dai rispettivi package; `user_package/limo_app.launch.py`
-orchestra i tre package per la simulazione completa.
+Change persistent values in the two YAML profiles; command-line arguments are
+for temporary trials. The real profile does not restart CV or open windows.
+'desktop_online.launch.py' uses that profile in desktop mode and launches RViz
+only. Planner and controller are started independently; 'user_package/limo_app.launch.py'
+orchestrates all three packages for the complete simulation.
 
-AMCL pubblica `map -> odom`; fornire una posa iniziale tramite RViz oppure il
-servizio AMCL di localizzazione globale. Non avviare contemporaneamente SLAM
-che pubblichi lo stesso TF. Il launch avvia localizzazione, map server, CV e
-RViz opzionale. La pipeline semantica temporale usa direttamente
-`local_ctrl_map`, con `local_grid` come modulo di supporto per la costmap e
-`semantic_memory` per la memoria temporale.
+AMCL publishes 'map -> odom'; provide an initial pose through RViz or AMCL's
+global-localization service. Do not start SLAM concurrently if it publishes the
+same TF. The launch starts localization, map server, CV, and optional RViz. The
+temporal semantic pipeline directly uses 'local_ctrl_map', with 'local_grid' as
+the costmap support module and 'semantic_memory' as temporal memory.
 
-`limo_controller` usa questa griglia insieme al laser: `ObstacleLayer` marca e
-libera gli ostacoli live letti da `/scan`, mentre `StaticLayer` inserisce i costi
-graduati di `/limo/map_package/online/local_costmap`. L'`InflationLayer` finale
-lavora sul risultato combinato. DWB valuta traiettorie locali su un orizzonte di
-2 s con il footprint completo; `limo_dwb_critics` scarta rotazioni sul posto,
-moto laterale e curvature non realizzabili. Il controller usa i parametri fisici
-del LIMO Ackermann: footprint 0,322 x 0,220 m, passo 0,20 m, raggio minimo di
-curvatura 0,462 m, velocità massima 0,50 m/s e limiti di accelerazione 1,3 m/s²
-e 3,4 rad/s².
+'limo_controller' combines this grid with laser data: 'ObstacleLayer' marks and
+clears live obstacles from '/scan', while 'StaticLayer' inserts graduated costs
+from '/limo/map_package/online/local_costmap'. The final 'InflationLayer' works
+on the combined result. The MPC controller evaluates local trajectories with
+the full footprint; 'limo_dwb_critics' rejects in-place rotations, lateral
+motion, and unrealizable curvature. LIMO Ackermann parameters are: footprint
+0.322 x 0.220 m, wheelbase 0.20 m, minimum turning radius 0.462 m, maximum
+speed 0.50 m/s, and acceleration limits 1.3 m/s² and 3.4 rad/s².
 
-DWB pubblica su `/cmd_vel_autonomy`, mentre `teleop_twist_keyboard` pubblica su
-`/cmd_vel_teleop`. Il mux interno di `limo_controller` assegna priorità 100 al
-teleop e 10 all'autonomia e pubblica il comando selezionato su `/cmd_vel`. Dopo
-0,5 s senza nuovi tasti il teleop scade e DWB riprende automaticamente, senza
-interrompere l'azione `FollowPath`.
+The MPC controller publishes '/cmd_vel_autonomy', while
+'teleop_twist_keyboard' publishes '/cmd_vel_teleop'. The internal
+'limo_controller' mux gives teleoperation priority 100 and autonomy priority
+10, then publishes the selected command on '/cmd_vel'. After 0.5 s without new
+key presses, teleoperation expires and autonomy resumes without interrupting
+the 'FollowPath' action.
 
-`local_ctrl_map` viene invece avviato dal profilo online e pubblica su
-`/limo/map_package/online/local_ctrl_map/markers` i limiti di lavoro in
-`base_link`: il rettangolo persistente verde da 2,50 x 2,66 m e il trapezio ROI
-giallo alto 1,95 m, largo da 0,60 a 2,66 m. La base maggiore del trapezio ha
-sempre la stessa larghezza del rettangolo e coincide con il suo lato anteriore,
-a 2,50 m da `base_link`. Il display **Local Map Regions** è già abilitato in
-`online_map.rviz`. In modalità desktop il nodo resta sul backend e RViz
-visualizza il topic ricevuto dalla LIMO.
+'local_ctrl_map' is started by the online profile and publishes the working
+limits on '/limo/map_package/online/local_ctrl_map/markers' in 'base_link': a
+persistent green 2.50 x 2.66 m rectangle and a yellow ROI trapezoid, 1.95 m
+high and 0.60 to 2.66 m wide. Its large base has the rectangle width and meets
+the front edge, 2.50 m from 'base_link'. **Local Map Regions** is already
+enabled in 'online_map.rviz'. In desktop mode the node stays on the backend and
+RViz displays the topic received from the LIMO.
 
-Un terzo contorno rosso mostra il trapezio interno: il lato vicino al robot e
-i due lati obliqui sono arretrati di 20 cm verso l'interno, misurati
-perpendicolarmente al lato (`inner_trapezoid_inset: 0.20`). La base larga rossa
-rimane invece allineata al bordo anteriore del trapezio giallo e del rettangolo
-verde. È un riferimento visivo in `base_link`; la memoria dei punti usa il
-trapezio giallo.
-Vertici e messaggi dei tre contorni sono precalcolati una sola volta durante
-l'inizializzazione; la pubblicazione aggiorna soltanto i timestamp.
+A third red contour shows the inner trapezoid: its near edge and oblique sides
+are inset by 20 cm, perpendicular to each edge
+('inner_trapezoid_inset: 0.20'). Its wide base remains aligned with the yellow
+trapezoid and green rectangle front edge. It is a visual 'base_link' reference;
+point memory uses the yellow trapezoid. The three contour vertices and messages
+are precomputed at initialization; publishing only updates timestamps.
 
-`local_ctrl_map` fonde la cloud CV corrente e la memoria dei punti riproiettati
-e pubblica direttamente `/limo/map_package/online/local_costmap` come
-`nav_msgs/OccupancyGrid`. La griglia coincide con il rettangolo verde: misura
-2,50 x 2,66 m, ha origine `(0, -1.33)` in `base_link` e, con risoluzione 2 cm,
-contiene esattamente 125 x 133 celle. Tutte le classi live 1--6 contribuiscono:
-strada (classi 1/5) vale 0, yellow line (classe 2) vale 60, soft obstacle
-(classe 3) vale 30 e boardwalk (classi 4/6) vale 90, come nella costruzione della
-mappa semantica offline. Se più punti cadono nella stessa cella viene conservato
-il costo maggiore. La griglia sorgente non viene pre-inflazionata
-(`inflation_radius: 0.0`): l'unica inflazione viene applicata dopo la fusione
-con il laser dalla `InflationLayer` della local costmap Nav2. I costi sono
-fissi: la confidenza regola la persistenza dei punti, ma non riduce il loro
-costo.
+'local_ctrl_map' fuses the live CV cloud and reprojected point memory, then
+publishes '/limo/map_package/online/local_costmap' directly as a
+'nav_msgs/OccupancyGrid'. The grid matches the green rectangle: 2.50 x 2.66 m,
+origin '(0, -1.33)' in 'base_link', and exactly 125 x 133 cells at 2 cm
+resolution. All live classes 1--6 contribute: road (1/5) costs 0, yellow line
+(2) 60, soft obstacle (3) 30, and boardwalk (4/6) 90. Where multiple points
+fall in one cell, the greatest cost is retained. The source grid is not
+pre-inflated ('inflation_radius: 0.0'); Nav2's local-costmap 'InflationLayer'
+is the only inflation after laser fusion. Confidence controls persistence, not
+the fixed class costs.
 
-Tutti i punti usati per costruire la griglia sono pubblicati a 10 Hz anche come
-`sensor_msgs/PointCloud2` su
-`/limo/map_package/online/local_ctrl_map/points`: tutti i punti e tutte le
-classi della sorgente live recente, più la memoria delle classi 2/4 riproiettata
-nel frame corrente e sottoposta al cap di 300 elementi. La cloud è in
-`base_link` e contiene i campi `x`, `y`, `z` e `class_id`. Il topic resta
-disponibile per il debug; i due display PointCloud2 sono presenti nella
-configurazione RViz online ma disabilitati per impostazione predefinita. La
-griglia rasterizza tutte le classi live nel rettangolo insieme alla memoria 2/4.
+At 10 Hz, all points used to build the grid are also published as
+'sensor_msgs/PointCloud2' on
+'/limo/map_package/online/local_ctrl_map/points': all recent-live points and
+classes, plus memory for classes 2/4 reprojected into the current frame and
+capped at 300 entries. The cloud is in 'base_link' and has 'x', 'y', 'z', and
+'class_id' fields. It is available for debugging; PointCloud2 displays exist in
+the online RViz configuration but are disabled by default.
 
-A ogni frame CV i punti di tutte le classi vengono conservati come sorgente live
-per 0,50 s. In parallelo, i punti situati **dentro il trapezio giallo ma fuori
-da quello rosso** vengono convertiti subito in coordinate `odom` usando la TF
-dello stesso timestamp e inseriti nella memoria. Non si attende che escano dal
-trapezio: la fascia fra i due contorni è la zona di ammissione. Se la TF al
-timestamp della cloud non è ancora disponibile, il frame attende in una coda
-limitata a `max_pending_clouds: 10`. Il nodo ritenta ogni 20 ms senza bloccare
-le altre callback, per un massimo di `tf_wait_timeout_sec: 0.20` secondi di
-tempo ROS dalla ricezione. I frame sono elaborati in ordine di timestamp;
-quelli scaduti o più vecchi in caso di saturazione vengono scartati con un
-avviso. Il timestamp originale resta invariato, anche per il timeout live.
-Il reset del clock svuota anche la coda. Durante l'attesa la memoria esistente
-continua a essere riproiettata e pubblicata quando la TF corrente è disponibile.
+At every CV frame, all classes are retained as the live source for 0.50 s. In
+parallel, points **inside the yellow trapezoid and outside the red one** are
+immediately transformed to 'odom' at the cloud timestamp and added to memory.
+If the TF is not yet available, the frame waits in a queue capped at
+'max_pending_clouds: 10'. The node retries every 20 ms, without blocking other
+callbacks, for at most 'tf_wait_timeout_sec: 0.20' ROS seconds from receipt.
+Frames are processed in timestamp order; expired or over-capacity frames are
+discarded with a warning. A clock reset also empties the queue.
 
-I punti persistenti sono riproiettati a 10 Hz anche senza nuovi frame CV.
-Sono cancellati quando entrano nel trapezio rosso, escono dal rettangolo oppure
-scendono sotto `minimum_confidence` (0,30). Alla nascita la confidenza vale 1:
-il decadimento viene integrato a ogni riproiezione in base alla regione e al
-comando `/cmd_vel` attuali. Il maggiore fra i rapporti
-di velocità lineare e angolare scala il decadimento da zero a uno: sotto le
-soglie di quiete (0,01 m/s e 0,02 rad/s) la memoria non decade; raggiunge il
-tasso massimo rispettivamente a 0,50 m/s o 1,00 rad/s. Nel rettangolo verde,
-fuori dal giallo, il massimo è `confidence_decay_per_sec` (0,10/s). Dentro il
-giallo e fuori dal rosso viene inoltre applicato `yellow_decay_multiplier: 3.0`.
-Dentro il rosso il punto viene cancellato immediatamente, indipendentemente
-dalla velocità. Con soglia 0,30 e velocità al rapporto massimo, un punto mai
-riosservato dura circa 12 secondi nella regione rossa e 4 secondi in quella
-gialla; da fermo non scade. `cmd_vel_timeout_sec: 0.0` conserva l'ultimo
-comando senza timeout, come il vecchio nodo. Impostare un valore positivo
-arresta il decadimento quando il comando diventa obsoleto. Questa confidenza
-descrive la memoria, non la certezza del classificatore CV.
-Un filtro voxel da 3 cm separato per classe evita duplicati. Il limite
-`maximum_points: 300` è condiviso dalle due classi: quando viene superato sono
-rimossi prima i punti a confidenza più bassa; a parità di confidenza i punti
-rimasti sono distribuiti spazialmente. Parametri nella sezione
-`local_ctrl_map` dei profili; override
-del limite dal launch: `local_map_maximum_points:=300` (riavviare per applicare).
-RViz mostra nel display **Local Semantic Costmap** la griglia sorgente
-`/limo/map_package/online/local_costmap`, prima della fusione con il laser e
-dell'inflazione Nav2. Il launch del controller non avvia più un convertitore
-separato: questa griglia è già pronta come sorgente della local costmap.
+Persistent points are reprojected at 10 Hz even without a new CV frame. They
+are removed when entering the red trapezoid, leaving the rectangle, or falling
+below 'minimum_confidence' (0.30). They start at confidence 1. Decay is
+integrated at each reprojection from their region and current '/cmd_vel'. The
+larger linear/angular speed ratio scales decay from zero to one: below 0.01 m/s
+and 0.02 rad/s it does not decay; it reaches maximum at 0.50 m/s or 1.00 rad/s.
+Outside yellow but inside green, maximum decay is
+'confidence_decay_per_sec' (0.10/s); inside yellow and outside red, it is
+multiplied by 'yellow_decay_multiplier: 3.0'. In red the point is removed
+immediately. At threshold 0.30 and maximum ratio, an unobserved point lasts
+about 12 s in the green-only region and 4 s in the yellow region; it does not
+expire while stationary. 'cmd_vel_timeout_sec: 0.0' keeps the last command with
+no timeout. Confidence describes memory, not classifier certainty.
 
-I log `CV cloud fusion` mostrano differenza temporale, punti in ingresso,
-voxel, particelle ed effettivo numero di confronti voxel × particelle.
+A separate 3 cm class-wise voxel filter avoids duplicates. The
+'maximum_points: 300' limit is shared by both persistent classes: lowest
+confidence points are removed first; ties are distributed spatially. Configure
+parameters in the 'local_ctrl_map' profile section; override the cap with
+'local_map_maximum_points:=300' and restart to apply it. RViz displays the
+source grid in **Local Semantic Costmap**, before laser fusion and Nav2
+inflation. The controller launch no longer starts a separate converter because
+this grid is already ready for the local costmap.
 
-## Verifica
+The 'CV cloud fusion' logs show time difference, input points, voxels,
+particles, and the effective voxel-times-particle comparison count.
 
-`nav2_amcl/test/test_cv_cloud.cpp` verifica selezione e fusione delle classi,
-voxelizzazione, layout/endian, trasformazioni e pesi. `test_cv_sync.cpp` verifica
-la compensazione temporale e il comportamento senza dati utilizzabili; i test Python in
-`test/test_localization_launch.py` verificano mappe, topic e parametri del launch.
-Il tuning e la convergenza vanno poi valutati con sensori reali o rosbag.
+## Verification
+
+'nav2_amcl/test/test_cv_cloud.cpp' verifies class selection and fusion,
+voxelization, layout/endian handling, transforms, and weights.
+'test_cv_sync.cpp' verifies temporal compensation and behavior without usable
+data. Python tests in 'test/test_localization_launch.py' verify maps, topics,
+and launch parameters. Tune and assess convergence with real sensors or a
+rosbag.
