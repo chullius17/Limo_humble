@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
-#include <random>
 #include <vector>
 
 namespace limo_dwb_critics
@@ -32,6 +31,8 @@ struct MpcConfig
   double steering_std{0.15};
   double acceleration_weight{0.5};
   double steering_weight{0.5};
+  double steering_command_weight{0.2};
+  double steering_rate_change_weight{0.1};
 
   void validate() const;
 };
@@ -77,7 +78,8 @@ public:
   double yawRate(const MpcControl & control) const;
   MpcControl advance(const MpcControl & current, const MpcControl & target) const;
   MpcRollout rollout(
-    const MpcState & initial, const std::vector<MpcControl> & targets) const;
+    const MpcState & initial, const std::vector<MpcControl> & targets,
+    double previous_steering_rate = 0.0) const;
   MpcSolution solve(
     const MpcState & initial,
     const std::function<double(const MpcRollout &, double)> & environment_cost,
@@ -86,8 +88,8 @@ public:
 private:
   MpcControl boundedTarget(const MpcControl & target) const;
   MpcConfig config_;
-  std::mt19937 random_{42};
   std::vector<MpcControl> previous_targets_;
+  double previous_steering_rate_{0.0};
 };
 
 }  // namespace limo_dwb_critics

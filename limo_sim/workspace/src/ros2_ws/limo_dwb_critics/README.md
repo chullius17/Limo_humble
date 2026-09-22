@@ -14,6 +14,8 @@ Each cycle:
 2. Shift the previous winning target sequence by the elapsed control steps.
 3. Sample piecewise target velocity/steering sequences around that solution,
    plus broad exploration, constant-curvature seeds and a braking sequence.
+   Perturbations repeat across cycles to reduce sampling-induced command noise;
+   their nominal sequence still shifts and changes with every solution.
 4. Roll out the constrained bicycle model over the full horizon. Score these
    trajectories with DWB critics plus normalized acceleration/steering effort.
 5. Publish **only the first reachable command** of the winning sequence. Repeat
@@ -57,7 +59,8 @@ rates instead of being clipped instantaneously.
 `AckermannKinematics.min_turning_radius` is shared by the model and the existing
 critic. The critic remains a final check on the command sent to Nav2.
 `MPC.max_steering_rate` limits the equivalent bicycle angle, not the inner wheel
-angle. Its initial value (0.8 rad/s) is a tuning estimate, not a measured LIMO
+angle. The YAML uses 0.5 rad/s (0.025 rad per 20 Hz command), a tuning estimate,
+not a measured LIMO
 actuator specification. `MPC.wheelbase: 0.20` and `MPC.rear_axle_to_base: 0.10`
 match the Ackermann URDF; set the latter to zero if the navigation base frame
 is actually located on the rear axle.
@@ -103,6 +106,18 @@ does not model steering feedback, actuator lag, wheel slip or moving obstacles.
 `MPC.acceleration_weight` and `MPC.steering_weight` penalize squared normalized
 input increments, averaged over the horizon. They are additional regularizers,
 not a translation of MPPI's `gamma` or `temperature`.
+
+`MPC.steering_command_weight: 0.2` additionally penalizes the squared first
+steering increment normalized by `max_steering_rate * model_dt`.
+`MPC.steering_rate_change_weight: 0.1` penalizes its difference from the previous
+issued steering increment, in the same normalized units. These immediate
+costs are **not divided by the horizon length**, so increasing the prediction
+horizon does not dilute command continuity. Steering-rate history resets with
+the warm start. Both are soft costs: collision rejection can still force a
+change or braking, and no command is filtered after trajectory evaluation.
+The YAML reduces local steering sampling deviation to 0.10 rad while retaining
+full-range seeds and broad exploration. The MPPI-derived critic weights remain
+unchanged.
 
 ## Cost correspondence with Humble MPPI
 

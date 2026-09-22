@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <stdexcept>
 
 namespace limo_dwb_critics
@@ -33,6 +34,8 @@ void MpcConfig::validate() const
     !std::isfinite(rear_axle_to_base) || rear_axle_to_base < 0.0 ||
     !std::isfinite(acceleration_weight) || acceleration_weight < 0.0 ||
     !std::isfinite(steering_weight) || steering_weight < 0.0 ||
+    !std::isfinite(steering_command_weight) || steering_command_weight < 0.0 ||
+    !std::isfinite(steering_rate_change_weight) || steering_rate_change_weight < 0.0 ||
     time_steps < 2 || time_steps > 1000 || control_segments < 1 ||
     control_segments > time_steps || velocity_samples < 2 || velocity_samples > 100 ||
     curvature_samples < 3 || curvature_samples > 100 || batch_size > 10000 ||
@@ -51,6 +54,7 @@ SamplingMpc::SamplingMpc(const MpcConfig & config)
 void SamplingMpc::reset()
 {
   previous_targets_.clear();
+  previous_steering_rate_ = 0.0;
 }
 
 double SamplingMpc::yawRate(const MpcControl & control) const
@@ -123,11 +127,13 @@ MpcControl SamplingMpc::advance(
 }
 
 MpcRollout SamplingMpc::rollout(
-  const MpcState & initial, const std::vector<MpcControl> & targets) const
+  const MpcState & initial, const std::vector<MpcControl> & targets,
+  double previous_steering_rate) const
 {
   if (targets.size() != static_cast<std::size_t>(config_.time_steps) ||
     !std::isfinite(initial.x) || !std::isfinite(initial.y) ||
     !std::isfinite(initial.yaw) || !finiteControl(initial.control) ||
+    !std::isfinite(previous_steering_rate) ||
     std::abs(initial.control.steering) >
     std::atan(config_.wheelbase / config_.min_turning_radius) + 1e-9)
   {
@@ -166,6 +172,14 @@ MpcRollout SamplingMpc::rollout(
     result.states.push_back(state);
   }
   result.effort_cost /= targets.size();
+  // The command actually issued must not have its regularization diluted by
+  // the horizon length. Penalize both its increment and changes in steering
+  // rate across control cycles, before collision/environment scoring.
+  const double first_rate = (result.states[1].control.steering - initial.control.steering) /
+    (config_.dt * config_.steering_rate);
+  const double rate_change = first_rate - previous_steering_rate / config_.steering_rate;
+  result.effort_cost += config_.steering_command_weight * first_rate * first_rate +
+    config_.steering_rate_change_weight * rate_change * rate_change;
   return result;
 }
 
@@ -183,10 +197,11 @@ MpcSolution SamplingMpc::solve(
   }
   // Warm state is committed only after a successful search, including when
   // a caller's evaluator throws. Failed searches cannot retain an old plan.
+  const double previous_rate = previous_steering_rate_;
   reset();
   MpcSolution best;
   const auto consider = [&](const std::vector<MpcControl> & targets) {
-      auto prediction = rollout(initial, targets);
+      auto prediction = rollout(initial, targets, previous_rate);
       const double remaining = best.cost - prediction.effort_cost;
       if (remaining < 0.0) {
         return;
@@ -212,6 +227,9 @@ MpcSolution SamplingMpc::solve(
             {velocity, std::atan(config_.wheelbase * curvature)})));
     }
   }
+  // Reuse the same perturbations each cycle; only their nominal sequence
+  // changes. Fresh random draws otherwise add noise to the winning command.
+  std::mt19937 random(42);
   std::normal_distribution<double> noise(0.0, 1.0);
   std::uniform_real_distribution<double> velocity_distribution(
     config_.min_velocity, config_.max_velocity);
@@ -224,10 +242,10 @@ MpcSolution SamplingMpc::solve(
     for (int segment = 0; segment < config_.control_segments; ++segment) {
       const std::size_t begin = segment * count / config_.control_segments;
       const std::size_t end = (segment + 1) * count / config_.control_segments;
-      const double velocity_noise = config_.velocity_std * noise(random_);
-      const double steering_noise = config_.steering_std * noise(random_);
-      const MpcControl broad_sample = boundedTarget({velocity_distribution(random_),
-          std::atan(config_.wheelbase * curvature_distribution(random_))});
+      const double velocity_noise = config_.velocity_std * noise(random);
+      const double steering_noise = config_.steering_std * noise(random);
+      const MpcControl broad_sample = boundedTarget({velocity_distribution(random),
+          std::atan(config_.wheelbase * curvature_distribution(random))});
       for (std::size_t t = begin; t < end; ++t) {
         // Keep global exploration even when the previous winner is trapped.
         targets[t] = sample % 4 == 0 ? broad_sample : boundedTarget({
@@ -238,6 +256,8 @@ MpcSolution SamplingMpc::solve(
   }
   if (std::isfinite(best.cost)) {
     previous_targets_ = best.rollout.targets;
+    previous_steering_rate_ =
+      (best.rollout.states[1].control.steering - initial.control.steering) / config_.dt;
   }
   return best;
 }

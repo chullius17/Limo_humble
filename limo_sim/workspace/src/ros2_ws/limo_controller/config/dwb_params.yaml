@@ -81,11 +81,14 @@ controller_server:
         curvature_samples: 15
         wheelbase: 0.20
         rear_axle_to_base: 0.10
-        max_steering_rate: 0.8  # Bicycle steering rad/s; initial tuning estimate.
+        max_steering_rate: 0.5  # Bicycle steering rad/s; 0.025 rad per control cycle.
         velocity_std: 0.12
-        steering_std: 0.15
+        steering_std: 0.10
         acceleration_weight: 0.5
         steering_weight: 0.5
+        # Immediate command costs are not averaged over the prediction horizon.
+        steering_command_weight: 0.2
+        steering_rate_change_weight: 0.1
 
       transform_tolerance: 0.20
       prune_distance: 1.50

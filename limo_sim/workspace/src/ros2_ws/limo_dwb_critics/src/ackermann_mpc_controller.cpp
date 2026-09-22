@@ -70,6 +70,10 @@ void AckermannMPCController::configure(
   config.steering_std = read_double("MPC.steering_std", config.steering_std);
   config.acceleration_weight = read_double("MPC.acceleration_weight", config.acceleration_weight);
   config.steering_weight = read_double("MPC.steering_weight", config.steering_weight);
+  config.steering_command_weight = read_double(
+    "MPC.steering_command_weight", config.steering_command_weight);
+  config.steering_rate_change_weight = read_double(
+    "MPC.steering_rate_change_weight", config.steering_rate_change_weight);
   steering_feedback_min_velocity_ = read_double(
     "MPC.steering_feedback_min_velocity", steering_feedback_min_velocity_);
   if (!std::isfinite(steering_feedback_min_velocity_) || steering_feedback_min_velocity_ <= 0.0) {
