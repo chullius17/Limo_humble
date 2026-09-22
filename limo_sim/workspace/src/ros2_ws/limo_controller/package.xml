@@ -6,7 +6,7 @@
   <name>limo_controller</name>
   <version>0.0.0</version>
 
-  <description>Nav2 MPPI control and velocity smoothing for the AgileX LIMO.</description>
+  <description>Nav2 DWB control with Ackermann constraints for the AgileX LIMO.</description>
 
   <maintainer email="giulio.cataldo@studio.unibo.it">Giulio Cataldo</maintainer>
   <license>Apache-2.0</license>
@@ -15,6 +15,7 @@
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>nav2_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
@@ -28,11 +29,10 @@
   <exec_depend>nav2_common</exec_depend>
   <exec_depend>nav2_controller</exec_depend>
   <exec_depend>nav2_costmap_2d</exec_depend>
+  <exec_depend>nav2_dwb_controller</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
-  <exec_depend>nav2_mppi_controller</exec_depend>
-  <exec_depend>nav2_velocity_smoother</exec_depend>
-  <exec_depend>traj_package</exec_depend>
-  <exec_depend>twist_mux</exec_depend>
+  <exec_depend>dwb_critics</exec_depend>
+  <exec_depend>limo_dwb_critics</exec_depend>
 
   <!-- Custom interfaces -->
   <depend>limo_interfaces</depend>

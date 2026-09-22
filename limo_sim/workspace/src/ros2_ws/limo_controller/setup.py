@@ -33,6 +33,8 @@ setup(
         'console_scripts': [
             'local_costmap = limo_controller.local_costmap:main',
             'control_gui = limo_controller.control_gui:main',
+            'cmd_vel_mux = limo_controller.cmd_vel_mux:main',
+            'path_executor = limo_controller.path_executor:main',
         ],
     },
 )

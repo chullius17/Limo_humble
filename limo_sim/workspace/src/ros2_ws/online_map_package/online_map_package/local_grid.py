@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Build the inflated semantic OccupancyGrid used by local_map_final."""
+"""Build the semantic OccupancyGrid used by local_ctrl_map."""
 
 import array
 import math

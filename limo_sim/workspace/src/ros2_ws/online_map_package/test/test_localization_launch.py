@@ -65,11 +65,11 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
     nodes, includes = online(monkeypatch)
     assert set(nodes) == {
         'complete_map_server', 'laser_map_server', 'cv_map_server',
-        'lifecycle_manager_online_maps', 'local_map_final', 'rviz2',
+        'lifecycle_manager_online_maps', 'local_ctrl_map', 'rviz2',
     }
     assert all(node['values']['use_sim_time'] is True
                for node in nodes.values())
-    assert len(includes) == 3
+    assert len(includes) == 2
     include_arguments = [dict(action.launch_arguments) for action in includes]
     assert {
         'use_sim_time': 'true',
@@ -80,47 +80,36 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
     assert amcl['cv_voxel_size'] == '0.075'
     assert amcl['map_topic'].endswith('/laser_map')
     assert amcl['cv_map_topic'].endswith('/cv_obstacle')
-    trajectory = next(values for values in include_arguments
-                      if 'autostart' in values)
-    assert trajectory == {
-        'use_sim_time': 'true',
-        'map_topic': '/map',
-        'autostart': 'true',
-    }
     assert nodes['rviz2']['arguments'][-2:] == ['-f', 'map']
-    assert nodes['local_map_final']['values']['base_frame'] == 'base_link'
-    assert nodes['local_map_final']['values']['maximum_points'] == 300
-    assert nodes['local_map_final']['values']['grid_resolution'] == 0.02
-    assert nodes['local_map_final']['values']['inflation_radius'] == 0.10
-    assert nodes['local_map_final']['values']['output_cloud_topic'] == (
-        '/limo/map_package/online/local_map_final/points')
-    assert nodes['local_map_final']['values']['cmd_vel_topic'] == '/cmd_vel'
-    assert nodes['local_map_final']['values'][
+    assert nodes['local_ctrl_map']['values']['base_frame'] == 'base_link'
+    assert nodes['local_ctrl_map']['values']['maximum_points'] == 300
+    assert nodes['local_ctrl_map']['values']['grid_resolution'] == 0.02
+    assert nodes['local_ctrl_map']['values']['inflation_radius'] == 0.0
+    assert nodes['local_ctrl_map']['values']['output_cloud_topic'] == (
+        '/limo/map_package/online/local_ctrl_map/points')
+    assert nodes['local_ctrl_map']['values']['cmd_vel_topic'] == '/cmd_vel'
+    assert nodes['local_ctrl_map']['values'][
         'linear_speed_at_max_decay'] == 0.50
-    assert nodes['local_map_final']['values'][
+    assert nodes['local_ctrl_map']['values'][
         'angular_speed_at_max_decay'] == 1.00
-    assert nodes['local_map_final']['values']['yellow_line_cost'] == 60
-    assert nodes['local_map_final']['values']['boardwalk_cost'] == 90
+    assert nodes['local_ctrl_map']['values']['yellow_line_cost'] == 60
+    assert nodes['local_ctrl_map']['values']['boardwalk_cost'] == 90
 
 
 def test_real_profile_is_headless_and_does_not_restart_cv(monkeypatch):
     nodes, includes = online(monkeypatch, 'real', mode='backend')
     assert set(nodes) == {
         'complete_map_server', 'laser_map_server', 'cv_map_server',
-        'lifecycle_manager_online_maps', 'local_map_final',
+        'lifecycle_manager_online_maps', 'local_ctrl_map',
     }
     assert all(node['values']['use_sim_time'] is False
                for node in nodes.values())
-    assert len(includes) == 2
+    assert len(includes) == 1
     include_arguments = [dict(action.launch_arguments) for action in includes]
     amcl = next(values for values in include_arguments
                 if 'cv_voxel_size' in values)
     assert amcl['use_sim_time'] == 'false'
     assert amcl['cv_enabled'] == 'true'
-    trajectory = next(values for values in include_arguments
-                      if 'autostart' in values)
-    assert trajectory['use_sim_time'] == 'false'
-    assert trajectory['map_topic'] == '/map'
 
 
 def test_desktop_online_starts_only_rviz(monkeypatch):
@@ -145,7 +134,7 @@ def test_custom_profile_and_cli_overrides_reach_consumers(
         monkeypatch, config_file=str(config),
         map_directory=str(tmp_path), max_particles='600',
         local_map_maximum_points='123')
-    assert nodes['local_map_final']['values']['maximum_points'] == 123
+    assert nodes['local_ctrl_map']['values']['maximum_points'] == 123
     assert nodes['complete_map_server']['values']['yaml_filename'] == str(
         tmp_path / 'custom_complete.yaml')
     assert ('map', '/test/laser_map') in (
@@ -155,9 +144,6 @@ def test_custom_profile_and_cli_overrides_reach_consumers(
     assert amcl['cv_voxel_size'] == '0.12'
     assert amcl['max_particles'] == '600'
     assert amcl['map_topic'] == '/test/laser_map'
-    trajectory = next(dict(action.launch_arguments) for action in includes
-                      if 'autostart' in dict(action.launch_arguments))
-    assert trajectory['map_topic'] == '/test/complete_map'
 
 
 @pytest.mark.parametrize('filename,profile,mode', [
@@ -180,7 +166,6 @@ def test_wrappers_select_profile_and_role(filename, profile, mode):
 
 @pytest.mark.parametrize('overrides', [
     {'use_sim_time': 'typo'},
-    {'start_trajectory': 'typo'},
     {'mode': 'typo'},
     {'max_particles': 'not-an-integer'},
 ])

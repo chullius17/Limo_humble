@@ -8,7 +8,7 @@ from geometry_msgs.msg import TransformStamped, Twist  # noqa: E402
 from rclpy.time import Time  # noqa: E402
 from sensor_msgs.msg import PointCloud2, PointField  # noqa: E402
 
-from online_map_package.local_map_final import LocalMapFinal  # noqa: E402
+from online_map_package.local_ctrl_map import LocalCtrlMap  # noqa: E402
 
 
 INPUT_DTYPE = np.dtype({
@@ -22,7 +22,7 @@ INPUT_DTYPE = np.dtype({
 @pytest.fixture
 def node():
     rclpy.init()
-    instance = LocalMapFinal()
+    instance = LocalCtrlMap()
     yield instance
     instance.destroy_node()
     rclpy.shutdown()
@@ -136,22 +136,22 @@ def test_live_and_memory_clouds_fuse_with_offline_costs_and_maximum(node):
 
     assert grid_cell(node, grid, 0.60, 0.10) == 90
     assert grid_cell(node, grid, 1.00, 0.00) == 60
-    assert grid_cell(node, grid, 0.68, 0.10) == 90
+    assert grid_cell(node, grid, 0.68, 0.10) == 0
     assert grid_cell(node, grid, 0.74, 0.10) == 0
 
 
-def test_inflation_is_circular_clipped_and_keeps_maximum_cost(node):
+def test_source_grid_does_not_preinflate_semantic_costs(node):
     grid = node.local_grid.rasterize(
         np.array([[0.01, node.local_grid.origin_y + 0.01],
                   [0.13, node.local_grid.origin_y + 0.01]]),
         np.array([3, 4]),
     )
     assert grid[0, 0] == 30
-    assert grid[0, 1] == 90
+    assert grid[0, 1] == 0
     assert grid[0, 6] == 90
-    assert grid[5, 0] == 30
-    assert grid[5, 6] == 90
-    assert grid[6, 0] == 0
+    assert grid[0, 5] == 0
+    assert grid[1, 0] == 0
+    assert grid[1, 6] == 0
 
 
 def test_occupancy_grid_message_has_expected_frame_geometry_and_data(node):
@@ -182,8 +182,10 @@ def test_final_grid_contains_all_live_classes_and_reprojected_memory(
     # Historical boundary evidence, then a fresh frame containing all classes.
     node.memory.observe(
         np.array([[0.6, -0.3]]), np.array([4]), (0.0, 0.0, 0.0), 9.9)
-    xy = np.array([[0.2, 0.0], [0.6, 0.0], [1.0, 0.0],
-                   [1.4, 0.0], [1.8, 0.0], [2.2, 0.0]])
+    # Keep samples away from exact cell edges: PointCloud2 stores float32,
+    # while the test coordinates below otherwise retain float64 precision.
+    xy = np.array([[0.21, 0.0], [0.61, 0.0], [1.01, 0.0],
+                   [1.41, 0.0], [1.81, 0.0], [2.21, 0.0]])
     node.cloud_callback(make_cloud(xy, [1, 2, 3, 4, 5, 6], stamp.to_msg()))
     grids = []
     monkeypatch.setattr(node, 'grid_pub', SimpleNamespace(publish=grids.append))

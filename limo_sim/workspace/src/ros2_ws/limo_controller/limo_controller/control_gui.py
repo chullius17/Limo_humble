@@ -3,7 +3,10 @@
 import signal
 import sys
 import threading
+import time
 
+from action_msgs.msg import GoalStatus, GoalStatusArray
+from geometry_msgs.msg import Twist
 import rclpy
 from PyQt5.QtCore import Qt, QTime, QTimer, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
@@ -27,6 +30,7 @@ class GuiSignals(QWidget):
     status_received = pyqtSignal(str)
     active_received = pyqtSignal(bool)
     paused_received = pyqtSignal(bool)
+    diagnostic_received = pyqtSignal(str)
 
 
 class ControlGuiNode(Node):
@@ -43,6 +47,10 @@ class ControlGuiNode(Node):
             SetBool,
             '/limo/control/set_enabled',
         )
+        self._service_availability = None
+        self._last_cmd_vel_log = 0.0
+        self._last_cmd_vel = None
+        self._last_follow_status = None
         state_qos = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -52,6 +60,12 @@ class ControlGuiNode(Node):
             String,
             '/limo/control/status',
             lambda msg: self.signals.status_received.emit(msg.data),
+            state_qos,
+        )
+        self.create_subscription(
+            String,
+            '/limo/planning/status',
+            lambda msg: self.signals.diagnostic_received.emit(msg.data),
             state_qos,
         )
         self.create_subscription(
@@ -65,6 +79,81 @@ class ControlGuiNode(Node):
             '/limo/control/paused',
             lambda msg: self.signals.paused_received.emit(msg.data),
             state_qos,
+        )
+        self.create_subscription(
+            GoalStatusArray,
+            '/follow_path/_action/status',
+            self._follow_path_status_callback,
+            10,
+        )
+        self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self._cmd_vel_callback,
+            10,
+        )
+        self.create_subscription(
+            String,
+            '/limo/control/cmd_vel_source',
+            lambda msg: self.signals.diagnostic_received.emit(
+                f'CMD_VEL SOURCE: {msg.data}'),
+            state_qos,
+        )
+        self.create_timer(1.0, self._report_service_availability)
+
+    def _diagnostic(self, message):
+        self.get_logger().info(message)
+        self.signals.diagnostic_received.emit(message)
+
+    def _report_service_availability(self):
+        availability = (
+            self.start_abort_client.service_is_ready(),
+            self.pause_resume_client.service_is_ready(),
+        )
+        if availability == self._service_availability:
+            return
+        self._service_availability = availability
+        self._diagnostic(
+            'SERVICES: set_active={} set_enabled={}'.format(
+                'ready' if availability[0] else 'missing',
+                'ready' if availability[1] else 'missing',
+            )
+        )
+
+    def _follow_path_status_callback(self, msg):
+        labels = {
+            GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
+            GoalStatus.STATUS_ACCEPTED: 'ACCEPTED',
+            GoalStatus.STATUS_EXECUTING: 'EXECUTING',
+            GoalStatus.STATUS_CANCELING: 'CANCELING',
+            GoalStatus.STATUS_SUCCEEDED: 'SUCCEEDED',
+            GoalStatus.STATUS_CANCELED: 'CANCELED',
+            GoalStatus.STATUS_ABORTED: 'ABORTED',
+        }
+        if not msg.status_list:
+            return
+        signature = tuple(item.status for item in msg.status_list)
+        if signature == self._last_follow_status:
+            return
+        self._last_follow_status = signature
+        summary = ', '.join(
+            labels.get(item.status, str(item.status))
+            for item in msg.status_list
+        )
+        self._diagnostic(f'FOLLOW_PATH ACTION: {summary}')
+
+    def _cmd_vel_callback(self, msg):
+        now = time.monotonic()
+        command = (round(msg.linear.x, 3), round(msg.angular.z, 3))
+        if command == self._last_cmd_vel and now - self._last_cmd_vel_log < 1.0:
+            return
+        if now - self._last_cmd_vel_log < 0.25:
+            return
+        self._last_cmd_vel = command
+        self._last_cmd_vel_log = now
+        self._diagnostic(
+            f'CMD_VEL: linear.x={msg.linear.x:.3f} m/s '
+            f'angular.z={msg.angular.z:.3f} rad/s'
         )
 
     def request_active(self, active):
@@ -84,6 +173,15 @@ class ControlGuiNode(Node):
         )
 
     def _call_service(self, kind, client, requested_state):
+        operation = {
+            ('active', True): 'START',
+            ('active', False): 'ABORT',
+            ('enabled', True): 'RESUME',
+            ('enabled', False): 'PAUSE',
+        }[(kind, requested_state)]
+        self._diagnostic(
+            f'REQUEST: {operation} via {client.srv_name}'
+        )
         if not client.service_is_ready():
             message = f"Service '{client.srv_name}' is not available"
             self.get_logger().error(message)
@@ -117,6 +215,10 @@ class ControlGuiNode(Node):
             message = f'Control request failed: {exc}'
         log = self.get_logger().info if success else self.get_logger().error
         log(message)
+        self.signals.diagnostic_received.emit(
+            'RESPONSE: {} success={} message={}'.format(
+                kind, success, message)
+        )
         self.signals.request_finished.emit(
             kind,
             success,
@@ -134,6 +236,8 @@ class ControlWindow(QWidget):
         self.control_active = False
         self.control_paused = False
         self.control_requested = False
+        self.path_ready = False
+        self.last_status = 'waiting for status'
 
         self.setWindowTitle('LIMO Control')
         self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
@@ -171,7 +275,9 @@ class ControlWindow(QWidget):
         signals.status_received.connect(self._set_status)
         signals.active_received.connect(self._set_active)
         signals.paused_received.connect(self._set_paused)
+        signals.diagnostic_received.connect(self._append_status)
         self._refresh_buttons()
+        self._append_status('GUI ready; waiting for path executor status')
 
     @staticmethod
     def _button_style(color):
@@ -183,6 +289,10 @@ class ControlWindow(QWidget):
     @pyqtSlot()
     def _toggle_active(self):
         requested_state = not self.control_requested
+        self._append_status(
+            'BUTTON: {} CONTROL pressed'.format(
+                'START' if requested_state else 'ABORT')
+        )
         self.start_button.setEnabled(False)
         if not self.node.request_active(requested_state):
             self.start_button.setEnabled(True)
@@ -198,6 +308,8 @@ class ControlWindow(QWidget):
     def _request_finished(self, kind, success, requested_state, message):
         if success and kind == 'active':
             self.control_requested = requested_state
+            if requested_state:
+                QTimer.singleShot(3000, self._check_controller_started)
             if not requested_state:
                 self.control_active = False
                 self.control_paused = False
@@ -208,14 +320,21 @@ class ControlWindow(QWidget):
 
     @pyqtSlot(str)
     def _set_status(self, status):
+        self.last_status = status
         self.state_label.setText(f'Control state: {status}')
-        if status.startswith(('READY:', 'IDLE:', 'ERROR:')):
+        if status.startswith('READY:'):
+            self.path_ready = True
             self.control_requested = False
-        elif status.startswith(('STARTING:', 'ACTIVE:', 'PAUSING:',
+        elif status.startswith('IDLE:'):
+            self.path_ready = False
+            self.control_requested = False
+        elif status.startswith('ERROR:'):
+            self.control_requested = False
+        elif status.startswith(('WAITING:', 'STARTING:', 'ACTIVE:', 'PAUSING:',
                                 'PAUSED:', 'RESUMING:', 'ABORTING:')):
             self.control_requested = not status.startswith('ABORTING:')
         color = '#2e7d32'
-        if status.startswith(('PAUSED:', 'PAUSING:')):
+        if status.startswith(('WAITING:', 'PAUSED:', 'PAUSING:')):
             color = '#ef6c00'
         elif status.startswith(('ERROR:', 'ABORTING:')):
             color = '#c62828'
@@ -224,6 +343,12 @@ class ControlWindow(QWidget):
         )
         self._append_status(status)
         self._refresh_buttons()
+
+    def _check_controller_started(self):
+        if self.last_status.startswith(('WAITING:', 'STARTING:')):
+            self._append_status(
+                'WARNING: FollowPath has not reached ACTIVE after 3 seconds'
+            )
 
     @pyqtSlot(bool)
     def _set_active(self, active):
@@ -253,7 +378,9 @@ class ControlWindow(QWidget):
         else:
             self.start_button.setText('START CONTROL')
             self.start_button.setStyleSheet(self._button_style('#0056b3'))
-        self.start_button.setEnabled(True)
+        self.start_button.setEnabled(
+            self.control_requested or self.path_ready
+        )
 
     @pyqtSlot(str)
     def _append_status(self, message):

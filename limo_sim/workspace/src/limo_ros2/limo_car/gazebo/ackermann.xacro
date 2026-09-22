@@ -340,6 +340,11 @@ Es würde einfach in andere Datei angerufen werden. -->
         <!-- *********************************************************************************************** -->
         <gazebo>
             <plugin name="ackermann_controller" filename="libgazebo_ros_ackermann_drive.so">
+                <ros>
+                    <!-- Foxy subscribes to cmd_vel via ROS remapping; the
+                         legacy command_topic SDF tag is not read. -->
+                    <remapping>cmd_vel:=/cmd_vel_gazebo</remapping>
+                </ros>
                 <update_rate>100</update_rate>
                 <front_left_joint>front_left_wheel_joint</front_left_joint>
                 <front_right_joint>front_right_wheel_joint</front_right_joint>
@@ -360,7 +365,6 @@ Es würde einfach in andere Datei angerufen werden. -->
                 <wheel_diameter>0.09</wheel_diameter> 
                 <max_wheel_torque>20</max_wheel_torque>
                 <max_wheel_acceleration>1.0</max_wheel_acceleration>
-                <command_topic>cmd_vel</command_topic>
                 <publish_odom>true</publish_odom>
                 <publish_odom_tf>false</publish_odom_tf>        <!-- Set to false in order to use EKF node -->
                 <publish_wheel_tf>true</publish_wheel_tf>

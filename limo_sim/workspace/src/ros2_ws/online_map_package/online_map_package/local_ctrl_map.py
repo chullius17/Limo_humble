@@ -45,15 +45,15 @@ OUTPUT_CLOUD_DTYPE = np.dtype({
 })
 
 
-class LocalMapFinal(Node):
+class LocalCtrlMap(Node):
     """Fuse live and reprojected boardwalk/yellow-line evidence into a grid."""
 
     def __init__(self):
-        super().__init__('local_map_final')
+        super().__init__('local_ctrl_map')
 
         self.declare_parameter(
             'marker_topic',
-            '/limo/map_package/online/local_map_final/markers',
+            '/limo/map_package/online/local_ctrl_map/markers',
         )
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('rectangle_length', 2.50)
@@ -119,7 +119,7 @@ class LocalMapFinal(Node):
             'input_topic': '/limo/cv_package/visual_ptcld/points',
             'output_topic': '/limo/map_package/online/local_costmap',
             'output_cloud_topic': (
-                '/limo/map_package/online/local_map_final/points'),
+                '/limo/map_package/online/local_ctrl_map/points'),
             'odometry_frame': 'odom',
             'maximum_points': 300,
             'minimum_confidence': 0.30,
@@ -133,7 +133,9 @@ class LocalMapFinal(Node):
             'cmd_vel_timeout_sec': 0.0,
             'voxel_size': 0.08,
             'grid_resolution': 0.02,
-            'inflation_radius': 0.10,
+            # Inflation belongs to the Nav2 controller costmap. Keep the
+            # published semantic source grid uninflated by default.
+            'inflation_radius': 0.0,
             'grid_publish_rate': 10.0,
             'live_cloud_timeout_sec': 0.50,
             'tf_wait_timeout_sec': 0.20,
@@ -556,7 +558,7 @@ class LocalMapFinal(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LocalMapFinal()
+    node = LocalCtrlMap()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

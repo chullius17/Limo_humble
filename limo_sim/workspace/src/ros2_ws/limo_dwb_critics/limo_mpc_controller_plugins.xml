@@ -1,0 +1,10 @@
+<library path="limo_dwb_critics">
+  <class
+    name="limo_dwb_critics::AckermannMPCController"
+    type="limo_dwb_critics::AckermannMPCController"
+    base_class_type="nav2_core::Controller">
+    <description>
+      Sampled receding-horizon Ackermann controller using DWB trajectory critics.
+    </description>
+  </class>
+</library>

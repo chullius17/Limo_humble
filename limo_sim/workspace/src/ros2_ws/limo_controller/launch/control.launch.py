@@ -1,23 +1,51 @@
-"""Launch the Nav2 MPPI controller configured for the physical LIMO."""
+"""Launch the Foxy-compatible Nav2 DWB controller for the physical LIMO."""
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import RewrittenYaml
 
 
+def model_overrides(profile):
+    """Match the different physical and Gazebo Ackermann geometries."""
+    if profile == 'real':
+        return {}  # Preserve the physical/custom values in the supplied YAML.
+    if profile == 'sim':
+        return {
+            'FollowPath.MPC.wheelbase': 0.24,
+            'FollowPath.MPC.rear_axle_to_base': 0.12,
+            'FollowPath.AckermannKinematics.min_turning_radius': 0.55,
+        }
+    raise ValueError('robot_model must be sim or real')
+
+
+def controller_node(context, configured_params, log_level):
+    """Apply simulation geometry only when explicitly selected by the launch."""
+    profile = LaunchConfiguration('robot_model').perform(context)
+    return [Node(
+        package='nav2_controller',
+        executable='controller_server',
+        name='controller_server',
+        output='screen',
+        parameters=[configured_params, model_overrides(profile)],
+        arguments=['--ros-args', '--log-level', log_level],
+        remappings=[('cmd_vel', '/cmd_vel_autonomy')],
+    )]
+
+
 def generate_launch_description():
-    """Create the controller, velocity smoother and lifecycle manager."""
+    """Create the controller server and its lifecycle manager."""
     package_share = get_package_share_directory('limo_controller')
     default_params_file = os.path.join(
         package_share,
         'config',
-        'mppi_control_params.yaml',
+        'dwb_params.yaml',
     )
     twist_mux_params_file = os.path.join(
         package_share,
@@ -25,51 +53,33 @@ def generate_launch_description():
         'twist_mux.yaml',
     )
 
-    params_file = LaunchConfiguration('params_file')
+    controller_params_file = LaunchConfiguration('controller_params_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
     log_level = LaunchConfiguration('log_level')
+    start_gui = LaunchConfiguration('start_gui')
 
     configured_params = RewrittenYaml(
-        source_file=params_file,
+        source_file=controller_params_file,
         root_key='',
         param_rewrites={'use_sim_time': use_sim_time},
         convert_types=True,
     )
 
-    controller_server = Node(
-        package='nav2_controller',
-        executable='controller_server',
-        name='controller_server',
-        output='screen',
-        parameters=[configured_params],
-        arguments=['--ros-args', '--log-level', log_level],
-        remappings=[('cmd_vel', 'cmd_vel_nav')],
+    controller_server = OpaqueFunction(
+        function=controller_node,
+        args=[configured_params, log_level],
     )
 
-    velocity_smoother = Node(
-        package='nav2_velocity_smoother',
-        executable='velocity_smoother',
-        name='velocity_smoother',
-        output='screen',
-        parameters=[configured_params],
-        arguments=['--ros-args', '--log-level', log_level],
-        remappings=[
-            ('cmd_vel', 'cmd_vel_nav'),
-            ('cmd_vel_smoothed', 'cmd_vel_autonomy'),
-        ],
-    )
-
-    twist_mux = Node(
-        package='twist_mux',
-        executable='twist_mux',
+    cmd_vel_mux = Node(
+        package='limo_controller',
+        executable='cmd_vel_mux',
         name='twist_mux',
         output='screen',
         parameters=[
             twist_mux_params_file,
             {'use_sim_time': ParameterValue(use_sim_time, value_type=bool)},
         ],
-        remappings=[('/cmd_vel_out', '/cmd_vel')],
     )
 
     lifecycle_manager = Node(
@@ -80,9 +90,19 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
             'autostart': ParameterValue(autostart, value_type=bool),
-            'node_names': ['controller_server', 'velocity_smoother'],
+            'node_names': ['controller_server'],
         }],
         arguments=['--ros-args', '--log-level', log_level],
+    )
+
+    path_executor = Node(
+        package='limo_controller',
+        executable='path_executor',
+        name='path_executor',
+        output='screen',
+        parameters=[{
+            'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
+        }],
     )
 
     control_gui = Node(
@@ -90,13 +110,19 @@ def generate_launch_description():
         executable='control_gui',
         name='control_gui',
         output='screen',
+        condition=IfCondition(start_gui),
     )
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'params_file',
+            'controller_params_file',
             default_value=default_params_file,
-            description='Absolute path to the LIMO MPPI parameter file.',
+            description='Absolute path to the LIMO controller parameters.',
+        ),
+        DeclareLaunchArgument(
+            'robot_model',
+            default_value='real',
+            description='sim for limo_car Gazebo geometry; real preserves the YAML geometry.',
         ),
         DeclareLaunchArgument(
             'use_sim_time',
@@ -113,9 +139,18 @@ def generate_launch_description():
             default_value='info',
             description='ROS log level for controller processes.',
         ),
+        DeclareLaunchArgument(
+            'start_gui',
+            default_value='true',
+            description='Open the local control window.',
+        ),
         controller_server,
-        velocity_smoother,
-        twist_mux,
-        lifecycle_manager,
+        cmd_vel_mux,
+        # Foxy lifecycle_manager performs startup only once.  When the whole
+        # application starts at the same time as mapping, planning and RViz,
+        # Fast DDS discovery can expose controller_server after that attempt.
+        # Give the server time to advertise its lifecycle services first.
+        TimerAction(period=3.0, actions=[lifecycle_manager]),
+        path_executor,
         control_gui,
     ])

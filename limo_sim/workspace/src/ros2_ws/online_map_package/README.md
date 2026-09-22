@@ -2,8 +2,8 @@
 
 I profili `config/mapping_sim.yaml` e `config/mapping_real.yaml` configurano
 avvio, map server e AMCL. `online_map.launch.py` contiene la logica condivisa e
-usa la pipeline CV ottimizzata, il planner di traiettoria e le tre mappe esportate
-in `ros2_maps/semantic` dal mapper offline:
+usa la pipeline CV ottimizzata e le tre mappe esportate in
+`ros2_maps/semantic` dal mapper offline:
 
 | File | Topic | Uso |
 | --- | --- | --- |
@@ -11,7 +11,7 @@ in `ros2_maps/semantic` dal mapper offline:
 | `limo_map_cv_obstacle.yaml` | `/limo/map_package/online/maps/cv_obstacle` | confronto CV AMCL |
 | `limo_map_complete.yaml` | `/map` | sorgente completa per planner e costmap globale |
 
-`trajectory.launch.py` riceve `/map` dal profilo online. Il relativo
+`traj_package` può ricevere `/map` pubblicata dal profilo online. Il relativo
 `BorderFollowLayer` costruisce `/global_costmap/costmap`, visualizzata in RViz
 come **Global Costmap (Inflation)** con lo schema colori `costmap` e alpha 0.35,
 come nel ramo `humble-navigation`.
@@ -87,13 +87,13 @@ finché il lidar o una posa iniziale non restringono le ipotesi.
 
 ## Avvio
 
-Dopo la build di `nav2_amcl`, `limo_inflation`, `traj_package`, `limo_rviz`,
-`cv_package`, `online_map_package` e il source del workspace:
+Dopo la build di `nav2_amcl`, `limo_rviz`, `cv_package`,
+`online_map_package` e il source del workspace:
 
 ```bash
 cd /workspace
-colcon build --packages-select nav2_amcl limo_inflation traj_package \
-  limo_rviz cv_package online_map_package --symlink-install
+colcon build --packages-select nav2_amcl limo_rviz cv_package \
+  online_map_package --symlink-install
 source install/setup.bash
 ros2 launch online_map_package online_map_sim.launch.py
 ```
@@ -121,19 +121,35 @@ ros2 launch online_map_package online_map_sim.launch.py \
 I valori persistenti si modificano nei due YAML; gli argomenti della riga di
 comando servono per prove temporanee. Il profilo reale non riavvia la CV e non
 apre finestre. `desktop_online.launch.py` usa lo stesso profilo reale in modalità
-desktop e avvia esclusivamente RViz. Il planner e la costmap vengono avviati
-dal profilo online sul backend; si possono disabilitare temporaneamente con
-`start_trajectory:=false`.
+desktop e avvia esclusivamente RViz. Planner e controller sono avviati
+separatamente dai rispettivi package; `user_package/limo_app.launch.py`
+orchestra i tre package per la simulazione completa.
 
 AMCL pubblica `map -> odom`; fornire una posa iniziale tramite RViz oppure il
 servizio AMCL di localizzazione globale. Non avviare contemporaneamente SLAM
-che pubblichi lo stesso TF. Il launch avvia localizzazione, map server, CV,
-planner di traiettoria e RViz opzionali. La pipeline semantica temporale usa
-direttamente `local_map_final`, con `local_grid` come modulo di supporto per la
-costmap e `semantic_memory` per la memoria temporale.
+che pubblichi lo stesso TF. Il launch avvia localizzazione, map server, CV e
+RViz opzionale. La pipeline semantica temporale usa direttamente
+`local_ctrl_map`, con `local_grid` come modulo di supporto per la costmap e
+`semantic_memory` per la memoria temporale.
 
-`local_map_final` viene invece avviato dal profilo online e pubblica su
-`/limo/map_package/online/local_map_final/markers` i limiti di lavoro in
+`limo_controller` usa questa griglia insieme al laser: `ObstacleLayer` marca e
+libera gli ostacoli live letti da `/scan`, mentre `StaticLayer` inserisce i costi
+graduati di `/limo/map_package/online/local_costmap`. L'`InflationLayer` finale
+lavora sul risultato combinato. DWB valuta traiettorie locali su un orizzonte di
+2 s con il footprint completo; `limo_dwb_critics` scarta rotazioni sul posto,
+moto laterale e curvature non realizzabili. Il controller usa i parametri fisici
+del LIMO Ackermann: footprint 0,322 x 0,220 m, passo 0,20 m, raggio minimo di
+curvatura 0,462 m, velocità massima 0,50 m/s e limiti di accelerazione 1,3 m/s²
+e 3,4 rad/s².
+
+DWB pubblica su `/cmd_vel_autonomy`, mentre `teleop_twist_keyboard` pubblica su
+`/cmd_vel_teleop`. Il mux interno di `limo_controller` assegna priorità 100 al
+teleop e 10 all'autonomia e pubblica il comando selezionato su `/cmd_vel`. Dopo
+0,5 s senza nuovi tasti il teleop scade e DWB riprende automaticamente, senza
+interrompere l'azione `FollowPath`.
+
+`local_ctrl_map` viene invece avviato dal profilo online e pubblica su
+`/limo/map_package/online/local_ctrl_map/markers` i limiti di lavoro in
 `base_link`: il rettangolo persistente verde da 2,50 x 2,66 m e il trapezio ROI
 giallo alto 1,95 m, largo da 0,60 a 2,66 m. La base maggiore del trapezio ha
 sempre la stessa larghezza del rettangolo e coincide con il suo lato anteriore,
@@ -150,7 +166,7 @@ trapezio giallo.
 Vertici e messaggi dei tre contorni sono precalcolati una sola volta durante
 l'inizializzazione; la pubblicazione aggiorna soltanto i timestamp.
 
-`local_map_final` fonde la cloud CV corrente e la memoria dei punti riproiettati
+`local_ctrl_map` fonde la cloud CV corrente e la memoria dei punti riproiettati
 e pubblica direttamente `/limo/map_package/online/local_costmap` come
 `nav_msgs/OccupancyGrid`. La griglia coincide con il rettangolo verde: misura
 2,50 x 2,66 m, ha origine `(0, -1.33)` in `base_link` e, con risoluzione 2 cm,
@@ -158,22 +174,21 @@ contiene esattamente 125 x 133 celle. Tutte le classi live 1--6 contribuiscono:
 strada (classi 1/5) vale 0, yellow line (classe 2) vale 60, soft obstacle
 (classe 3) vale 30 e boardwalk (classi 4/6) vale 90, come nella costruzione della
 mappa semantica offline. Se più punti cadono nella stessa cella viene conservato
-il costo maggiore. Ogni cella con costo non nullo viene inflazionata in un disco
-di raggio `inflation_radius` (0,10 m di default), propagando lo stesso costo;
-nelle sovrapposizioni prevale ancora il massimo. L'inflazione è ritagliata ai
-bordi della griglia e può essere disabilitata impostando il raggio a zero. I
-costi sono fissi: la confidenza regola la persistenza dei punti, ma non riduce
-il loro costo.
+il costo maggiore. La griglia sorgente non viene pre-inflazionata
+(`inflation_radius: 0.0`): l'unica inflazione viene applicata dopo la fusione
+con il laser dalla `InflationLayer` della local costmap Nav2. I costi sono
+fissi: la confidenza regola la persistenza dei punti, ma non riduce il loro
+costo.
 
 Tutti i punti usati per costruire la griglia sono pubblicati a 10 Hz anche come
 `sensor_msgs/PointCloud2` su
-`/limo/map_package/online/local_map_final/points`: tutti i punti e tutte le
+`/limo/map_package/online/local_ctrl_map/points`: tutti i punti e tutte le
 classi della sorgente live recente, più la memoria delle classi 2/4 riproiettata
 nel frame corrente e sottoposta al cap di 300 elementi. La cloud è in
 `base_link` e contiene i campi `x`, `y`, `z` e `class_id`. Il topic resta
-disponibile per il debug, ma i due display PointCloud2 sono rimossi dalla
-configurazione RViz online. La griglia rasterizza tutte le classi live nel
-rettangolo insieme alla memoria 2/4.
+disponibile per il debug; i due display PointCloud2 sono presenti nella
+configurazione RViz online ma disabilitati per impostazione predefinita. La
+griglia rasterizza tutte le classi live nel rettangolo insieme alla memoria 2/4.
 
 A ogni frame CV i punti di tutte le classi vengono conservati come sorgente live
 per 0,50 s. In parallelo, i punti situati **dentro il trapezio giallo ma fuori
@@ -210,11 +225,12 @@ Un filtro voxel da 3 cm separato per classe evita duplicati. Il limite
 `maximum_points: 300` è condiviso dalle due classi: quando viene superato sono
 rimossi prima i punti a confidenza più bassa; a parità di confidenza i punti
 rimasti sono distribuiti spazialmente. Parametri nella sezione
-`local_map_final` dei profili; override
+`local_ctrl_map` dei profili; override
 del limite dal launch: `local_map_maximum_points:=300` (riavviare per applicare).
-RViz mostra la griglia risultante nel display **Local Semantic Costmap**, oltre
-alla cloud CV originale e ai tre contorni. Il launch del controller non avvia
-più un convertitore separato: questa griglia è già pronta per il controller.
+RViz mostra nel display **Local Semantic Costmap** la griglia sorgente
+`/limo/map_package/online/local_costmap`, prima della fusione con il laser e
+dell'inflazione Nav2. Il launch del controller non avvia più un convertitore
+separato: questa griglia è già pronta come sorgente della local costmap.
 
 I log `CV cloud fusion` mostrano differenza temporale, punti in ingresso,
 voxel, particelle ed effettivo numero di confronti voxel × particelle.

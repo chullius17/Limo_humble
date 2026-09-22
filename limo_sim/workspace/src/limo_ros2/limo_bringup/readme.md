@@ -28,6 +28,6 @@ ros2 launch build_map_2d revo_build_map_2d.launch.py
 # 键盘控制
 
 ```shell
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 launch limo_bringup limon_teletop_keyboard.launch.py
 ros2 launch limo_bringup limo_start.launch.py
 ```

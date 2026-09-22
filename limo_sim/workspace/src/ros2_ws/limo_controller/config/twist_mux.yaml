@@ -1,5 +1,7 @@
 twist_mux:
   ros__parameters:
+    output_topic: /cmd_vel
+    publish_rate: 50.0
     topics:
       autonomy:
         topic: /cmd_vel_autonomy
@@ -9,4 +11,3 @@ twist_mux:
         topic: /cmd_vel_teleop
         timeout: 0.5
         priority: 100
-

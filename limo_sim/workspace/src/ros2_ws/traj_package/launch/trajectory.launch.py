@@ -1,3 +1,17 @@
+# Copyright 2026 Giulio Cataldo
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Launch the LIMO Nav2 global planner with SMAC Hybrid-A*."""
 
 import os
@@ -20,7 +34,7 @@ def generate_launch_description():
         'smac_hybrid_params.yaml',
     )
 
-    params_file = LaunchConfiguration('params_file')
+    planner_params_file = LaunchConfiguration('planner_params_file')
     map_topic = LaunchConfiguration('map_topic')
     use_sim_time = LaunchConfiguration('use_sim_time')
     autostart = LaunchConfiguration('autostart')
@@ -29,7 +43,7 @@ def generate_launch_description():
     # both the real LIMO and Gazebo without relying on launch substitutions
     # inside the parameter file itself.
     configured_params = RewrittenYaml(
-        source_file=params_file,
+        source_file=planner_params_file,
         root_key='',
         param_rewrites={
             'use_sim_time': use_sim_time,
@@ -75,14 +89,6 @@ def generate_launch_description():
         parameters=[{
             'use_sim_time': ParameterValue(use_sim_time, value_type=bool),
             'planner_id': 'GridBased',
-            'follow_path_action': '/follow_path',
-            'controller_id': 'FollowPath',
-            'goal_checker_id': 'goal_checker',
-            # Planner-only by default: selecting a 2D Goal Pose computes the
-            # path without requiring a controller or moving the robot.
-            'enable_control': False,
-            # Never start execution as a side effect of selecting an RViz goal.
-            'auto_start_control': False,
             'costmap_topic': '/global_costmap/costmap',
             'adjusted_goal_topic': '/adjusted_goal_pose',
             'adjusted_start_topic': '/adjusted_start_pose',
@@ -106,7 +112,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'params_file',
+            'planner_params_file',
             default_value=default_params_file,
             description='Absolute path to the SMAC and global-costmap parameters.',
         ),

@@ -1,0 +1,19 @@
+<library path="limo_dwb_critics">
+  <class
+    name="limo_dwb_critics::AckermannKinematicsCritic"
+    type="limo_dwb_critics::AckermannKinematicsCritic"
+    base_class_type="dwb_core::TrajectoryCritic">
+    <description>
+      Rejects lateral, rotate-in-place and over-curved DWB commands that the
+      AgileX LIMO cannot execute in Ackermann mode.
+    </description>
+  </class>
+  <class name="limo_dwb_critics::MppiObstacleCritic"
+    type="limo_dwb_critics::MppiObstacleCritic" base_class_type="dwb_core::TrajectoryCritic">
+    <description>MPPI-style normalized cost with hard footprint collision rejection.</description>
+  </class>
+  <class name="limo_dwb_critics::MppiPathCritic"
+    type="limo_dwb_critics::MppiPathCritic" base_class_type="dwb_core::TrajectoryCritic">
+    <description>Metric path and goal costs using the LIMO Humble MPPI weights and gates.</description>
+  </class>
+</library>

@@ -37,10 +37,19 @@ def generate_launch_description():
         parameters=[params]
     )
 
+    twist_adapter = Node(
+        package='limo_car',
+        executable='gazebo_twist_adapter.py',
+        name='gazebo_twist_adapter',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_sim_time',
             default_value='false',
             description='Use sim time if true'),
-        node_robot_state_publisher
+        node_robot_state_publisher,
+        twist_adapter,
     ])

@@ -63,13 +63,13 @@ ros2 launch limo_base limo_base.launch.py
 Start the keyboard teleop node
 
 ```
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args \
+  -r cmd_vel:=/cmd_vel_teleop
 ```
 
 # statement
 
 The limo_car gazebo simulation function package is provided by us and the Institute for **Intermodal Transport and Logistics SystemsTU Braunschweig, Germany **jointly developed, thanks for their efforts
-
 
 
 

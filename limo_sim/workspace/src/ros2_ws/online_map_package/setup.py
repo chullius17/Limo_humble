@@ -36,7 +36,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'local_map_final = online_map_package.local_map_final:main',
+            'local_ctrl_map = online_map_package.local_ctrl_map:main',
         ],
     },
 )
