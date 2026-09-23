@@ -29,7 +29,7 @@
  */
 
 #include "limo_base/limo_driver.h"
-int flag=0; 
+#include <cmath>
 
 namespace AgileX {
 
@@ -516,20 +516,18 @@ void LimoDriver::publishIMUData(double stamp) {
     tf2::Quaternion q;
     q.setRPY(0.0, 0.0, degToRad(imu_data_.yaw));
 
-    if (flag==0)
-    {
-        double present_theta_ =imu_data_.yaw;
-        double last_theta_ = imu_data_.yaw;
-        flag=1;    
-        
+    // Odometry yaw starts at zero at the first IMU sample. Keep state per
+    // driver instance, including before any IMU frame has been received.
+    if (!imu_yaw_initialized_) {
+        last_theta_ = imu_data_.yaw;
+        imu_yaw_initialized_ = true;
+    } else {
+        // Preserve slow turns and unwrap the IMU's +/-180 degree boundary.
+        // A per-sample deadband discards real motion at high sample rates.
+        const double delta_theta = std::remainder(imu_data_.yaw - last_theta_, 360.0);
+        real_theta_ += delta_theta;
+        last_theta_ = imu_data_.yaw;
     }
-    //ROS_INFO("flag:%d",flag);
-    present_theta_ = imu_data_.yaw;
-    delta_theta_ = present_theta_ - last_theta_;
-    if(delta_theta_< 0.1 && delta_theta_> -0.1) delta_theta_=0;
-    real_theta_ = real_theta_ + delta_theta_;
-    last_theta_ = present_theta_;
-    //ROS_INFO("present_theta_:%f;delta_theta_:%f;real_theta_:%f;last_theta_:%f",present_theta_,delta_theta_,real_theta_,last_theta_);
 
     imu_msg.orientation.x = q.x();
     imu_msg.orientation.y = q.y();
@@ -597,7 +595,7 @@ void LimoDriver::publishOdometry(double stamp, double linear_velocity,
         default:
             break;
     }
-    rad = degToRad(real_theta_);
+    const double rad = degToRad(real_theta_);
 
     position_x_ += cos(rad) * vx * dt - sin(rad) * vy * dt;
     position_y_ += sin(rad) * vx * dt + cos(rad) * vy * dt;

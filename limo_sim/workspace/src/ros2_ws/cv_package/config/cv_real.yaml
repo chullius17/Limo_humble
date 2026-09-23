@@ -38,7 +38,7 @@ visual_ptcld:
   input_crop_y_min: 0.5
   pointcloud_min_depth_m: 0.1
   pointcloud_max_depth_m: 2.5
-  blue_radius_min_m: 0.15
+  blue_radius_min_m: 0.06
   blue_radius_max_m: 0.25
   enable_boardwalk: true
   boardwalk_propagation_radius_m: 0.15
