@@ -7,6 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
     OpaqueFunction,
 )
@@ -76,15 +77,18 @@ def _launch_mapping(context):
 
     nodes = []
     if settings['start_cv']:
-        nodes.append(IncludeLaunchDescription(
+        cv_share = get_package_share_directory('cv_package')
+        cv_profile = 'cv_sim.yaml' if settings['use_sim_time'] else 'cv_real.yaml'
+        nodes.append(GroupAction(actions=[IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory('cv_package'),
-                'launch', 'cv.launch.py')),
+                cv_share, 'launch', 'cv.launch.py')),
             launch_arguments={
+                'config_file': os.path.join(cv_share, 'config', cv_profile),
+                'mode': 'backend',
                 'use_sim_time': str(settings['use_sim_time']).lower(),
                 'visual_ptcld_enable_telemetry': 'false',
             }.items(),
-        ))
+        )]))
     if settings['start_slam']:
         # Avoid the different Foxy/Humble argument names in online_async_launch.
         nodes.append(Node(

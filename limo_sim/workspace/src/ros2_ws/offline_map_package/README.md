@@ -75,14 +75,16 @@ ros2 launch offline_map_package map.launch.py start_slam:=false
 ~~~
 
 Add 'mode:=backend' for replay or headless use. On the physical robot, with
-sensors, EKF, and computer vision already active:
+sensors and EKF already active:
 
 ~~~bash
 ros2 launch offline_map_package map_real.launch.py
 ~~~
 
-This uses 'mapping_real.yaml' and forces 'mode:=backend': SLAM and the mapper
-run with real time and 'base_link', without a robot-side window. On a PC, start
+This uses 'mapping_real.yaml' and forces 'mode:=backend': computer vision, SLAM,
+and the mapper run with real time and 'base_link', without a robot-side window.
+If computer vision is already running separately, add 'start_cv:=false' to avoid
+starting it twice. On a PC, start
 only RViz and Save Map, connected to robot topics and service:
 
 ~~~bash
