@@ -1,4 +1,4 @@
-"""Start the CV pipeline on the LIMO, without desktop clients."""
+"""Start the CV RViz client in the PC container."""
 
 import os
 
@@ -11,9 +11,10 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 def generate_launch_description():
     share = get_package_share_directory('cv_package')
     return LaunchDescription([IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'cv.launch.py')),
+        PythonLaunchDescriptionSource(os.path.join(
+            share, 'launch', 'cv.launch.py')),
         launch_arguments={
             'config_file': os.path.join(share, 'config', 'cv_real.yaml'),
-            'mode': 'backend',
+            'mode': 'desktop',
         }.items(),
     )])

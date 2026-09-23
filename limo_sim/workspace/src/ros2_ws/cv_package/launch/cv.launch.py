@@ -1,4 +1,4 @@
-"""Launch the CV pipeline from a simulation or real robot profile."""
+"""Launch the CV pipeline or its desktop client from one YAML profile."""
 
 import os
 
@@ -37,6 +37,16 @@ def _launch_cv(context):
     if override:
         start_rviz = _boolean(override)
 
+    mode = LaunchConfiguration('mode').perform(context)
+    start_pipeline = True
+    if mode == 'desktop':
+        start_pipeline = False
+        start_rviz = _boolean(override) if override else True
+    elif mode == 'backend':
+        start_rviz = False
+    elif mode != 'profile':
+        raise ValueError('mode must be profile, backend or desktop')
+
     lane_params = dict(profile['lane_detector'], use_sim_time=use_sim_time)
     depth_params = dict(profile['depth_correction'], use_sim_time=use_sim_time)
     cloud_params = dict(profile['visual_ptcld'], use_sim_time=use_sim_time)
@@ -65,13 +75,15 @@ def _launch_cv(context):
         },
         parameters=[cloud_params],
     )
-    nodes = [
-        lane_node,
-        depth_node,
-        RegisterEventHandler(OnProcessStart(
-            target_action=lane_node, on_start=[cloud_node],
-        )),
-    ]
+    nodes = []
+    if start_pipeline:
+        nodes.extend([
+            lane_node,
+            depth_node,
+            RegisterEventHandler(OnProcessStart(
+                target_action=lane_node, on_start=[cloud_node],
+            )),
+        ])
     if start_rviz:
         config_dir = os.path.join(get_package_share_directory('cv_package'), 'config')
         nodes.append(Node(
@@ -88,6 +100,10 @@ def generate_launch_description():
         get_package_share_directory('cv_package'), 'config', 'cv_real.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('config_file', default_value=default_config),
+        DeclareLaunchArgument(
+            'mode', default_value='profile',
+            description=(
+                'profile: use YAML; backend: no RViz; desktop: RViz only.')),
         DeclareLaunchArgument('use_sim_time', default_value='',
                               description='Override the profile clock.'),
         DeclareLaunchArgument('start_rviz', default_value='',
