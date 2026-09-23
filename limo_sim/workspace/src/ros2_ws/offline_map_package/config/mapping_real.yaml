@@ -41,7 +41,9 @@ semantic_mapper:
   boardwalk_cost: 90
   hit_log_odds: 0.85
   miss_log_odds: 0.4
-  log_odds_limit: 3.0
+  # Low camera FPS: switch a saturated class after 2 consistent pure-class
+  # observations instead of 5, while retaining it after one contradictory frame.
+  log_odds_limit: 1.0
   min_evidence: 0.5
   publish_rate_hz: 4.0
   save_directory: ''  # ros2_maps/semantic in the workspace running the mapper.

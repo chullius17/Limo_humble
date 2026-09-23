@@ -226,3 +226,28 @@ def test_cloud_rejects_bad_schema_and_truncated_buffer():
     msg.data = msg.data[:-1]
     with pytest.raises(ValueError, match='Truncated'):
         read_class_cloud(msg)
+
+
+@pytest.mark.parametrize('old_class,new_class,cost', [
+    (4, 3, 30), (4, 1, 0), (4, 5, 0), (3, 4, 90), (5, 4, 90),
+])
+def test_real_profile_revises_saturated_cells_in_two_observations(old_class, new_class, cost):
+    from pathlib import Path
+    import yaml
+
+    profile = yaml.safe_load((Path(__file__).parents[1] / 'config' /
+                              'mapping_real.yaml').read_text())['semantic_mapper']
+    grid = SemanticGrid(
+        hit=profile['hit_log_odds'], miss=profile['miss_log_odds'],
+        limit=profile['log_odds_limit'], threshold=profile['min_evidence'])
+    grid.set_pose((0, 0), (0.0, 0.0, 0.0))
+    xy = np.array([[0.01, 0.01], [0.11, 0.01]])
+    for _ in range(30):
+        grid.update(xy, np.full(2, old_class))
+    old_map = grid.render()[2].copy()
+    grid.update(xy[:1], np.array([new_class]))
+    np.testing.assert_array_equal(grid.render()[2], old_map)
+    grid.update(xy[:1], np.array([new_class]))
+    expected = old_map.copy()
+    expected[0, 0] = cost
+    np.testing.assert_array_equal(grid.render()[2], expected)

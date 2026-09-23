@@ -110,12 +110,20 @@ class ColorLaneDetector(Node):
         self.last_logged_resolution = None
         self.last_logged_ingress_path = None
 
-        # HSV Threshold parameters for Yellow and Black colors
-        self.yellow_lower = np.array([15, 80, 80], dtype=np.uint8)
+        # Startup thresholds; profiles can accommodate brighter real scenes.
+        self.declare_parameter('road_max_value', 150)
+        self.declare_parameter('yellow_min_saturation', 80)
+        self.road_max_value = self.get_parameter('road_max_value').value
+        yellow_min_saturation = self.get_parameter('yellow_min_saturation').value
+        for name, value in (('road_max_value', self.road_max_value),
+                            ('yellow_min_saturation', yellow_min_saturation)):
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
+                raise ValueError(name + ' must be an integer in [0, 255]')
+        self.yellow_lower = np.array([15, yellow_min_saturation, 80], dtype=np.uint8)
         self.yellow_upper = np.array([35, 255, 255], dtype=np.uint8)
 
         self.black_lower = np.array([0, 0, 0], dtype=np.uint8)
-        self.black_upper = np.array([180, 255, 150], dtype=np.uint8)
+        self.black_upper = np.array([180, 255, self.road_max_value], dtype=np.uint8)
 
         # Subscriber to Limo's camera
         self.declare_parameter('rgb_topic', '/rgb/image_raw')
@@ -430,13 +438,12 @@ class ColorLaneDetector(Node):
         band_bgr_native = self._resize_band(cv_image)
         cv2.cvtColor(band_bgr_native, hsv_code, dst=self._buf_hsv)
 
-        # Step 3: yellow needs all three HSV channels; black is exactly
-        # V <= 150 (H spans [0,179] and S spans [0,255] in 8-bit HSV, so
-        # both bounds of the original 3-channel inRange are tautologies).
+        # Yellow uses all HSV channels; road uses V <= road_max_value.
+        # Yellow takes priority over road when composing overlapping masks.
         cv2.inRange(self._buf_hsv, self.yellow_lower, self.yellow_upper,
                     dst=self._buf_yellow)
         cv2.extractChannel(self._buf_hsv, 2, dst=self._buf_v)
-        cv2.threshold(self._buf_v, 150, 255, cv2.THRESH_BINARY_INV,
+        cv2.threshold(self._buf_v, self.road_max_value, 255, cv2.THRESH_BINARY_INV,
                       dst=self._buf_black)
 
         if self.debug_telemetry:
