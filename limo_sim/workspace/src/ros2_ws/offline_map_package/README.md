@@ -233,3 +233,12 @@ The real CV profile preserves border road (1), interior road (5), boardwalk (4),
 and interior boardwalk (6). Road variants map to cost 0; boardwalk variants to 90. Yellow-line
 and remaining background points are discarded, not relabeled. The semantic
 mapper still accepts the full class set for the unchanged simulation CV profile.
+
+
+For slow manual mapping, `mapping_real.yaml` uses `minimum_travel_distance: 0.05`
+metres and `minimum_travel_heading: 0.05` radians (about 3 degrees). SLAM publishes
+its grid every 0.5 seconds, while the semantic mapper publishes at 4 Hz. These
+settings increase accepted scan density and map publication work compared with
+the 0.5 m / 0.5 rad SLAM defaults and the previous 2 s publication interval.
+Restart the mapping backend to apply them; restarting starts a new mapping session.
+They do not change camera FPS or the semantic evidence thresholds.

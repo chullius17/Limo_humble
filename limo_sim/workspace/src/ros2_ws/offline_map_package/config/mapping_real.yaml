@@ -21,7 +21,11 @@ slam_toolbox:
   scan_queue_size: 1
   throttle_scans: 1
   minimum_time_interval: 0.1
-  map_update_interval: 2.0
+  # Slow manual mapping: accept movement of one map cell or ~3 degrees.
+  minimum_travel_distance: 0.05
+  minimum_travel_heading: 0.05
+  # Publish new laser geometry twice per second; semantic output stays at 4 Hz.
+  map_update_interval: 0.5
   resolution: 0.05
   max_laser_range: 8.0
 
