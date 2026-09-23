@@ -37,8 +37,10 @@ def mapping(monkeypatch, profile='sim', **overrides):
             action.execute(context)
     # Inspect the actual launch inputs without starting processes or moving hardware.
     monkeypatch.setattr(module, 'Node', lambda **kwargs: kwargs)
-    # CV is an included launch; inspect the direct node actions here.
-    nodes = [node for node in module._launch_mapping(context) if isinstance(node, dict)]
+    actions = module._launch_mapping(context)
+    if overrides.get('start_cv', 'false') == 'false':
+        assert all(isinstance(action, dict) for action in actions), 'CV started implicitly'
+    nodes = [node for node in actions if isinstance(node, dict)]
     for node in nodes:
         parameters = evaluate_parameters(context, normalize_parameters(node['parameters']))
         node['values'] = {key: value for params in parameters for key, value in params.items()}

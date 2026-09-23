@@ -81,11 +81,13 @@ sensors and EKF already active:
 ros2 launch offline_map_package map_real.launch.py
 ~~~
 
-This uses 'mapping_real.yaml' and forces 'mode:=backend': computer vision, SLAM,
-and the mapper run with real time and 'base_link', without a robot-side window.
-If computer vision is already running separately, add 'start_cv:=false' to avoid
-starting it twice. On a PC, start
-only RViz and Save Map, connected to robot topics and service:
+This uses 'mapping_real.yaml' and forces 'mode:=backend': SLAM and the mapper
+run with real time and 'base_link', without a robot-side window. All shipped
+mapping profiles (real and simulation) have 'start_cv: false'. Start CV separately
+with 'ros2 launch cv_package cv_real.launch.py' on the robot, or
+'ros2 launch cv_package cv_sim.launch.py' in simulation. Explicit 'start_cv:=true'
+is still available when desired. On a PC, start only RViz and Save Map, connected
+to robot topics and service:
 
 ~~~bash
 ros2 launch offline_map_package desktop_offline.launch.py
@@ -225,3 +227,9 @@ The first admits brighter road pixels; the second admits pale yellow while
 preserving its hue range [15, 35] and value range [80, 255]. Yellow retains
 priority over road. These thresholds need validation under the robot's lighting:
 brighter non-road surfaces and pale yellow objects may also be included.
+
+
+The real CV profile publishes only road (class 1, cost 0) and boardwalk
+(class 4, cost 90), merging each class's interior/exterior variants. Yellow-line
+and remaining background points are discarded, not relabeled. The semantic
+mapper still accepts the full class set for the unchanged simulation CV profile.

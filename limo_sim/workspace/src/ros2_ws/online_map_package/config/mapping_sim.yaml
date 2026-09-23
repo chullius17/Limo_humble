@@ -2,7 +2,7 @@
 # Simulation: Gazebo clock, localization, CV and RViz on the PC.
 launch:
   use_sim_time: true
-  start_cv: true
+  start_cv: false
   start_maps: true
   start_amcl: true
   start_local_ctrl_map: true

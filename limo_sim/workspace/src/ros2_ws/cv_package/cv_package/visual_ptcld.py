@@ -148,6 +148,7 @@ class VisualPtcld(Node):
         self.declare_parameter('blue_radius_min_m', 0.15)
         self.declare_parameter('blue_radius_max_m', 0.25)
         self.declare_parameter('enable_boardwalk', True)
+        self.declare_parameter('road_boardwalk_only', False)
         self.declare_parameter('boardwalk_propagation_radius_m', 0.15)
 
         self.input_crop_y_min = float(
@@ -168,6 +169,10 @@ class VisualPtcld(Node):
             self.get_parameter('blue_radius_max_m').value)
         self.enable_boardwalk = bool(
             self.get_parameter('enable_boardwalk').value)
+        self.road_boardwalk_only = bool(
+            self.get_parameter('road_boardwalk_only').value)
+        if self.road_boardwalk_only and not self.enable_boardwalk:
+            raise ValueError('road_boardwalk_only requires enable_boardwalk')
         self.boardwalk_propagation_radius = float(
             self.get_parameter('boardwalk_propagation_radius_m').value)
         self.boardwalk_classifier = BoardwalkClassifier()
@@ -934,6 +939,16 @@ class VisualPtcld(Node):
                 self.boardwalk_propagation_radius,
                 self.LABEL_BLUE, self.LABEL_BACKGROUND, self.LABEL_BOARDWALK,
                 self.LABEL_INTERIOR_BOARDWALK)
+
+        # Background is needed as a candidate for boardwalk recognition.
+        # Filter only after classification: never promote unclassified points.
+        if self.road_boardwalk_only:
+            keep = np.isin(class_ids, (
+                self.LABEL_BLUE, self.LABEL_INTERIOR_BLUE,
+                self.LABEL_BOARDWALK, self.LABEL_INTERIOR_BOARDWALK))
+            bev_points, class_ids = bev_points[keep], class_ids[keep]
+            class_ids[class_ids == self.LABEL_INTERIOR_BLUE] = self.LABEL_BLUE
+            class_ids[class_ids == self.LABEL_INTERIOR_BOARDWALK] = self.LABEL_BOARDWALK
 
         # Downsample only the outgoing cloud. The full-resolution points above
         # remain available to both cKDTree passes. Classes use separate 2D

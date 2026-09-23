@@ -153,11 +153,13 @@ def _launch_online(context):
                 'odometry_frame': amcl['odom_frame_id'],
             }]))
     if settings['start_cv']:
+        cv_share = get_package_share_directory('cv_package')
+        cv_profile = 'cv_sim.yaml' if settings['use_sim_time'] else 'cv_real.yaml'
         actions.append(IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory('cv_package'),
-                'launch', 'cv.launch.py')),
+                cv_share, 'launch', 'cv.launch.py')),
             launch_arguments={
+                'config_file': os.path.join(cv_share, 'config', cv_profile),
                 'use_sim_time': str(settings['use_sim_time']).lower(),
                 'visual_ptcld_enable_telemetry': 'false',
             }.items(),

@@ -2,7 +2,7 @@
 # Simulation: Gazebo clock, mapping and GUI on the PC.
 launch:
   use_sim_time: true
-  start_cv: true
+  start_cv: false
   start_slam: true
   start_mapper: true
   start_rviz: true

@@ -61,7 +61,7 @@ def online(monkeypatch, profile='sim', **overrides):
     return nodes, includes
 
 
-def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
+def test_simulation_starts_maps_amcl_and_rviz_without_cv(monkeypatch):
     nodes, includes = online(monkeypatch)
     assert set(nodes) == {
         'complete_map_server', 'laser_map_server', 'cv_map_server',
@@ -69,12 +69,8 @@ def test_simulation_starts_cv_maps_amcl_and_rviz(monkeypatch):
     }
     assert all(node['values']['use_sim_time'] is True
                for node in nodes.values())
-    assert len(includes) == 2
+    assert len(includes) == 1
     include_arguments = [dict(action.launch_arguments) for action in includes]
-    assert {
-        'use_sim_time': 'true',
-        'visual_ptcld_enable_telemetry': 'false',
-    } in include_arguments
     amcl = next(values for values in include_arguments
                 if 'cv_voxel_size' in values)
     assert amcl['cv_voxel_size'] == '0.075'
@@ -207,3 +203,13 @@ def test_amcl_launch_passes_typed_cloud_parameters(monkeypatch):
     assert params['max_particles'] == 600
     assert params['cv_map_topic'].endswith('/cv_obstacle')
     assert params['map_topic'].endswith('/laser_map')
+
+
+@pytest.mark.parametrize('profile', ['real', 'sim'])
+def test_explicit_cv_opt_in_selects_matching_profile(monkeypatch, profile):
+    _, includes = online(monkeypatch, profile, start_cv='true')
+    cv = [dict(action.launch_arguments) for action in includes
+          if 'config_file' in dict(action.launch_arguments)]
+    assert len(cv) == 1
+    assert cv[0]['config_file'] == str(
+        PACKAGES / 'cv_package' / 'config' / ('cv_' + profile + '.yaml'))
