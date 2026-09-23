@@ -1,113 +1,99 @@
+"""Launch the CV pipeline from a simulation or real robot profile."""
+
+import os
+
+import yaml
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
-from launch.substitutions import LaunchConfiguration
-from launch_ros.parameter_descriptions import ParameterValue
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, RegisterEventHandler
 from launch.event_handlers import OnProcessStart
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
-    use_sim_time = ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool)
-    visual_ptcld_enable_telemetry = ParameterValue(
-        LaunchConfiguration('visual_ptcld_enable_telemetry'),
-        value_type=bool,
-    )
-    lane_node = Node(
-            package='cv_package',
-            executable='lane_detector',
-            name='lane_node',
-            output='screen',
-            emulate_tty=True,
-            parameters=[{
-                'use_sim_time': use_sim_time,
-                'enable_telemetry': False,
-                'rgb_topic': '/rgb/image_raw',
-                'roi_y_min': 0.1,
-                'roi_y_max': 1.0,
-                'opencv_num_threads': 1,
-            }]
-        )
+def _boolean(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.lower() in ('true', 'false'):
+        return value.lower() == 'true'
+    raise ValueError('Expected true or false, got {!r}'.format(value))
 
-    visual_ptcld_node = Node(
-        package='cv_package',
-        executable='visual_ptcld',
-        name='visual_ptcld',
-        output='screen',
-        emulate_tty=True,
+
+def _launch_cv(context):
+    config_file = os.path.expanduser(LaunchConfiguration('config_file').perform(context))
+    with open(config_file, encoding='utf-8') as stream:
+        profile = yaml.safe_load(stream)
+    for section in ('launch', 'lane_detector', 'depth_correction', 'visual_ptcld'):
+        if not isinstance(profile, dict) or not isinstance(profile.get(section), dict):
+            raise ValueError('{}: missing YAML mapping {!r}'.format(config_file, section))
+
+    settings = profile['launch']
+    use_sim_time = settings['use_sim_time']
+    start_rviz = settings['start_rviz']
+    override = LaunchConfiguration('use_sim_time').perform(context)
+    if override:
+        use_sim_time = _boolean(override)
+    override = LaunchConfiguration('start_rviz').perform(context)
+    if override:
+        start_rviz = _boolean(override)
+
+    lane_params = dict(profile['lane_detector'], use_sim_time=use_sim_time)
+    depth_params = dict(profile['depth_correction'], use_sim_time=use_sim_time)
+    cloud_params = dict(profile['visual_ptcld'], use_sim_time=use_sim_time)
+    override = LaunchConfiguration('visual_ptcld_enable_telemetry').perform(context)
+    if override:
+        cloud_params['enable_telemetry'] = _boolean(override)
+
+    lane_node = Node(
+        package='cv_package', executable='lane_detector',
+        name='lane_node', output='screen', emulate_tty=True,
+        parameters=[lane_params],
+    )
+    depth_node = Node(
+        package='cv_package', executable='depth_correction',
+        name='depth_correction', output='screen', emulate_tty=True,
+        parameters=[depth_params],
+    )
+    cloud_node = Node(
+        package='cv_package', executable='visual_ptcld',
+        name='visual_ptcld', output='screen', emulate_tty=True,
         additional_env={
             'OPENBLAS_NUM_THREADS': '1',
             'OMP_NUM_THREADS': '1',
             'MKL_NUM_THREADS': '1',
             'BLIS_NUM_THREADS': '1',
         },
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'opencv_num_threads': 1,
-            'enable_telemetry': visual_ptcld_enable_telemetry,
-            'roi_y_min': 0.0,
-            'roi_y_max': 1.0,
-            # Optional images are disabled; PointCloud2 is always published.
-            'enable_debug_publications': False,
-            'point_voxel_size': 5,
-            # Downsample all published BEV classes in class-aware 2 cm cells.
-            'pointcloud_voxel_size_m': 0.02,
-            # 7x7 keeps an approximately three-pixel exterior-road boundary.
-            'blue_boundary_kernel_size': 7,
-            'camera_info_topic': '/rgb/camera_info',
-            'depth_topic': (
-                'limo/cv_package/depth_correction/depth_corrected/raw'
-            ),
-            'fallback_depth_topic': '/depth_camera/depth/image_raw',
-            'corrected_depth_timeout_sec': 1.0,
-            'fallback_depth_width': 320,
-            'fallback_depth_height': 120,
-            'pointcloud_topic': 'limo/cv_package/visual_ptcld/points',
-            'input_crop_y_min': 0.5,
-            'pointcloud_min_depth_m': 0.1,
-            'pointcloud_max_depth_m': 2.5,
-            'blue_radius_min_m': 0.15,
-            'blue_radius_max_m': 0.25,
-            # Soft-obstacle points in the exterior-road distance band seed
-            # class 4 (boardwalk). Points beyond the maximum radius become 6
-            # (interior boardwalk) in the same first cKDTree pass.
-            # Restore exact metric point distances: blue neighbors, then seed neighbors.
-            'enable_boardwalk': True,
-            'boardwalk_propagation_radius_m': 0.15,
-            # OpenCV filters exterior road; cKDTree runs both point passes.
-            'telemetry_window_size': 60,
-            'telemetry_log_interval_frames': 30,
-        }]
+        parameters=[cloud_params],
     )
-
-    depth_correction_node = Node(
-        package='cv_package',
-        executable='depth_correction',
-        name='depth_correction',
-        output='screen',
-        emulate_tty=True,
-        parameters=[{
-            'use_sim_time': use_sim_time,
-            'input_topic': '/depth_camera/depth/image_raw',
-            'camera_info_topic': '/depth_camera/depth/camera_info',
-            'enable_telemetry': False,
-        }],
-    )
-
-    boundary_trigger = RegisterEventHandler(
-        OnProcessStart(
-            target_action=lane_node,
-            on_start=[visual_ptcld_node]
-        )
-    )
-
-    return LaunchDescription([
-        DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument(
-            'visual_ptcld_enable_telemetry',
-            default_value='true',
-            description='Enable visual_ptcld performance telemetry.',
-        ),
+    nodes = [
         lane_node,
-        depth_correction_node,
-        boundary_trigger,
+        depth_node,
+        RegisterEventHandler(OnProcessStart(
+            target_action=lane_node, on_start=[cloud_node],
+        )),
+    ]
+    if start_rviz:
+        config_dir = os.path.join(get_package_share_directory('cv_package'), 'config')
+        nodes.append(Node(
+            package='rviz2', executable='rviz2', name='cv_rviz',
+            output='screen',
+            arguments=['-d', os.path.join(config_dir, settings['rviz_config'])],
+            parameters=[{'use_sim_time': use_sim_time}],
+        ))
+    return nodes
+
+
+def generate_launch_description():
+    default_config = os.path.join(
+        get_package_share_directory('cv_package'), 'config', 'cv_real.yaml')
+    return LaunchDescription([
+        DeclareLaunchArgument('config_file', default_value=default_config),
+        DeclareLaunchArgument('use_sim_time', default_value='',
+                              description='Override the profile clock.'),
+        DeclareLaunchArgument('start_rviz', default_value='',
+                              description='Override the profile RViz setting.'),
+        DeclareLaunchArgument(
+            'visual_ptcld_enable_telemetry', default_value='',
+            description='Override the visual point cloud telemetry setting.'),
+        OpaqueFunction(function=_launch_cv),
     ])

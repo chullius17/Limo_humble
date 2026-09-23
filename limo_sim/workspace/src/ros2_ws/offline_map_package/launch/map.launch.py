@@ -116,7 +116,7 @@ def _launch_mapping(context):
 
 def generate_launch_description():
     default_config = os.path.join(
-        get_package_share_directory('offline_map_package'), 'config', 'mapping_sim.yaml')
+        get_package_share_directory('offline_map_package'), 'config', 'mapping_real.yaml')
     overrides = (
         'use_sim_time', 'start_cv', 'start_slam', 'start_mapper', 'start_rviz',
         'start_gui',

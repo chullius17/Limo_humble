@@ -38,21 +38,29 @@ def _optional_boolean(context, name, default):
     return default if value == '' else _boolean(value)
 
 
-def _launch_app(context, profile):
+def _launch_app(context, profile, use_sim_time_override=None):
     """Resolve overrides and compose the selected application's subsystems."""
     if profile not in ('sim', 'real'):
         raise ValueError('profile must be sim or real')
 
     simulation = profile == 'sim'
-    use_sim_time = str(simulation).lower()
+    use_sim_time = str(
+        simulation if use_sim_time_override is None
+        else use_sim_time_override
+    ).lower()
     start_gui = _optional_boolean(
         context, 'start_control_gui', simulation)
 
     map_topic = LaunchConfiguration('map_topic').perform(context)
+    online_map_arguments = {}
+    if use_sim_time_override is not None:
+        online_map_arguments['use_sim_time'] = use_sim_time
+
     return [
         _include(
             'online_map_package',
             'online_map_{}.launch.py'.format(profile),
+            online_map_arguments,
         ),
         _include(
             'traj_package',
@@ -76,7 +84,7 @@ def _launch_app(context, profile):
     ]
 
 
-def generate_app_launch_description(profile):
+def generate_app_launch_description(profile, use_sim_time=None):
     """Create the complete application launch for ``sim`` or ``real``."""
     if profile not in ('sim', 'real'):
         raise ValueError('profile must be sim or real')
@@ -88,5 +96,8 @@ def generate_app_launch_description(profile):
         DeclareLaunchArgument(
             'start_control_gui', default_value='',
             description='Override the profile default for the control GUI.'),
-        OpaqueFunction(function=_launch_app, args=[profile]),
+        OpaqueFunction(
+            function=_launch_app,
+            args=[profile, use_sim_time],
+        ),
     ])

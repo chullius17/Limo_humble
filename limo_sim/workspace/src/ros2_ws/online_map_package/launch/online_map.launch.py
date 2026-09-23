@@ -217,7 +217,7 @@ def _launch_online(context):
 def generate_launch_description():
     default_config = os.path.join(
         get_package_share_directory('online_map_package'),
-        'config', 'mapping_sim.yaml')
+        'config', 'mapping_real.yaml')
     launch_overrides = (
         'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
         'start_local_ctrl_map', 'start_rviz',
