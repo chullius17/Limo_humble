@@ -941,14 +941,12 @@ class VisualPtcld(Node):
                 self.LABEL_INTERIOR_BOARDWALK)
 
         # Background is needed as a candidate for boardwalk recognition.
-        # Filter only after classification: never promote unclassified points.
+        # Filter after classification, preserving boundary/interior class IDs.
         if self.road_boardwalk_only:
             keep = np.isin(class_ids, (
                 self.LABEL_BLUE, self.LABEL_INTERIOR_BLUE,
                 self.LABEL_BOARDWALK, self.LABEL_INTERIOR_BOARDWALK))
             bev_points, class_ids = bev_points[keep], class_ids[keep]
-            class_ids[class_ids == self.LABEL_INTERIOR_BLUE] = self.LABEL_BLUE
-            class_ids[class_ids == self.LABEL_INTERIOR_BOARDWALK] = self.LABEL_BOARDWALK
 
         # Downsample only the outgoing cloud. The full-resolution points above
         # remain available to both cKDTree passes. Classes use separate 2D

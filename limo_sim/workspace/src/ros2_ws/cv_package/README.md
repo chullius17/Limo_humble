@@ -14,8 +14,10 @@ ros2 launch cv_package cv_sim.launch.py
 
 | Class ID | Meaning | Mapping cost |
 | --- | --- | --- |
-| 1 | Road (previous IDs 1 and 5) | 0 |
-| 4 | Boardwalk (previous IDs 4 and 6) | 90 |
+| 1 | Border road | 0 |
+| 5 | Interior road | 0 |
+| 4 | Boardwalk | 90 |
+| 6 | Interior boardwalk | 90 |
 
 Yellow-line points (2) and unclassified background points (3) are excluded.
 They are never promoted to road or boardwalk. Filtering happens after metric

@@ -20,7 +20,7 @@ depth_correction:
   enable_telemetry: false
 
 visual_ptcld:
-  # Publish only road (1) and boardwalk (4); discard yellow/background.
+  # Keep road (1, 5) and boardwalk (4, 6); discard yellow/background.
   road_boardwalk_only: true
   opencv_num_threads: 1
   enable_telemetry: true

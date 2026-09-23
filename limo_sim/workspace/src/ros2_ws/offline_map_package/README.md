@@ -229,7 +229,7 @@ priority over road. These thresholds need validation under the robot's lighting:
 brighter non-road surfaces and pale yellow objects may also be included.
 
 
-The real CV profile publishes only road (class 1, cost 0) and boardwalk
-(class 4, cost 90), merging each class's interior/exterior variants. Yellow-line
+The real CV profile preserves border road (1), interior road (5), boardwalk (4),
+and interior boardwalk (6). Road variants map to cost 0; boardwalk variants to 90. Yellow-line
 and remaining background points are discarded, not relabeled. The semantic
 mapper still accepts the full class set for the unchanged simulation CV profile.

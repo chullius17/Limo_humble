@@ -302,7 +302,7 @@ def test_boardwalk_uses_boundary_points_before_metric_voxelization():
     assert result[-1]['boardwalk_final_count'] == 1
 
 
-def test_real_two_class_cloud_excludes_yellow_and_unclassified_background():
+def test_real_cloud_excludes_yellow_and_unclassified_background():
     detector, published = detector_stub()
     detector.road_boardwalk_only = True
     # x=0.125 stays background; x=0.25 becomes interior boardwalk.
@@ -314,20 +314,23 @@ def test_real_two_class_cloud_excludes_yellow_and_unclassified_background():
         np.array([[0, 1], [0, 2]]), 4, 1, header,
         interior_blue_points=np.array([[0, 3]]))
     points = np.frombuffer(published[0].data, dtype=VisualPtcld.CLOUD_DTYPE)
-    assert sorted(points['class_id'].tolist()) == [1, 1, 4]
+    assert sorted(points['class_id'].tolist()) == [1, 5, 6]
     assert set(points['x'].tolist()) == {0.0, 0.25, 0.375}
     stats = result[-1]
-    assert stats['published_blue_count'] == 2
-    assert stats['published_boardwalk_count'] == 1
-    for name in ('turquoise', 'background', 'interior_blue', 'interior_boardwalk'):
+    assert stats['published_blue_count'] == 1
+    assert stats['published_interior_blue_count'] == 1
+    assert stats['published_interior_boardwalk_count'] == 1
+    assert stats['published_boardwalk_count'] == 0
+    for name in ('turquoise', 'background'):
         assert stats['published_' + name + '_count'] == 0
 
 
-def test_real_two_class_cloud_keeps_recognized_boardwalk():
+def test_real_cloud_preserves_all_four_road_and_boardwalk_classes():
     detector, published = detector_stub()
     detector.road_boardwalk_only = True
     VisualPtcld.publish_pointcloud(
         detector, np.array([[0, 0]]), np.array([[0, 3]]),
-        np.array([[0, 1], [0, 2]]), 4, 1, Header(frame_id='camera'))
+        np.array([[0, 1], [0, 2]]), 4, 1, Header(frame_id='camera'),
+        interior_blue_points=np.array([[0, 3]]))
     points = np.frombuffer(published[0].data, dtype=VisualPtcld.CLOUD_DTYPE)
-    assert sorted(points['class_id'].tolist()) == [1, 4, 4]
+    assert sorted(points['class_id'].tolist()) == [1, 4, 5, 6]
