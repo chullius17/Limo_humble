@@ -8,6 +8,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    GroupAction,
     IncludeLaunchDescription,
     OpaqueFunction,
 )
@@ -108,6 +109,10 @@ def _launch_online(context):
     elif mode != 'profile':
         raise ValueError('mode must be profile, backend or desktop')
 
+    settings['cv_config'] = _override(
+        context, 'cv_config', settings.get(
+            'cv_config', 'cv_sim.yaml' if settings['use_sim_time'] else 'cv_real.yaml'), str)
+
     maps = dict(profile['map_servers'])
     maps['directory'] = _override(
         context, 'map_directory', maps.get('directory', ''), str)
@@ -154,16 +159,17 @@ def _launch_online(context):
             }]))
     if settings['start_cv']:
         cv_share = get_package_share_directory('cv_package')
-        cv_profile = 'cv_sim.yaml' if settings['use_sim_time'] else 'cv_real.yaml'
-        actions.append(IncludeLaunchDescription(
+        cv_profile = os.path.expanduser(settings['cv_config'])
+        actions.append(GroupAction(actions=[IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 cv_share, 'launch', 'cv.launch.py')),
             launch_arguments={
                 'config_file': os.path.join(cv_share, 'config', cv_profile),
+                'mode': 'backend',
                 'use_sim_time': str(settings['use_sim_time']).lower(),
                 'visual_ptcld_enable_telemetry': 'false',
             }.items(),
-        ))
+        )]))
     if settings['start_maps']:
         for name, suffix, topic in map_specs:
             actions.append(Node(
@@ -223,7 +229,7 @@ def generate_launch_description():
     launch_overrides = (
         'use_sim_time', 'start_cv', 'start_maps', 'start_amcl',
         'start_local_ctrl_map', 'start_rviz',
-        'rviz_config', 'fixed_frame', 'map_directory', 'map_name',
+        'rviz_config', 'fixed_frame', 'cv_config', 'map_directory', 'map_name',
         'local_map_maximum_points',
     )
     return LaunchDescription([

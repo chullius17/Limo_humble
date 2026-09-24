@@ -47,6 +47,17 @@ def _launch_cv(context):
     elif mode != 'profile':
         raise ValueError('mode must be profile, backend or desktop')
 
+    detector = settings.get('lane_detector', 'color')
+    detectors = {'color': 'lane_detector', 'waterfall': 'lane_detector_waterfall'}
+    if detector not in detectors:
+        raise ValueError('launch.lane_detector must be color or waterfall')
+    lane_remappings = []
+    if detector == 'waterfall':
+        # Keep the pipeline's label contract; standalone/debug topics stay distinct.
+        lane_remappings.append((
+            'limo/cv_package/detection/lane_waterfall_labels/raw',
+            'limo/cv_package/detection/lane_labels/raw',
+        ))
     lane_params = dict(profile['lane_detector'], use_sim_time=use_sim_time)
     depth_params = dict(profile['depth_correction'], use_sim_time=use_sim_time)
     cloud_params = dict(profile['visual_ptcld'], use_sim_time=use_sim_time)
@@ -55,9 +66,9 @@ def _launch_cv(context):
         cloud_params['enable_telemetry'] = _boolean(override)
 
     lane_node = Node(
-        package='cv_package', executable='lane_detector',
+        package='cv_package', executable=detectors[detector],
         name='lane_node', output='screen', emulate_tty=True,
-        parameters=[lane_params],
+        parameters=[lane_params], remappings=lane_remappings,
     )
     depth_node = Node(
         package='cv_package', executable='depth_correction',

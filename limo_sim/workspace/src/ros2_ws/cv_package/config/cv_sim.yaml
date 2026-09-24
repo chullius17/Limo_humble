@@ -1,5 +1,6 @@
 # Read by cv.launch.py; this is not a ROS --params-file.
 launch:
+  lane_detector: color
   use_sim_time: true
   start_rviz: false
   rviz_config: cv_visual.rviz

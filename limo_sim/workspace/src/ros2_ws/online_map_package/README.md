@@ -121,7 +121,11 @@ global-localization service. Do not start SLAM concurrently if it publishes the
 same TF. The launch starts localization, map server, and optional RViz. CV must be
 started separately for both real and simulation profiles, using
 `ros2 launch cv_package cv_real.launch.py` or `cv_sim.launch.py`, respectively.
-An explicit `start_cv:=true` opts into starting CV with the matching profile. The
+An explicit `start_cv:=true` opts into starting CV with the matching profile:
+waterfall for real, HSV color for simulation. `launch.cv_config` in the mapping
+YAML selects this independently of `use_sim_time`; `cv_config:=/path/to/profile.yaml`
+provides an override. This also applies to the `user_package` application launches.
+The detector label remap is handled inside CV; the cloud topic remains unchanged. The
 temporal semantic pipeline directly uses 'local_ctrl_map', with 'local_grid' as
 the costmap support module and 'semantic_memory' as temporal memory.
 

@@ -1,4 +1,4 @@
-"""Start the CV pipeline on the LIMO, without desktop clients."""
+"""Start the waterfall CV pipeline on the LIMO, without desktop clients."""
 
 import os
 

@@ -125,3 +125,27 @@ def test_wrappers_select_profile_and_role(filename, profile, mode):
 def test_invalid_launch_settings_fail(monkeypatch, overrides):
     with pytest.raises(ValueError):
         mapping(monkeypatch, **overrides)
+
+
+@pytest.mark.parametrize('profile,clock', [('real', 'false'), ('sim', 'true'),
+                                          ('real', 'true'), ('sim', 'false')])
+def test_cv_opt_in_keeps_profile_independent_of_clock(monkeypatch, profile, clock):
+    module = load_launch('map.launch.py')
+    context = LaunchContext()
+    context.launch_configurations.update({
+        'config_file': str(PACKAGE / 'config' / ('mapping_' + profile + '.yaml')),
+        'start_cv': 'true', 'use_sim_time': clock,
+        'start_slam': 'false', 'start_mapper': 'false',
+        'start_rviz': 'false', 'start_gui': 'false',
+    })
+    for action in module.generate_launch_description().entities:
+        if isinstance(action, DeclareLaunchArgument):
+            action.execute(context)
+    monkeypatch.setattr(module, 'GroupAction', lambda actions: actions)
+    actions = module._launch_mapping(context)
+    assert len(actions) == 1
+    args = dict(actions[0][0].launch_arguments)
+    assert args['config_file'] == str(
+        PACKAGE.parent / 'cv_package' / 'config' / ('cv_' + profile + '.yaml'))
+    assert args['use_sim_time'] == clock
+    assert args['mode'] == 'backend'

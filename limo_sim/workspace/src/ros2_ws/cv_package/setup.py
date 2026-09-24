@@ -27,6 +27,8 @@ setup(
     entry_points={
         'console_scripts': [
             'lane_detector = cv_package.lane_detector:main',
+            'lane_detector_binary = cv_package.lane_detector_binary:main',
+            'lane_detector_waterfall = cv_package.lane_detector_waterfall:main',
             'visual_ptcld = cv_package.visual_ptcld:main',
             'depth_correction = cv_package.depth_correction:main',
         ],

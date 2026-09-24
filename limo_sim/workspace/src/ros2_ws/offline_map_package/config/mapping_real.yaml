@@ -3,6 +3,7 @@
 launch:
   use_sim_time: false
   start_cv: false
+  cv_config: cv_real.yaml  # Profile identity is independent of the clock.
   start_slam: true
   start_mapper: true
   start_rviz: false

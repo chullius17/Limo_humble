@@ -44,11 +44,14 @@ def online(monkeypatch, profile='sim', **overrides):
         if isinstance(action, DeclareLaunchArgument):
             action.execute(context)
     monkeypatch.setattr(module, 'Node', lambda **kwargs: kwargs)
+    monkeypatch.setattr(module, 'GroupAction', lambda actions: actions)
     actions = module._launch_online(context)
     nodes = {}
     includes = []
     for action in actions:
-        if isinstance(action, dict):
+        if isinstance(action, list):
+            includes.extend(action)
+        elif isinstance(action, dict):
             parameters = evaluate_parameters(
                 context, normalize_parameters(action['parameters']))
             action['values'] = {
@@ -213,3 +216,20 @@ def test_explicit_cv_opt_in_selects_matching_profile(monkeypatch, profile):
     assert len(cv) == 1
     assert cv[0]['config_file'] == str(
         PACKAGES / 'cv_package' / 'config' / ('cv_' + profile + '.yaml'))
+
+
+@pytest.mark.parametrize('profile,clock', [('sim', 'false'), ('real', 'true')])
+def test_cv_profile_identity_survives_clock_override(monkeypatch, profile, clock):
+    _, includes = online(monkeypatch, profile, start_cv='true', use_sim_time=clock)
+    args = next(dict(action.launch_arguments) for action in includes
+                if 'config_file' in dict(action.launch_arguments))
+    assert args['config_file'].endswith('/cv_' + profile + '.yaml')
+    assert args['use_sim_time'] == clock
+    assert args['mode'] == 'backend'
+
+
+def test_cv_config_override_reaches_include(monkeypatch):
+    _, includes = online(monkeypatch, 'real', start_cv='true', cv_config='/tmp/custom_cv.yaml')
+    args = next(dict(action.launch_arguments) for action in includes
+                if 'config_file' in dict(action.launch_arguments))
+    assert args['config_file'] == '/tmp/custom_cv.yaml'

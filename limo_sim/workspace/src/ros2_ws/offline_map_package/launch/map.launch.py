@@ -46,7 +46,7 @@ def _launch_mapping(context):
             'start_rviz', 'start_gui'):
         override = LaunchConfiguration(name).perform(context)
         settings[name] = _boolean(override if override else settings[name])
-    for name in ('rviz_config', 'fixed_frame'):
+    for name in ('rviz_config', 'fixed_frame', 'cv_config'):
         override = LaunchConfiguration(name).perform(context)
         if override:
             settings[name] = override
@@ -78,7 +78,8 @@ def _launch_mapping(context):
     nodes = []
     if settings['start_cv']:
         cv_share = get_package_share_directory('cv_package')
-        cv_profile = 'cv_sim.yaml' if settings['use_sim_time'] else 'cv_real.yaml'
+        cv_profile = os.path.expanduser(settings.get(
+            'cv_config', 'cv_sim.yaml' if settings['use_sim_time'] else 'cv_real.yaml'))
         nodes.append(GroupAction(actions=[IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 cv_share, 'launch', 'cv.launch.py')),
@@ -124,7 +125,7 @@ def generate_launch_description():
     overrides = (
         'use_sim_time', 'start_cv', 'start_slam', 'start_mapper', 'start_rviz',
         'start_gui',
-        'rviz_config', 'fixed_frame', 'pose_source', 'trajectory_id',
+        'rviz_config', 'fixed_frame', 'cv_config', 'pose_source', 'trajectory_id',
         'resolution', 'save_directory',
     )
     return LaunchDescription([

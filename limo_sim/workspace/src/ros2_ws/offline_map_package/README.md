@@ -221,12 +221,12 @@ its previous class. Mixed-class cells can require more observations. This trades
 some temporal stability for responsiveness; it does not increase camera FPS or
 fill cells without observations. The simulation profile keeps its original tuning.
 
-`cv_real.yaml` sets `road_max_value: 180` (default 150) and
-`yellow_min_saturation: 50` (default 80). Both are startup parameters in [0, 255].
-The first admits brighter road pixels; the second admits pale yellow while
-preserving its hue range [15, 35] and value range [80, 255]. Yellow retains
-priority over road. These thresholds need validation under the robot's lighting:
-brighter non-road surfaces and pale yellow objects may also be included.
+`cv_real.yaml` now selects the waterfall detector, with seed/gradient thresholds
+and optional seed erosion/barrier dilation. Its label output is remapped to the
+common topic consumed by `visual_ptcld`, preserving the semantic cloud topic.
+The simulation profile retains the HSV detector. `launch.cv_config` in the mapping
+profile selects `cv_real.yaml` or `cv_sim.yaml` independently of the clock;
+`cv_config:=/path/to/profile.yaml` can override it when `start_cv:=true`.
 
 
 The real CV profile preserves border road (1), interior road (5), boardwalk (4),

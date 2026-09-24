@@ -1,5 +1,6 @@
 # Read by cv.launch.py; this is not a ROS --params-file.
 launch:
+  lane_detector: waterfall
   use_sim_time: false
   start_rviz: false
   rviz_config: cv_visual.rviz
@@ -7,9 +8,14 @@ launch:
 lane_detector:
   enable_telemetry: false
   rgb_topic: /rgb/image_raw
-  # Brighter asphalt and pale yellow under strong illumination (HSV 0..255).
-  road_max_value: 180
-  yellow_min_saturation: 50
+  # Seeded growth bounded by scaled Sobel gradients.
+  seed_max_gray: 80
+  gradient_threshold: 15.0
+  seed_y_min: 0.0
+  seed_erosion_iterations: 0
+  barrier_dilation_iterations: 1
+  debug_jpeg_quality: 85
+  debug_probe_interval_frames: 30
   roi_y_min: 0.1
   roi_y_max: 1.0
   opencv_num_threads: 1
@@ -40,7 +46,7 @@ visual_ptcld:
   input_crop_y_min: 0.5
   pointcloud_min_depth_m: 0.1
   pointcloud_max_depth_m: 2.5
-  blue_radius_min_m: 0.06
+  blue_radius_min_m: 0.04
   blue_radius_max_m: 0.25
   enable_boardwalk: true
   boardwalk_propagation_radius_m: 0.15
