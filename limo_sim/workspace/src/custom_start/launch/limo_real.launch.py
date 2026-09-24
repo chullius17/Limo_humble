@@ -138,11 +138,25 @@ def generate_launch_description():
         package='robot_localization',
         executable='ekf_node',
         name='ekf_filter_node',
+        # Foxy otherwise scopes the inline parameters to /**, which loses
+        # to the node-specific ekf.yaml values regardless of file order.
+        namespace='/',
         output='screen',
         parameters=[
             os.path.join(custom_start_share, 'config', 'ekf.yaml'),
             {
                 'use_sim_time': False,
+                # The physical chassis reports zero odometry yaw rate even
+                # during turns. Fuse yaw rate from /limo/imu only, avoiding
+                # conflicting angular-velocity measurements in the EKF.
+                # Override here because ekf.yaml is also used in simulation.
+                'odom0_config': [
+                    True, True, False,     # x, y, z
+                    False, False, True,    # roll, pitch, yaw
+                    True, True, False,     # vx, vy, vz
+                    False, False, False,   # vroll, vpitch, vyaw
+                    False, False, False,   # ax, ay, az
+                ],
             },
         ],
     )

@@ -80,6 +80,8 @@ install(DIRECTORY launch params startup config
     DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
+    find_package(ament_cmake_gtest REQUIRED)
+    ament_add_gtest(test_scan_ranges test/test_scan_ranges.cpp)
     find_package(ament_lint_auto REQUIRED)
     ament_lint_auto_find_test_dependencies()
 endif()

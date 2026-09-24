@@ -14,6 +14,7 @@
 #endif
 
 #include "src/CYdLidar.h"
+#include "scan_ranges.hpp"
 #include <math.h>
 #include <chrono>
 #include <iostream>
@@ -240,6 +241,12 @@ int main(int argc, char *argv[]) {
         }
         //file << "i:" << i << ",a:" << p.angle << ",d:" << p.range << ",p:" << p.intensity << std::endl;
       }
+      // Foxy Karto can match finite zero readings as points at the sensor
+      // origin. Honor the configured invalid-range representation, including
+      // angular bins that received no SDK sample.
+      ydlidar_ros2_driver::normalizeInvalidRanges(
+        scan_msg->ranges, scan_msg->range_min, scan_msg->range_max,
+        invalid_range_is_inf);
       laser_pub->publish(*scan_msg);
     } 
     else 

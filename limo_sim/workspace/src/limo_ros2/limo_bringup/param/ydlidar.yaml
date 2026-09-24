@@ -8,7 +8,8 @@ ydlidar_ros2_driver_node:
     device_type: 0
     sample_rate: 3
     abnormal_check_count: 4
-    resolution_fixed: true
+    # Keep scan geometry constant for SLAM Toolbox / Karto.
+    fixed_resolution: true
     reversion: true
     inverted: true
     auto_reconnect: true
@@ -20,4 +21,5 @@ ydlidar_ros2_driver_node:
     range_max: 12.0
     range_min: 0.01
     frequency: 8.0
-    invalid_range_is_inf: false
+    # Exclude missing returns from SLAM matching instead of creating zero-range points.
+    invalid_range_is_inf: true
