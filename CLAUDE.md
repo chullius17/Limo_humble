@@ -82,7 +82,7 @@ Data flow (base pipeline; AI pipeline is the same with `ai_` names):
 
 Node-to-node topics are namespaced `/limo/<package>/<node>/<signal>`; mission control and health signals live under `/limo/mission/*` (`enable`, `pause`, `goals`, `paths`, `state`, `diagnostics`, `health/astar`, `health/controller`).
 
-Artifacts are written relative to a project root discovered at runtime by walking parents for a `src/ros2_ws` directory (`find_project_root` in `map_saver.py`, `limo_rviz.launch.py`, `control_viz.py`) — this is why the workspace layout must keep `src/ros2_ws` in place:
+Artifacts are written relative to a project root discovered at runtime by walking parents for a `src/ros2_ws` directory (for example in `limo_rviz.launch.py` and `control_viz.py`) — this is why the workspace layout must keep `src/ros2_ws` in place:
 
 - maps: `limo_sim/workspace/ros2_maps/base_pipeline/{base_cv,ai_cv}/limo_map.{pgm,yaml}` (also what `limo_rviz`'s map_server loads)
 - control plots: `control_logs/` under the same `{base_cv,ai_cv}` split, selected by the `ai_mode` launch argument threaded through `limo_app.launch.py` → `user.launch.py` → `control_viz`.

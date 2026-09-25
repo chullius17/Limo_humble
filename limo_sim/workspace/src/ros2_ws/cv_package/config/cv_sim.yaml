@@ -22,7 +22,7 @@ visual_ptcld:
   enable_telemetry: true
   roi_y_min: 0.0
   roi_y_max: 1.0
-  enable_debug_publications: false
+  enable_debug_publications: true
   point_voxel_size: 5
   pointcloud_voxel_size_m: 0.02
   blue_boundary_kernel_size: 7
