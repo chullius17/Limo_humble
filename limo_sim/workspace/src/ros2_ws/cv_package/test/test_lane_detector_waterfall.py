@@ -58,20 +58,31 @@ def test_growth_reaches_brighter_pixels_across_a_gentle_ramp(detector):
     assert detector.telemetry_stats['road_percent'][-1] == 100
 
 
-def test_strong_edge_stops_growth_and_dilation_excludes_seeds(detector):
+def test_strong_edge_stops_growth_without_becoming_thicker(detector):
     frame = np.full((240, 320), 40, np.uint8)
     frame[:, 160:] = 200
-    labels = process_gray(detector, frame, barrier_dilation_iterations=0)
+    labels = process_gray(detector, frame, barrier_closing_iterations=0)
     assert np.all(labels[12:, :159] == 1)
     assert np.all(labels[12:, 159:] == 3)
     assert np.all(detector._buf_barriers[:, 159:161] == 255)
     assert not np.any(detector._buf_seeds[:, 159:])
     old_barriers = detector._buf_barriers.copy()
-    labels = process_gray(detector, frame, barrier_dilation_iterations=1)
-    assert np.all(detector._buf_barriers[:, 158:162] == 255)
-    assert np.count_nonzero(detector._buf_barriers) > np.count_nonzero(old_barriers)
+    labels = process_gray(detector, frame, barrier_closing_iterations=1)
+    np.testing.assert_array_equal(detector._buf_barriers, old_barriers)
     assert not np.any(detector._buf_seeds[detector._buf_barriers != 0])
-    assert np.all(labels[12:, 158:] == 3)
+    assert np.all(labels[12:, 159:] == 3)
+
+
+def test_closing_fills_a_small_barrier_gap_without_thickening(detector):
+    detector._resize_band(np.zeros((240, 320), np.uint8))
+    detector._buf_barriers.fill(0)
+    detector._buf_barriers[:, 100] = 255
+    detector._buf_barriers[50, 100] = 0
+
+    detector._close_barrier_gaps(1)
+
+    assert np.all(detector._buf_barriers[:, 100] == 255)
+    assert cv2.countNonZero(detector._buf_barriers) == detector._buf_barriers.shape[0]
 
 
 def test_seed_band_restricts_starts_without_restricting_growth(detector):
@@ -175,8 +186,8 @@ def test_debug_colors_subscriber_gating_and_frame_ownership(
     ('seed_max_gray', -1), ('seed_max_gray', 256),
     ('gradient_threshold', -1.0), ('gradient_threshold', float('nan')),
     ('gradient_threshold', float('inf')), ('seed_y_min', 1.0),
-    ('seed_y_min', -0.1), ('barrier_dilation_iterations', -1),
-    ('barrier_dilation_iterations', 6), ('debug_jpeg_quality', 101),
+    ('seed_y_min', -0.1), ('barrier_closing_iterations', -1),
+    ('barrier_closing_iterations', 6), ('debug_jpeg_quality', 101),
     ('seed_erosion_iterations', -1), ('seed_erosion_iterations', 6),
 ])
 def test_invalid_parameter_batch_is_atomic(detector, name, value):

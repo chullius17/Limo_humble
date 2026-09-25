@@ -233,27 +233,33 @@ def test_reset_and_save_exact_costs(node, tmp_path):
     assert node.pending is None
 
 
-def test_save_median_removes_isolated_black_without_changing_live_map(
-        node, tmp_path):
+@pytest.mark.parametrize('kernel', [1, 3])
+@pytest.mark.parametrize('label,cost', [(2, 60), (3, 30), (4, 90)])
+def test_save_median_removes_isolated_cv_without_changing_live_or_laser(
+        node, tmp_path, kernel, label, cost):
     laser = np.full((3, 3), -1, dtype=np.int8)
     laser[0, 0] = 100
     node.map_callback(reference_map(laser))
-    node.grid.update(np.array([[1.1, 1.1]]), np.array([4]))
+    node.grid.update(np.array([[1.1, 1.1]]), np.array([label]))
     node.config['save_directory'] = str(tmp_path)
+    node.config['save_median_kernel'] = kernel
 
     live_before = node.grid.render(node.reference_geometry)[2]
-    assert live_before[1, 1] == 90
+    assert live_before[1, 1] == cost
     result = node.save_map(Trigger.Request(), Trigger.Response())
     assert result.success, result.message
 
     saved = read_raw_costs(tmp_path / 'limo_map_complete.pgm')
-    assert saved[1, 1] == -1
+    assert saved[1, 1] == (-1 if kernel == 3 else cost)
+    assert saved[2, 0] == 100  # Laser obstacle survives the semantic filter.
+    cv_saved = read_trinary_costs(tmp_path / 'limo_map_cv_obstacle.pgm')
+    assert cv_saved[1, 1] == (-1 if kernel == 3 else (100 if cost >= 40 else 0))
     assert (tmp_path / 'limo_map_complete.yaml').is_file()
     laser = read_raw_costs(tmp_path / 'limo_map_laser.pgm')
     assert laser[2, 0] == 100  # PGM rows are vertically flipped.
     assert np.count_nonzero(laser == 100) == 1
     assert not list(tmp_path.glob('*.npz'))
-    assert node.grid.render(node.reference_geometry)[2][1, 1] == 90
+    np.testing.assert_array_equal(node.grid.render(node.reference_geometry)[2], live_before)
 
 
 def test_complete_map_precedence():

@@ -228,10 +228,7 @@ def test_cloud_rejects_bad_schema_and_truncated_buffer():
         read_class_cloud(msg)
 
 
-@pytest.mark.parametrize('old_class,new_class,cost', [
-    (4, 3, 30), (4, 1, 0), (4, 5, 0), (3, 4, 90), (5, 4, 90),
-])
-def test_real_profile_revises_saturated_cells_in_two_observations(old_class, new_class, cost):
+def real_mapper():
     from pathlib import Path
     import yaml
 
@@ -239,15 +236,76 @@ def test_real_profile_revises_saturated_cells_in_two_observations(old_class, new
                               'mapping_real.yaml').read_text())['semantic_mapper']
     grid = SemanticGrid(
         hit=profile['hit_log_odds'], miss=profile['miss_log_odds'],
-        limit=profile['log_odds_limit'], threshold=profile['min_evidence'])
+        limit=profile['log_odds_limit'], threshold=profile['min_evidence'],
+        free_confirmations=profile['free_confirmations'])
     grid.set_pose((0, 0), (0.0, 0.0, 0.0))
+    return grid
+
+
+@pytest.mark.parametrize('old_class,new_class,cost,observations', [
+    (4, 3, 30, 2), (4, 1, 0, 5), (4, 5, 0, 5), (3, 4, 90, 2), (5, 4, 90, 2),
+])
+def test_real_profile_delays_clearing_but_keeps_class_changes_fast(
+        old_class, new_class, cost, observations):
+    grid = real_mapper()
     xy = np.array([[0.01, 0.01], [0.11, 0.01]])
     for _ in range(30):
         grid.update(xy, np.full(2, old_class))
     old_map = grid.render()[2].copy()
-    grid.update(xy[:1], np.array([new_class]))
-    np.testing.assert_array_equal(grid.render()[2], old_map)
+    for _ in range(observations - 1):
+        grid.update(xy[:1], np.array([new_class]))
+        np.testing.assert_array_equal(grid.render()[2], old_map)
     grid.update(xy[:1], np.array([new_class]))
     expected = old_map.copy()
     expected[0, 0] = cost
     np.testing.assert_array_equal(grid.render()[2], expected)
+
+
+@pytest.mark.parametrize('obstacle_class,cost', [(2, 60), (3, 30), (4, 90), (6, 90)])
+@pytest.mark.parametrize('road_class', [1, 5])
+def test_real_profile_preserves_new_obstacles_through_short_free_bursts(
+        obstacle_class, cost, road_class):
+    grid = real_mapper()
+    xy = np.array([[0.01, 0.01]])
+    obstacle, road = np.array([obstacle_class]), np.array([road_class])
+    grid.update(xy, obstacle)
+    assert grid.render()[2][0, 0] == cost
+    for _ in range(3):
+        grid.update(xy, road)
+        assert grid.render()[2][0, 0] == cost
+    # Empty clouds and observations elsewhere must not advance this cell's count.
+    grid.update(np.empty((0, 2)), np.empty(0, dtype=np.uint8))
+    grid.update(xy + [0.2, 0.0], road)
+    assert grid.render()[2][0, 0] == cost
+    # Seeing the obstacle again resets the free confirmation sequence.
+    grid.update(xy, obstacle)
+    for _ in range(3):
+        grid.update(xy, road)
+        assert grid.render()[2][0, 0] == cost
+    for _ in range(2):
+        grid.update(xy, road)
+    assert grid.render()[2][0, 0] == 0
+    assert grid.render()[1][:, 0, 0].tolist() == [0, 0, 0]
+
+
+def test_real_profile_new_free_space_and_dense_cloud_confirmation():
+    grid = real_mapper()
+    xy = np.array([[0.01, 0.01], [0.11, 0.01]])
+    grid.update(xy, np.array([4, 1]))
+    assert grid.render()[2].tolist() == [[90, -1, 0]]
+    # Thousands of road points in one cloud still constitute one confirmation.
+    grid.update(np.repeat(xy[:1], 1000, axis=0), np.full(1000, 5))
+    assert grid.render()[2][0, 0] == 90
+    grid.update(xy[:1], np.array([1]))
+    grid.update(xy[:1], np.array([5]))
+    assert grid.render()[2][0, 0] == 90
+    grid.update(xy[:1], np.array([1]))
+    # Evidence now starts decreasing; eventually the cell is explicitly free.
+    grid.update(xy[:1], np.array([5]))
+    assert grid.render()[2][0, 0] == 0
+
+
+@pytest.mark.parametrize('value', [0, -1, 256, 1.5, True])
+def test_free_confirmations_reject_invalid_values(value):
+    with pytest.raises(ValueError, match='free_confirmations'):
+        SemanticGrid(free_confirmations=value)

@@ -47,13 +47,17 @@ semantic_mapper:
   hit_log_odds: 0.85
   miss_log_odds: 0.4
   # Low camera FPS: switch a saturated class after 2 consistent pure-class
-  # observations instead of 5, while retaining it after one contradictory frame.
+  # observations instead of 5. Clearing to road has extra protection below.
   log_odds_limit: 1.0
   min_evidence: 0.5
+  # Require this many consecutive road-majority observations of an occupied
+  # cell before starting to reduce its evidence. 1 disables the extra delay.
+  free_confirmations: 4
   publish_rate_hz: 4.0
   save_directory: ''  # ros2_maps/semantic in the workspace running the mapper.
   save_map_name: limo_map
-  save_median_kernel: 3
+  # Filter the CV snapshot only when saving; live evidence and laser are unchanged.
+  save_median_kernel: 3  # Odd kernel: 1 disables, 5 removes larger speckles.
   tf_wait_sec: 0.5
   submap_max_age_sec: 2.0
   max_input_points: 100000

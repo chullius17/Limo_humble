@@ -158,9 +158,10 @@ ROI parameters, camera encodings, QoS and input headers as the other detectors.
 On the grayscale ROI it computes Sobel 3x3 with scale 1/8 and replicated borders.
 The gradient magnitude is `abs(Gx) + abs(Gy)` without a square root. The scale
 makes an axis-aligned ramp of one gray level per pixel produce gradient 1.
-Pixels with gradient strictly above `gradient_threshold` are barriers. Optional
-3x3 dilation expands these barriers before seeds are selected (one iteration
-by default; set `barrier_dilation_iterations=0` to disable).
+Pixels with gradient strictly above `gradient_threshold` are barriers. An optional
+3x3 morphological closing bridges small holes and discontinuities without leaving
+the barriers thicker (one iteration by default; set
+`barrier_closing_iterations=0` to disable).
 
 Seeds are pixels with `gray <= seed_max_gray`, outside the barriers and inside
 the allowed seed band. Optional 3x3 square erosion removes small or thin seed
@@ -180,7 +181,7 @@ region growth on a barrier mask, not OpenCV watershed.
 | `seed_max_gray` | `80` | Maximum seed intensity, integer [0, 255] |
 | `gradient_threshold` | `15.0` | Barrier threshold in scaled Sobel L1 units, finite [0, 255] |
 | `seed_y_min` | `0.0` | First seed row as a fraction of the ROI height, [0, 1); e.g. 0.7 restricts seeds to the bottom 30%, without limiting growth |
-| `barrier_dilation_iterations` | `1` | Number of 3x3 barrier dilations, integer [0, 5] |
+| `barrier_closing_iterations` | `1` | Number of 3x3 barrier closings, integer [0, 5]; 0 disables gap filling |
 | `seed_erosion_iterations` | `0` | Number of 3x3 seed erosions, integer [0, 5]; 0 disables filtering |
 | `debug_jpeg_quality` | `85` | JPEG quality [1, 100] |
 | `enable_telemetry` | `true` | Enable timing and segmentation statistics |
@@ -189,7 +190,7 @@ region growth on a barrier mask, not OpenCV watershed.
 `debug_probe_interval_frames` (default 30) are startup-only, as in the binary node.
 The seed and gradient defaults are initial tuning values. Incomplete barriers
 can let a region spread through a gap; dark objects can create their own seeds.
-Dilation and restricting the seed band can help, but should be tuned on camera data.
+Closing and restricting the seed band can help, but should be tuned on camera data.
 
 | Output topic (under `/limo/cv_package/detection/`) | Format |
 | --- | --- |
@@ -198,7 +199,7 @@ Dilation and restricting the seed band can help, but should be tuned on camera d
 | `lane_waterfall_overlay/compressed` | JPEG: blue road overlay on camera image |
 | `lane_waterfall_seeds_overlay/compressed` | JPEG: red barriers and green seeds on camera image |
 
-The dedicated seed overlay displays the actual barriers after dilation and only
+The dedicated seed overlay displays the actual barriers after closing and only
 surviving seeds after erosion. Red and green replace those pixels for clear visibility; all
 other pixels show the original camera crop, including outside the ROI. The blue
 road overlay is available separately. Debug images are produced only when their

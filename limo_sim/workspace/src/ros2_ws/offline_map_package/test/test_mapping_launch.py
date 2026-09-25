@@ -59,11 +59,19 @@ def test_simulation_preserves_mapping_parameters(monkeypatch):
     assert mapper['publish_rate_hz'] == 4.0
 
 
+@pytest.mark.parametrize('profile,kernel', [('real', 3), ('sim', 1)])
+@pytest.mark.parametrize('clock', ['true', 'false'])
+def test_save_filter_follows_profile_not_clock(monkeypatch, profile, kernel, clock):
+    nodes = mapping(monkeypatch, profile, use_sim_time=clock)
+    assert nodes['semantic_mapper']['values']['save_median_kernel'] == kernel
+
+
 def test_real_profile_is_headless_with_wall_clock(monkeypatch):
     nodes = mapping(monkeypatch, 'real')
     assert set(nodes) == {'slam_toolbox', 'semantic_mapper'}
     assert all(node['values']['use_sim_time'] is False for node in nodes.values())
     assert nodes['slam_toolbox']['values']['base_frame'] == 'base_link'
+    assert nodes['semantic_mapper']['values']['free_confirmations'] == 4
 
 
 @pytest.mark.parametrize('profile,sim_time', [('sim', True), ('real', False)])

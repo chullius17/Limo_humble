@@ -55,7 +55,7 @@ def test_real_profile_selects_waterfall_and_connects_to_cloud(monkeypatch):
         'limo/cv_package/detection/lane_labels/raw')]
     params = lane['parameters'][0]
     assert params['seed_erosion_iterations'] == 0
-    assert params['barrier_dilation_iterations'] == 1
+    assert params['barrier_closing_iterations'] == 1
     assert params['gradient_threshold'] == 15.0
     assert 'road_max_value' not in params and 'yellow_min_saturation' not in params
     assert all(node['parameters'][0]['use_sim_time'] is False for node in nodes.values())

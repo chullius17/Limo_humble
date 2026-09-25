@@ -21,6 +21,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from offline_map_package.map_filters import median_saved_semantic
 from offline_map_package.semantic_grid import (
     CLASS_NAMES, Geometry, SemanticGrid,
     read_class_cloud, transform_xy,
@@ -135,11 +136,12 @@ class SemanticMapper(Node):
             'resolution': 0.05, 'turquoise_cost': 60, 'white_cost': 30,
             'boardwalk_cost': 90, 'hit_log_odds': 0.85, 'miss_log_odds': 0.4,
             'log_odds_limit': 3.0, 'min_evidence': 0.5,
+            'free_confirmations': 1,
             'max_cells': 2000000, 'max_output_cells': 4000000,
             'max_input_points': 100000, 'publish_rate_hz': 4.0,
             'tf_wait_sec': 0.5, 'submap_max_age_sec': 2.0,
             'save_directory': '', 'save_map_name': 'limo_map',
-            'save_median_kernel': 3,
+            'save_median_kernel': 1,
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
@@ -153,7 +155,8 @@ class SemanticMapper(Node):
         if self.config['max_input_points'] < 1:
             raise ValueError('max_input_points must be positive')
         median_kernel = self.config['save_median_kernel']
-        if (not isinstance(median_kernel, int) or median_kernel < 1
+        if (isinstance(median_kernel, bool) or not isinstance(median_kernel, int)
+                or median_kernel < 1
                 or median_kernel % 2 == 0):
             raise ValueError('save_median_kernel must be a positive odd integer')
         if not self.config['map_frame'] or not self.config['odom_frame']:
@@ -218,7 +221,8 @@ class SemanticMapper(Node):
             costs=[c[name + '_cost'] for name in CLASS_NAMES],
             hit=c['hit_log_odds'], miss=c['miss_log_odds'],
             limit=c['log_odds_limit'], threshold=c['min_evidence'],
-            max_cells=c['max_cells'], max_output_cells=c['max_output_cells'])
+            max_cells=c['max_cells'], max_output_cells=c['max_output_cells'],
+            free_confirmations=c['free_confirmations'])
         if self.pose_source == 'tf':
             grid.set_pose((0, 0), (0.0, 0.0, 0.0))
         return grid
@@ -416,7 +420,7 @@ class SemanticMapper(Node):
             if rendered is None:
                 raise ValueError('Cannot render the complete map')
             _geometry, _layers, combined = rendered
-            semantic = self.filter_saved_black_points(combined)
+            semantic = median_saved_semantic(combined, self.config['save_median_kernel'])
             laser = self.laser_map
             complete = combine_semantic_and_laser(semantic, laser)
             cv_obstacles = cv_obstacle_map(semantic, laser)
@@ -474,26 +478,6 @@ class SemanticMapper(Node):
                     pass
         self.status(response.message)
         return response
-
-    def filter_saved_black_points(self, combined):
-        """Median-filter isolated highest-cost cells in a saved snapshot."""
-        kernel = self.config['save_median_kernel']
-        if kernel == 1 or not combined.size:
-            return combined.copy()
-        radius = kernel // 2
-        padded = np.pad(combined, radius, mode='edge')
-        height, width = combined.shape
-        neighborhoods = np.stack([
-            padded[y:y + height, x:x + width]
-            for y in range(kernel) for x in range(kernel)
-        ])
-        middle = neighborhoods.shape[0] // 2
-        median = np.partition(neighborhoods, middle, axis=0)[middle]
-        filtered = combined.copy()
-        black_cost = int(self.grid.costs.max())
-        isolated = (combined == black_cost) & (median != black_cost)
-        filtered[isolated] = median[isolated]
-        return filtered
 
 
 def main(args=None):

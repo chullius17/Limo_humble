@@ -47,7 +47,7 @@ semantic_mapper:
   publish_rate_hz: 4.0
   save_directory: ''  # ros2_maps/semantic in the workspace running the mapper.
   save_map_name: limo_map
-  save_median_kernel: 3
+  save_median_kernel: 1  # No save-time filtering in simulation.
   tf_wait_sec: 0.5
   submap_max_age_sec: 2.0
   max_input_points: 100000

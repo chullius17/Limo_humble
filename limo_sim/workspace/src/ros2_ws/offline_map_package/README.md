@@ -124,8 +124,18 @@ SLAM and mapper. Relative RViz paths refer to 'limo_rviz/config'.
 The node publishes no TF. A missing TF is awaited for 'tf_wait_sec', then the
 cloud is discarded; it does not fall back to the latest pose. Duplicate or
 out-of-order timestamps are ignored. Call 'reset_map' before rewinding a bag.
-At save time, 'save_median_kernel: 3' removes isolated black boardwalk cells
-with a 3x3 median; the live map is unchanged.
+Only the real profile enables save-time filtering: `save_median_kernel: 3`
+applies a 3x3 median to all observed CV semantic costs before building the
+`_complete` and `_cv_obstacle` files. This reduces isolated speckles and small
+holes; the live map and accumulated evidence are unchanged. Unknown cells stay
+unknown in the filtered CV snapshot; unknown neighbors can remove an isolated
+CV observation. The laser is overlaid afterwards and `_laser` is saved unchanged.
+The standalone node and simulation profile default to `save_median_kernel: 1`
+(disabled). Profile selection controls filtering independently of `use_sim_time`.
+Use an odd kernel size; 5 gives stronger cleanup but can remove thin real features
+(at 0.05 m/cell, 3x3 spans 15 cm and 5x5 spans 25 cm). Edit the real profile and
+restart the mapper before saving again; existing saved files are not filtered
+until another save is requested.
 
 Outputs have exactly the geometry of the latest valid '/map'. CV points outside
 that view remain in tiles and reappear if the map expands. Updates with unchanged
@@ -215,11 +225,24 @@ the real camera stream.
 
 `map_real.launch.py` uses `mapping_real.yaml`, whose `log_odds_limit: 1.0`
 reduces evidence memory for low camera frame rates. With the configured hit,
-miss and threshold, a saturated cell changes class after two consecutive
-pure-class observations instead of five. One contradictory observation retains
+miss and threshold, a saturated cell changes to another non-road class after two
+consecutive pure-class observations instead of five. One contradictory observation retains
 its previous class. Mixed-class cells can require more observations. This trades
 some temporal stability for responsiveness; it does not increase camera FPS or
 fill cells without observations. The simulation profile keeps its original tuning.
+
+The real profile additionally sets `free_confirmations: 4`: a classified semantic
+cell must receive four consecutive road-majority observations before road starts
+reducing its evidence. An obstacle/non-road-majority observation resets the count.
+Missing or invalid observations do not count and do not erase cells. New obstacles
+and newly observed free space are integrated immediately. With the real profile,
+a saturated obstacle becomes free after five pure-road observations; a freshly
+detected obstacle is retained for the first three. Delay depends on how often the
+same cell is observed, not the map publication rate. Increase `free_confirmations`
+for more persistence (integer 1..255); 1 restores the original behavior. Set it in
+`semantic_mapper` in the profile and restart the mapper. This applies to camera
+semantic cells within each submap; the SLAM laser layer is unchanged. The counter
+adds one byte per allocated cell when enabled.
 
 `cv_real.yaml` now selects the waterfall detector, with seed/gradient thresholds
 and optional seed erosion/barrier dilation. Its label output is remapped to the

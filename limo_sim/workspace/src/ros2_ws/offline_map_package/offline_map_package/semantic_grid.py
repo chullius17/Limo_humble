@@ -147,7 +147,8 @@ class SemanticGrid:
 
     def __init__(self, resolution=0.05, costs=DEFAULT_COSTS, hit=0.85,
                  miss=0.4, limit=3.0, threshold=0.5,
-                 max_cells=2000000, max_output_cells=4000000):
+                 max_cells=2000000, max_output_cells=4000000,
+                 free_confirmations=1):
         values = [resolution, hit, miss, limit, threshold]
         if not np.isfinite(values).all() or min(values) <= 0:
             raise ValueError('Resolution and evidence parameters must be positive')
@@ -157,6 +158,10 @@ class SemanticGrid:
             raise ValueError('Three integer semantic costs in [1, 100] required')
         if max_cells < TILE_SIZE ** 2 or max_output_cells < 1:
             raise ValueError('Invalid map memory limits')
+        if (isinstance(free_confirmations, bool)
+                or not isinstance(free_confirmations, int)
+                or not 1 <= free_confirmations <= 255):
+            raise ValueError('free_confirmations must be an integer in [1, 255]')
         self.resolution = resolution
         self.costs = np.asarray(costs, dtype=np.int8)
         self.hit, self.miss, self.limit, self.threshold = hit, miss, limit, threshold
@@ -166,6 +171,8 @@ class SemanticGrid:
         self.visible = None
         self.sequence = 0
         self.allocated_cells = 0
+        self.free_confirmations = free_confirmations
+        self.free_streaks = {}
 
     def set_pose(self, key, pose):
         """Move an existing semantic submap without resampling its evidence."""
@@ -209,11 +216,30 @@ class SemanticGrid:
                     np.zeros((TILE_SIZE ** 2, len(CLASS_IDS)), dtype=np.float32),
                     np.zeros(TILE_SIZE ** 2, dtype=np.uint32))
                 self.allocated_cells += TILE_SIZE ** 2
+                if self.free_confirmations > 1:
+                    self.free_streaks[tile_key] = np.zeros(TILE_SIZE ** 2, dtype=np.uint8)
             scores, seen = self.tiles[tile_key]
             selected = tile_inverse == index
             local = cells[selected] % TILE_SIZE
             flat = local[:, 1] * TILE_SIZE + local[:, 0]
-            scores[flat] = np.clip(scores[flat] + updates[selected], -self.limit, self.limit)
+            delta = updates[selected]
+            if self.free_confirmations > 1:
+                current = scores[flat]
+                best = current.max(axis=1)
+                occupied = ((current.argmax(axis=1) != ROAD_INDEX)
+                            & (best >= self.threshold)
+                            & ((current == best[:, None]).sum(axis=1) == 1))
+                # Confirm road on an already classified cell before reducing
+                # any evidence. Mixed/non-road observations reset the streak;
+                # unseen cells neither advance nor reset it.
+                clearing = occupied & (fractions[selected, ROAD_INDEX] > 0.5)
+                streaks = self.free_streaks[tile_key]
+                streaks[flat[~clearing]] = 0
+                pending = flat[clearing]
+                streaks[pending] = np.minimum(
+                    streaks[pending].astype(np.uint16) + 1, self.free_confirmations)
+                delta[clearing & (streaks[flat] < self.free_confirmations)] = 0
+            scores[flat] = np.clip(scores[flat] + delta, -self.limit, self.limit)
             seen[flat] = self.sequence
         return True
 

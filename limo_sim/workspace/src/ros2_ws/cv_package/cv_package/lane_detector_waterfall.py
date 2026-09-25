@@ -47,11 +47,11 @@ class WaterfallLaneDetector(Node):
         ):
             self.declare_parameter(name, default, readonly)
         defaults = {
-            'seed_max_gray': 80,
+            'seed_max_gray': 50,
             'gradient_threshold': 15.0,
             'seed_y_min': 0.0,
             'seed_erosion_iterations': 0,
-            'barrier_dilation_iterations': 1,
+            'barrier_closing_iterations': 2,
             'debug_jpeg_quality': 85,
             'enable_telemetry': True,
         }
@@ -132,7 +132,7 @@ class WaterfallLaneDetector(Node):
     def _validate_settings(settings):
         for name, low, high in (
             ('seed_max_gray', 0, 255), ('debug_jpeg_quality', 1, 100),
-            ('barrier_dilation_iterations', 0, 5), ('seed_erosion_iterations', 0, 5),
+            ('barrier_closing_iterations', 0, 5), ('seed_erosion_iterations', 0, 5),
         ):
             value = settings[name]
             if (isinstance(value, bool) or not isinstance(value, int)
@@ -280,6 +280,13 @@ class WaterfallLaneDetector(Node):
         np.take(selected, components, out=self._buf_road, mode='clip')
         return int(np.count_nonzero(selected))
 
+    def _close_barrier_gaps(self, iterations):
+        """Bridge small barrier gaps without leaving the edges dilated."""
+        if iterations:
+            cv2.morphologyEx(
+                self._buf_barriers, cv2.MORPH_CLOSE, self._morphology_kernel,
+                dst=self._buf_barriers, iterations=iterations)
+
     def _segment_road(self, gray, settings):
         """Build gradient barriers, admit dark seeds, then grow through free regions."""
         telemetry = settings['enable_telemetry']
@@ -295,10 +302,7 @@ class WaterfallLaneDetector(Node):
         cv2.add(self._buf_dx, self._buf_dy, dst=self._buf_gradient)
         cv2.compare(self._buf_gradient, settings['gradient_threshold'],
                     cv2.CMP_GT, dst=self._buf_barriers)
-        iterations = settings['barrier_dilation_iterations']
-        if iterations:
-            cv2.dilate(self._buf_barriers, self._morphology_kernel,
-                       dst=self._buf_barriers, iterations=iterations)
+        self._close_barrier_gaps(settings['barrier_closing_iterations'])
         if telemetry:
             self.telemetry_stats['gradient'].append((time.perf_counter() - started) * 1000)
             started = time.perf_counter()
@@ -380,7 +384,7 @@ class WaterfallLaneDetector(Node):
                 if self._publish_overlay:
                     overlay = cv2.addWeighted(background, 0.7, mask, 0.5, 0)
                 if self._publish_seeds_overlay:
-                    # Show actual barriers (after dilation) and surviving seeds (after erosion).
+                    # Show closed barriers and surviving seeds (after erosion).
                     # Regions without either retain the original camera pixels.
                     seeds_overlay = background.copy()
                     band_view = seeds_overlay[self._y_min:self._y_max]
